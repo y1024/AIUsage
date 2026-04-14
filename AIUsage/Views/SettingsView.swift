@@ -4,6 +4,7 @@ import ServiceManagement
 
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var sparkle: SparkleController
     @State private var hideDockIcon = UserDefaults.standard.bool(forKey: "hideDockIcon")
     @State private var launchAtLogin: Bool = {
@@ -76,8 +77,8 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
-            remoteHostInput = appState.remoteHost
-            remotePortInput = "\(appState.remotePort)"
+            remoteHostInput = settings.remoteHost
+            remotePortInput = "\(settings.remotePort)"
         }
         .onChange(of: hideDockIcon) { _, newValue in
             UserDefaults.standard.set(newValue, forKey: "hideDockIcon")
@@ -102,28 +103,28 @@ struct SettingsView: View {
         .onChange(of: lowQuotaThreshold) { _, newValue in
             UserDefaults.standard.set(newValue, forKey: "lowQuotaThreshold")
         }
-        .onChange(of: appState.autoRefreshInterval) { _, _ in
-            appState.saveSettings()
+        .onChange(of: settings.autoRefreshInterval) { _, _ in
+            settings.saveSettings()
             appState.setupAutoRefresh()
         }
-        .onChange(of: appState.claudeCodeRefreshInterval) { _, _ in
-            appState.saveSettings()
+        .onChange(of: settings.claudeCodeRefreshInterval) { _, _ in
+            settings.saveSettings()
             appState.setupClaudeCodeAutoRefresh()
         }
-        .onChange(of: appState.isDarkMode) { _, _ in
-            appState.saveSettings()
+        .onChange(of: settings.isDarkMode) { _, _ in
+            settings.saveSettings()
         }
-        .onChange(of: appState.themeMode) { _, _ in
-            appState.saveSettings()
+        .onChange(of: settings.themeMode) { _, _ in
+            settings.saveSettings()
         }
-        .onChange(of: appState.quotaIndicatorStyle) { _, _ in
-            appState.saveSettings()
+        .onChange(of: settings.quotaIndicatorStyle) { _, _ in
+            settings.saveSettings()
         }
-        .onChange(of: appState.quotaIndicatorMetric) { _, _ in
-            appState.saveSettings()
+        .onChange(of: settings.quotaIndicatorMetric) { _, _ in
+            settings.saveSettings()
         }
-        .onChange(of: appState.language) { _, _ in
-            appState.saveSettings()
+        .onChange(of: settings.language) { _, _ in
+            settings.saveSettings()
             appState.refreshAllProviders()
         }
     }
@@ -203,18 +204,18 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 heroPill(
                     title: t("Backend", "后端"),
-                    value: appState.backendMode == "remote" ? t("Remote", "远程") : t("Local", "本地"),
+                    value: settings.backendMode == "remote" ? t("Remote", "远程") : t("Local", "本地"),
                     tint: .blue
                 )
                 heroPill(
                     title: t("Auto Refresh", "自动刷新"),
-                    value: autoRefreshTitle(for: appState.autoRefreshInterval),
+                    value: autoRefreshTitle(for: settings.autoRefreshInterval),
                     tint: .teal
                 )
                 heroPill(
                     title: t("Theme", "主题"),
                     value: {
-                        switch appState.themeMode {
+                        switch settings.themeMode {
                         case "light": return t("Light", "浅色")
                         case "dark": return t("Dark", "深色")
                         default: return t("System", "系统")
@@ -244,18 +245,18 @@ struct SettingsView: View {
             subtitle: t("Choose whether AIUsage reads data locally or from a remote QuotaServer.", "选择 AIUsage 从本地还是远程 QuotaServer 读取数据。")
         ) {
             settingsBlock(title: t("Mode", "模式")) {
-                Picker("", selection: $appState.backendMode) {
+                Picker("", selection: $settings.backendMode) {
                     Text(t("Local", "本地")).tag("local")
                     Text(t("Remote", "远程")).tag("remote")
                 }
                 .pickerStyle(.segmented)
-                .onChange(of: appState.backendMode) { _, _ in
-                    appState.saveSettings()
+                .onChange(of: settings.backendMode) { _, _ in
+                    settings.saveSettings()
                     appState.refreshAllProviders()
                 }
             }
 
-            if appState.backendMode == "remote" {
+            if settings.backendMode == "remote" {
                 Divider()
 
                 settingsBlock(title: t("Host", "地址")) {
@@ -322,8 +323,8 @@ struct SettingsView: View {
                 title: t("Providers auto-refresh", "服务商自动刷新"),
                 subtitle: t("Refresh interval for API-based providers (OpenAI, Anthropic, etc.)", "API 服务商的刷新间隔（OpenAI、Anthropic 等）")
             ) {
-                Picker("", selection: $appState.autoRefreshInterval) {
-                    ForEach(AppState.supportedAutoRefreshIntervals, id: \.self) { interval in
+                Picker("", selection: $settings.autoRefreshInterval) {
+                    ForEach(AppSettings.supportedAutoRefreshIntervals, id: \.self) { interval in
                         Text(autoRefreshTitle(for: interval)).tag(interval)
                     }
                 }
@@ -337,8 +338,8 @@ struct SettingsView: View {
                 title: t("Claude Code auto-refresh", "Claude Code 自动刷新"),
                 subtitle: t("Refresh interval for local Claude Code stats (faster intervals available)", "本地 Claude Code 统计的刷新间隔（支持更短间隔）")
             ) {
-                Picker("", selection: $appState.claudeCodeRefreshInterval) {
-                    ForEach(AppState.supportedClaudeCodeRefreshIntervals, id: \.self) { interval in
+                Picker("", selection: $settings.claudeCodeRefreshInterval) {
+                    ForEach(AppSettings.supportedClaudeCodeRefreshIntervals, id: \.self) { interval in
                         Text(claudeCodeRefreshTitle(for: interval)).tag(interval)
                     }
                 }
@@ -355,11 +356,11 @@ struct SettingsView: View {
                 HStack(spacing: 8) {
                     Text("$")
                         .foregroundStyle(.secondary)
-                    TextField("0.00", value: $appState.claudeCodeDailyThreshold, format: .number.precision(.fractionLength(2)))
+                    TextField("0.00", value: $settings.claudeCodeDailyThreshold, format: .number.precision(.fractionLength(2)))
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 100)
-                        .onChange(of: appState.claudeCodeDailyThreshold) { _, _ in
-                            appState.saveSettings()
+                        .onChange(of: settings.claudeCodeDailyThreshold) { _, _ in
+                            settings.saveSettings()
                         }
                     Text(t("USD", "美元"))
                         .foregroundStyle(.secondary)
@@ -408,7 +409,7 @@ struct SettingsView: View {
                 title: t("Theme", "主题"),
                 subtitle: t("Choose app appearance: follow system, light, or dark.", "选择外观模式：跟随系统、浅色或深色。")
             ) {
-                Picker("", selection: $appState.themeMode) {
+                Picker("", selection: $settings.themeMode) {
                     Text(t("System", "系统")).tag("system")
                     Text(t("Light", "浅色")).tag("light")
                     Text(t("Dark", "深色")).tag("dark")
@@ -420,7 +421,7 @@ struct SettingsView: View {
             Divider()
 
             settingsBlock(title: t("Language", "语言")) {
-                Picker("", selection: $appState.language) {
+                Picker("", selection: $settings.language) {
                     Text("English").tag("en")
                     Text("中文").tag("zh")
                 }
@@ -453,7 +454,7 @@ struct SettingsView: View {
             Divider()
 
             settingsBlock(title: t("Quota card style", "额度卡片样式")) {
-                Picker("", selection: $appState.quotaIndicatorStyle) {
+                Picker("", selection: $settings.quotaIndicatorStyle) {
                     ForEach(CardQuotaIndicatorStyle.allCases, id: \.self) { style in
                         Text(quotaStyleTitle(style)).tag(style)
                     }
@@ -465,7 +466,7 @@ struct SettingsView: View {
             Divider()
 
             settingsBlock(title: t("Progress meaning", "进度语义")) {
-                Picker("", selection: $appState.quotaIndicatorMetric) {
+                Picker("", selection: $settings.quotaIndicatorMetric) {
                     ForEach(CardQuotaIndicatorMetric.allCases, id: \.self) { metric in
                         Text(quotaMetricTitle(metric)).tag(metric)
                     }
@@ -726,7 +727,7 @@ struct SettingsView: View {
     }
 
     private var previewDisplayPercent: Double {
-        appState.quotaIndicatorMetric == .remaining ? previewRemainingPercent : 100 - previewRemainingPercent
+        settings.quotaIndicatorMetric == .remaining ? previewRemainingPercent : 100 - previewRemainingPercent
     }
 
     private var previewValueText: String {
@@ -763,7 +764,7 @@ struct SettingsView: View {
                         .font(.system(size: 28, weight: .bold, design: .rounded))
 
                     Text(
-                        appState.quotaIndicatorMetric == .remaining
+                        settings.quotaIndicatorMetric == .remaining
                         ? t("Healthy reserve for the current cycle", "当前周期余量依然充足")
                         : t("Usage is visible without feeling alarming", "使用趋势清晰，但还不紧张")
                     )
@@ -775,7 +776,7 @@ struct SettingsView: View {
                 Spacer(minLength: 16)
 
                 QuotaIndicatorView(remainingPercent: previewRemainingPercent, accentColor: .blue)
-                    .frame(width: appState.quotaIndicatorStyle == .ring ? 120 : 220)
+                    .frame(width: settings.quotaIndicatorStyle == .ring ? 120 : 220)
             }
         }
         .padding(16)
@@ -817,9 +818,9 @@ struct SettingsView: View {
     private func applyRemoteSettings(refreshDashboard: Bool = true) {
         let host = remoteHostInput.trimmingCharacters(in: .whitespaces)
         let port = Int(remotePortInput.trimmingCharacters(in: .whitespaces)) ?? 4318
-        appState.remoteHost = host.isEmpty ? "127.0.0.1" : host
-        appState.remotePort = port
-        appState.saveSettings()
+        settings.remoteHost = host.isEmpty ? "127.0.0.1" : host
+        settings.remotePort = port
+        settings.saveSettings()
         remoteConnectionState = .idle
         remoteConnectionMessage = nil
         if refreshDashboard {
@@ -833,7 +834,7 @@ struct SettingsView: View {
         isTestingRemoteConnection = true
         defer { isTestingRemoteConnection = false }
 
-        APIService.shared.updateBaseURL("http://\(appState.remoteHost):\(appState.remotePort)")
+        APIService.shared.updateBaseURL("http://\(settings.remoteHost):\(settings.remotePort)")
         let startedAt = Date()
 
         do {
@@ -862,4 +863,5 @@ struct SettingsView: View {
 #Preview {
     SettingsView()
         .environmentObject(AppState.shared)
+        .environmentObject(AppSettings.shared)
 }

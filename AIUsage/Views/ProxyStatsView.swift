@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import QuotaBackend
 
 struct ProxyStatsView: View {
     @EnvironmentObject var appState: AppState
@@ -412,9 +413,7 @@ struct ProxyStatsView: View {
     // MARK: - Formatting
 
     private func formatAxisDate(_ date: Date) -> String {
-        let df = DateFormatter()
-        df.dateFormat = granularity == .hourly ? "HH:mm" : "MM/dd"
-        return df.string(from: date)
+        DateFormat.string(from: date, format: granularity == .hourly ? "HH:mm" : "MM/dd")
     }
 }
 

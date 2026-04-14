@@ -284,7 +284,9 @@ public struct AntigravityProvider: MultiAccountProviderFetcher, CredentialAccept
             )
         }
 
-        let url = URL(string: Self.oauthRefreshURL)!
+        guard let url = URL(string: Self.oauthRefreshURL) else {
+            throw ProviderError("invalid_url", "Antigravity OAuth refresh URL is invalid.")
+        }
         var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -456,7 +458,9 @@ public struct AntigravityProvider: MultiAccountProviderFetcher, CredentialAccept
     }
 
     private func fetchAvailableModels(accessToken: String, projectId: String?) async throws -> [String: Any] {
-        let url = URL(string: Self.quotaURL)!
+        guard let url = URL(string: Self.quotaURL) else {
+            throw ProviderError("invalid_url", "Antigravity quota URL is invalid.")
+        }
         var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -606,17 +610,11 @@ public struct AntigravityProvider: MultiAccountProviderFetcher, CredentialAccept
     }
 
     private static func parseISO8601(_ value: String) -> Date? {
-        let withFractional = ISO8601DateFormatter()
-        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFractional.date(from: value) { return date }
-
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        return standard.date(from: value)
+        SharedFormatters.parseISO8601(value)
     }
 
     private func iso8601String(_ date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
+        SharedFormatters.iso8601String(from: date)
     }
 
     private func formatResetDescription(_ date: Date?, prefix: String) -> String {

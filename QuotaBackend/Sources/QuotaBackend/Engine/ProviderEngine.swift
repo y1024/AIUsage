@@ -21,7 +21,7 @@ public actor ProviderEngine {
         } else {
             providers = ProviderRegistry.allProviders()
         }
-        let generatedAt = ISO8601DateFormatter().string(from: Date())
+        let generatedAt = SharedFormatters.iso8601String(from: Date())
 
         let results: [ProviderResult] = await withTaskGroup(of: [ProviderResult].self) { group in
             for provider in providers {
@@ -519,7 +519,10 @@ func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable ()
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             throw ProviderError("timeout", "Operation timed out after \(Int(seconds))s")
         }
-        let result = try await group.next()!
+        guard let result = try await group.next() else {
+            group.cancelAll()
+            throw ProviderError("timeout", "Operation ended without a result.")
+        }
         group.cancelAll()
         return result
     }

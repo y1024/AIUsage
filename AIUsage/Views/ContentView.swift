@@ -84,7 +84,6 @@ struct ContentView: View {
         }
         .task {
             await appState.performStartupFlowIfNeeded()
-            await appState.fetchDashboard()
         }
         .sheet(item: $appState.providerPickerMode) { mode in
             ProviderPickerView(mode: mode)

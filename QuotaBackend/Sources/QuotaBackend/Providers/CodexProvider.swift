@@ -287,7 +287,9 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     }
 
     private func refreshCredentials(_ creds: Credentials, refreshToken: String) async throws -> Credentials {
-        let url = URL(string: Self.refreshURL)!
+        guard let url = URL(string: Self.refreshURL) else {
+            throw ProviderError("invalid_url", "Codex OAuth refresh URL is invalid.")
+        }
         var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -333,7 +335,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
             if let rt = creds.refreshToken { json["refresh_token"] = rt }
             if let it = creds.idToken { json["id_token"] = it }
         }
-        json["last_refresh"] = ISO8601DateFormatter().string(from: Date())
+        json["last_refresh"] = SharedFormatters.iso8601String(from: Date())
 
         if let data = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
@@ -361,7 +363,10 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         }
         let path = baseURL.contains("/backend-api") ? "wham/usage" : "api/codex/usage"
         let normalized = baseURL.hasSuffix("/") ? baseURL : baseURL + "/"
-        return URL(string: "\(normalized)\(path)")!
+        guard let url = URL(string: "\(normalized)\(path)") else {
+            throw ProviderError("invalid_url", "Codex usage URL is invalid.")
+        }
+        return url
     }
 
     private func requestUsage(creds: Credentials, url: URL) async throws -> [String: Any] {
@@ -455,7 +460,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
 
         if let resetAtRaw = window["reset_at"] as? Double, resetAtRaw > 0 {
             let resetDate = Date(timeIntervalSince1970: resetAtRaw)
-            result.resetAt = ISO8601DateFormatter().string(from: resetDate)
+            result.resetAt = SharedFormatters.iso8601String(from: resetDate)
             result.resetDescription = formatResetDescription(resetDate)
         }
         return result
@@ -474,7 +479,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     }
 
     private func parseDate(_ value: String) -> Date? {
-        ISO8601DateFormatter().date(from: value)
+        SharedFormatters.parseISO8601(value)
     }
 
     private func modificationDate(for url: URL) -> Date {

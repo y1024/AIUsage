@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import QuotaBackend
 
 // MARK: - Claude Settings Manager
 
@@ -402,7 +403,7 @@ class ProxyViewModel: ObservableObject {
     }
 
     private func pruneOldLogs() {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -logRetentionDays, to: Date())!
+        let cutoff = Calendar.current.date(byAdding: .day, value: -logRetentionDays, to: Date()) ?? .distantPast
         var pruned = false
         for (configId, logs) in recentLogs {
             let filtered = logs.filter { $0.timestamp > cutoff }
@@ -727,11 +728,8 @@ class ProxyViewModel: ObservableObject {
         let logs = allLogs(nodeFilter: nodeFilter, modelFilter: modelFilter)
         let cal = Calendar.current
         var map: [String: DailyAggregate] = [:]
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd"
-
         for log in logs {
-            let key = df.string(from: log.timestamp)
+            let key = DateFormat.string(from: log.timestamp, format: "yyyy-MM-dd")
             let dayStart = cal.startOfDay(for: log.timestamp)
             var agg = map[key] ?? DailyAggregate(id: key, date: dayStart, label: key, cost: 0, tokens: 0, requests: 0)
             agg.cost += log.estimatedCostUSD
@@ -747,11 +745,8 @@ class ProxyViewModel: ObservableObject {
         let logs = allLogs(nodeFilter: nodeFilter, modelFilter: modelFilter)
         let cal = Calendar.current
         var map: [String: DailyAggregate] = [:]
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd HH"
-
         for log in logs {
-            let key = df.string(from: log.timestamp)
+            let key = DateFormat.string(from: log.timestamp, format: "yyyy-MM-dd HH")
             let comps = cal.dateComponents([.year, .month, .day, .hour], from: log.timestamp)
             let hourStart = cal.date(from: comps) ?? log.timestamp
             var agg = map[key] ?? DailyAggregate(id: key, date: hourStart, label: key, cost: 0, tokens: 0, requests: 0)
@@ -777,8 +772,7 @@ class ProxyViewModel: ObservableObject {
         guard !logs.isEmpty else { return [] }
 
         let cal = Calendar.current
-        let df = DateFormatter()
-        df.dateFormat = granularity == "hourly" ? "yyyy-MM-dd HH" : "yyyy-MM-dd"
+        let format = granularity == "hourly" ? "yyyy-MM-dd HH" : "yyyy-MM-dd"
 
         var map: [String: ModelTimePoint] = [:]
         var allModels = Set<String>()
@@ -786,7 +780,7 @@ class ProxyViewModel: ObservableObject {
         var dateMap: [String: Date] = [:]
 
         for log in logs {
-            let timeKey = df.string(from: log.timestamp)
+            let timeKey = DateFormat.string(from: log.timestamp, format: format)
             let key = "\(timeKey)|\(log.upstreamModel)"
             let dateStart: Date
             if granularity == "hourly" {
@@ -820,7 +814,7 @@ class ProxyViewModel: ObservableObject {
         }
 
         while cursor <= end {
-            let timeKey = df.string(from: cursor)
+            let timeKey = DateFormat.string(from: cursor, format: format)
             for model in allModels {
                 let key = "\(timeKey)|\(model)"
                 if map[key] == nil {

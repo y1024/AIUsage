@@ -793,29 +793,17 @@ public struct KiroProvider: MultiAccountProviderFetcher, CredentialAcceptingProv
 
     private func parseISO8601(_ value: String?) -> Date? {
         guard let value, !value.isEmpty else { return nil }
-
-        let withFractional = ISO8601DateFormatter()
-        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFractional.date(from: value) { return date }
-
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        return standard.date(from: value)
+        return SharedFormatters.parseISO8601(value)
     }
 
     private func iso8601String(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        return formatter.string(from: date)
+        SharedFormatters.iso8601FractionalUTC.string(from: date)
     }
 
     private func formatResetDescription(_ date: Date?) -> String {
         guard let date else { return "Reset unavailable" }
-
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return "Resets \(formatter.string(from: date))"
+        let day = DateFormat.string(from: date, format: "MMM d")
+        return "Resets \(day)"
     }
 
     private func stringValue(_ value: Any?) -> String? {

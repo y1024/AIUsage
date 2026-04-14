@@ -189,7 +189,9 @@ public struct GeminiProvider: ProviderFetcher, CredentialAcceptingProvider {
     }
 
     private func attemptTokenRefresh(refreshToken: String, clientId: String, clientSecret: String) async throws -> RefreshResult {
-        let url = URL(string: Self.oauthRefreshURL)!
+        guard let url = URL(string: Self.oauthRefreshURL) else {
+            throw ProviderError("invalid_url", "Gemini OAuth refresh URL is invalid.")
+        }
         var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -372,7 +374,9 @@ public struct GeminiProvider: ProviderFetcher, CredentialAcceptingProvider {
     }
 
     private func retrieveQuota(accessToken: String, projectId: String?) async throws -> [String: Any] {
-        let url = URL(string: Self.quotaURL)!
+        guard let url = URL(string: Self.quotaURL) else {
+            throw ProviderError("invalid_url", "Gemini quota URL is invalid.")
+        }
         var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -454,7 +458,7 @@ public struct GeminiProvider: ProviderFetcher, CredentialAcceptingProvider {
     }
 
     private func formatGeminiReset(_ resetTime: String?) -> String {
-        guard let s = resetTime, let date = ISO8601DateFormatter().date(from: s) else { return "Resets soon" }
+        guard let s = resetTime, let date = SharedFormatters.parseISO8601(s) else { return "Resets soon" }
         let diff = date.timeIntervalSinceNow
         if diff <= 0 { return "Resets soon" }
         let totalMin = Int(diff / 60)

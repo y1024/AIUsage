@@ -61,7 +61,7 @@ public struct CopilotProvider: ProviderFetcher, CredentialAcceptingProvider {
         }
 
         var extra: [String: AnyCodable] = [:]
-        extra["quotaResetAt"]     = AnyCodable(quotaResetAt.map { ISO8601DateFormatter().string(from: $0) } ?? "")
+        extra["quotaResetAt"]     = AnyCodable(quotaResetAt.map { SharedFormatters.iso8601String(from: $0) } ?? "")
         extra["resetDescription"] = AnyCodable(resetDesc ?? "")
         extra["copilotPlan"] = AnyCodable(payload["copilot_plan"] as? String ?? "")
         extra["accessTypeSKU"] = AnyCodable(payload["access_type_sku"] as? String ?? "")
@@ -135,7 +135,9 @@ public struct CopilotProvider: ProviderFetcher, CredentialAcceptingProvider {
     // MARK: - API Requests
 
     private func fetchCopilotData(token: String) async throws -> ([String: Any], String?) {
-        let copilotURL = URL(string: "https://api.github.com/copilot_internal/user")!
+        guard let copilotURL = URL(string: "https://api.github.com/copilot_internal/user") else {
+            throw ProviderError("invalid_url", "GitHub Copilot API URL is invalid.")
+        }
         var request = URLRequest(url: copilotURL, timeoutInterval: timeoutSeconds)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("token \(token)", forHTTPHeaderField: "Authorization")
@@ -159,7 +161,7 @@ public struct CopilotProvider: ProviderFetcher, CredentialAcceptingProvider {
     }
 
     private func fetchGitHubEmail(token: String) async -> String? {
-        let url = URL(string: "https://api.github.com/user")!
+        guard let url = URL(string: "https://api.github.com/user") else { return nil }
         var req = URLRequest(url: url, timeoutInterval: timeoutSeconds)
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("token \(token)", forHTTPHeaderField: "Authorization")
@@ -171,7 +173,7 @@ public struct CopilotProvider: ProviderFetcher, CredentialAcceptingProvider {
         if let email = json["email"] as? String, !email.isEmpty { return email }
 
         // Try /user/emails
-        let emailsURL = URL(string: "https://api.github.com/user/emails")!
+        guard let emailsURL = URL(string: "https://api.github.com/user/emails") else { return nil }
         var emailsReq = URLRequest(url: emailsURL, timeoutInterval: timeoutSeconds)
         emailsReq.setValue("application/json", forHTTPHeaderField: "Accept")
         emailsReq.setValue("token \(token)", forHTTPHeaderField: "Authorization")
@@ -310,7 +312,7 @@ public struct CopilotProvider: ProviderFetcher, CredentialAcceptingProvider {
         window.remaining = remaining
         window.usedPercent = unlimited ? 0 : max(0, 100 - percentRemaining)
         window.remainingPercent = percentRemaining
-        window.resetAt = resetAt.map { ISO8601DateFormatter().string(from: $0) }
+        window.resetAt = resetAt.map { SharedFormatters.iso8601String(from: $0) }
         window.resetDescription = resetDesc
         return window
     }
@@ -332,24 +334,19 @@ public struct CopilotProvider: ProviderFetcher, CredentialAcceptingProvider {
 
     private func formatResetDescription(_ date: Date?) -> String? {
         guard let d = date else { return nil }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d"
-        let day = fmt.string(from: d)
-        let timeFmt = DateFormatter()
-        timeFmt.dateFormat = "h:mma"
-        return "Resets \(day) at \(timeFmt.string(from: d))"
+        let day = DateFormat.string(from: d, format: "MMM d")
+        let time = DateFormat.string(from: d, format: "h:mma")
+        return "Resets \(day) at \(time)"
     }
 
     private func parseDate(_ s: String?) -> Date? {
         guard let s else { return nil }
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: s) { return d }
+        if let d = SharedFormatters.parseISO8601(s) { return d }
         if let ts = Double(s), ts > 0 {
             let ms = ts > 1_000_000_000_000 ? ts : ts * 1000
             return Date(timeIntervalSince1970: ms / 1000)
         }
-        return ISO8601DateFormatter().date(from: s)
+        return nil
     }
 
     private func intValue(_ v: Any?) -> Int {

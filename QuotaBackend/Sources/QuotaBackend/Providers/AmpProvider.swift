@@ -73,7 +73,9 @@ public struct AmpProvider: ProviderFetcher, CredentialAcceptingProvider {
 
     private func fetchWithCookie(_ cookieHeader: String, source: SourceInfo) async throws -> ProviderUsage {
         let normalizedCookieHeader = try normalizedCookieHeader(from: cookieHeader)
-        let url = URL(string: Self.settingsURL)!
+        guard let url = URL(string: Self.settingsURL) else {
+            throw ProviderError("invalid_url", "Amp settings URL is invalid.")
+        }
         var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
         applyAmpHeaders(to: &request, cookieHeader: normalizedCookieHeader)
 
@@ -205,7 +207,7 @@ public struct AmpProvider: ProviderFetcher, CredentialAcceptingProvider {
         let estimatedFullResetAt: String?
         if used > 0, quota > 0, usage.hourlyReplenishment > 0 {
             let resetDate = Date(timeIntervalSinceNow: Double(used) / usage.hourlyReplenishment * 3600)
-            estimatedFullResetAt = ISO8601DateFormatter().string(from: resetDate)
+            estimatedFullResetAt = SharedFormatters.iso8601String(from: resetDate)
         } else {
             estimatedFullResetAt = nil
         }
@@ -307,12 +309,10 @@ public struct AmpProvider: ProviderFetcher, CredentialAcceptingProvider {
     }
 
     private func formatReset(_ isoString: String) -> String? {
-        guard let date = ISO8601DateFormatter().date(from: isoString) else { return nil }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d"
-        let timeFmt = DateFormatter()
-        timeFmt.dateFormat = "h:mma"
-        return "Resets \(fmt.string(from: date)) at \(timeFmt.string(from: date))"
+        guard let date = SharedFormatters.parseISO8601(isoString) else { return nil }
+        let day = DateFormat.string(from: date, format: "MMM d")
+        let time = DateFormat.string(from: date, format: "h:mma")
+        return "Resets \(day) at \(time)"
     }
 
     // MARK: - Cookie Import (mirrors importAmpSessionCookieFromBrowser in browserCookies.js)

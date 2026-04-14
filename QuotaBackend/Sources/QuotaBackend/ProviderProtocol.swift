@@ -55,7 +55,7 @@ public struct AccountCredential: Codable, Sendable, Identifiable {
         self.accountLabel = accountLabel
         self.authMethod = authMethod
         self.credential = credential
-        self.createdAt = ISO8601DateFormatter().string(from: Date())
+        self.createdAt = SharedFormatters.iso8601String(from: Date())
         self.lastUsedAt = nil
         self.metadata = metadata
     }
@@ -153,7 +153,7 @@ public struct ProviderUsage: Codable, Sendable {
         self.provider = provider
         self.label = label
         self.usageAccountId = accountId
-        self.fetchedAt = ISO8601DateFormatter().string(from: Date())
+        self.fetchedAt = SharedFormatters.iso8601String(from: Date())
         self.extra = extra
     }
 }

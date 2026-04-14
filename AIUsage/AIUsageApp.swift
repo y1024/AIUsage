@@ -27,6 +27,7 @@ final class SparkleController: ObservableObject {
 struct AIUsageApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState.shared
+    @ObservedObject private var appSettings = AppSettings.shared
     @StateObject private var proxyViewModel = ProxyViewModel()
     @StateObject private var sparkle = SparkleController()
     
@@ -34,10 +35,14 @@ struct AIUsageApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
+                .environmentObject(ProviderActivationManager.shared)
+                .environmentObject(ProviderRefreshCoordinator.shared)
+                .environmentObject(AccountStore.shared)
+                .environmentObject(appSettings)
                 .environmentObject(proxyViewModel)
                 .environmentObject(sparkle)
                 .frame(minWidth: 900, idealWidth: 1100, minHeight: 600, idealHeight: 700)
-                .preferredColorScheme(appState.resolvedColorScheme)
+                .preferredColorScheme(appSettings.resolvedColorScheme)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -59,6 +64,10 @@ struct AIUsageApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appState)
+                .environmentObject(ProviderActivationManager.shared)
+                .environmentObject(ProviderRefreshCoordinator.shared)
+                .environmentObject(AccountStore.shared)
+                .environmentObject(appSettings)
                 .environmentObject(sparkle)
         }
     }
@@ -130,6 +139,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController = NSHostingController(
             rootView: MenuBarView()
                 .environmentObject(AppState.shared)
+                .environmentObject(ProviderActivationManager.shared)
         )
         self.popover = popover
 
@@ -138,8 +148,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         DispatchQueue.main.async {
-            AppState.shared.detectActiveCodexAccount()
-            AppState.shared.detectActiveGeminiAccount()
+            ProviderActivationManager.shared.detectActiveCodexAccount()
+            ProviderActivationManager.shared.detectActiveGeminiAccount()
         }
     }
 
@@ -198,6 +208,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func menuText(_ en: String, _ zh: String) -> String {
-        AppState.shared.language == "zh" ? zh : en
+        AppSettings.shared.language == "zh" ? zh : en
     }
 }

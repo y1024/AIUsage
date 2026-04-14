@@ -305,7 +305,10 @@ public struct CursorProvider: ProviderFetcher, CredentialAcceptingProvider {
     // MARK: - API
 
     private func fetchJSON(url: String, cookie: String, userAgent: String) async throws -> [String: Any] {
-        var request = URLRequest(url: URL(string: url)!, timeoutInterval: timeoutSeconds)
+        guard let requestURL = URL(string: url) else {
+            throw ProviderError("invalid_url", "Cursor API URL is invalid.")
+        }
+        var request = URLRequest(url: requestURL, timeoutInterval: timeoutSeconds)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(cookie, forHTTPHeaderField: "Cookie")
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
@@ -377,7 +380,7 @@ public struct CursorProvider: ProviderFetcher, CredentialAcceptingProvider {
         // Extra fields
         let onDemand = individual?["onDemand"] as? [String: Any]
         usage.extra["membershipType"] = AnyCodable(membershipType ?? "")
-        usage.extra["billingCycleEnd"] = AnyCodable(billingEnd.map { ISO8601DateFormatter().string(from: $0) } ?? "")
+        usage.extra["billingCycleEnd"] = AnyCodable(billingEnd.map { SharedFormatters.iso8601String(from: $0) } ?? "")
         usage.extra["billingCycleResetDescription"] = AnyCodable(resetDesc)
         usage.extra["includedPlan.usedUsd"]   = AnyCodable(centsToUsd(planUsedRaw))
         usage.extra["includedPlan.limitUsd"]  = AnyCodable(centsToUsd(planLimitRaw))
@@ -391,7 +394,7 @@ public struct CursorProvider: ProviderFetcher, CredentialAcceptingProvider {
         var w = RawQuotaWindow()
         w.usedPercent = used
         w.remainingPercent = max(0, 100 - used)
-        w.resetAt = billingEnd.map { ISO8601DateFormatter().string(from: $0) }
+        w.resetAt = billingEnd.map { SharedFormatters.iso8601String(from: $0) }
         w.resetDescription = resetDesc
         return w
     }
@@ -408,11 +411,9 @@ public struct CursorProvider: ProviderFetcher, CredentialAcceptingProvider {
     }
 
     private func formatResetDescription(_ date: Date) -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d"
-        let timeFmt = DateFormatter()
-        timeFmt.dateFormat = "h:mma"
-        return "Resets \(fmt.string(from: date)) at \(timeFmt.string(from: date))"
+        let day = DateFormat.string(from: date, format: "MMM d")
+        let time = DateFormat.string(from: date, format: "h:mma")
+        return "Resets \(day) at \(time)"
     }
 
     private func centsToUsd(_ cents: Double) -> Double { cents / 100 }
@@ -432,9 +433,6 @@ public struct CursorProvider: ProviderFetcher, CredentialAcceptingProvider {
 
     private func parseDate(_ s: String?) -> Date? {
         guard let s else { return nil }
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: s) { return d }
-        return ISO8601DateFormatter().date(from: s)
+        return SharedFormatters.parseISO8601(s)
     }
 }

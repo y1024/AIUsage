@@ -299,7 +299,9 @@ public struct DroidProvider: ProviderFetcher, CredentialAcceptingProvider {
     }
 
     private func exchangeRefreshToken(_ refreshToken: String, orgId: String?) async throws -> RefreshedAuth {
-        let url = URL(string: Self.workOSRefreshURL)!
+        guard let url = URL(string: Self.workOSRefreshURL) else {
+            throw ProviderError("invalid_url", "Droid token refresh URL is invalid.")
+        }
         var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -432,12 +434,16 @@ public struct DroidProvider: ProviderFetcher, CredentialAcceptingProvider {
     }
 
     private func requestAuthInfo(baseURL: String, auth: DroidAuth) async throws -> [String: Any] {
-        let url = URL(string: "\(baseURL)/api/app/auth/me")!
+        guard let url = URL(string: "\(baseURL)/api/app/auth/me") else {
+            throw ProviderError("invalid_url", "Droid auth URL is invalid.")
+        }
         return try await requestDroidJSON(url: url, method: "GET", body: nil, auth: auth)
     }
 
     private func requestUsageInfo(baseURL: String, auth: DroidAuth) async throws -> [String: Any] {
-        let url = URL(string: "\(baseURL)/api/organization/subscription/usage")!
+        guard let url = URL(string: "\(baseURL)/api/organization/subscription/usage") else {
+            throw ProviderError("invalid_url", "Droid usage URL is invalid.")
+        }
         var body: [String: Any] = ["useCache": true]
         if let userId = auth.userId { body["userId"] = userId }
         return try await requestDroidJSON(url: url, method: "POST", body: body, auth: auth)
@@ -519,8 +525,8 @@ public struct DroidProvider: ProviderFetcher, CredentialAcceptingProvider {
 
         usage.extra["planName"] = AnyCodable(planName)
         usage.extra["organizationName"] = AnyCodable(org?["name"] as? String ?? "")
-        usage.extra["periodStart"] = AnyCodable(periodStart.map { ISO8601DateFormatter().string(from: $0) } ?? "")
-        usage.extra["periodEnd"] = AnyCodable(periodEnd.map { ISO8601DateFormatter().string(from: $0) } ?? "")
+        usage.extra["periodStart"] = AnyCodable(periodStart.map { SharedFormatters.iso8601String(from: $0) } ?? "")
+        usage.extra["periodEnd"] = AnyCodable(periodEnd.map { SharedFormatters.iso8601String(from: $0) } ?? "")
 
         usage.extra["standard.userTokens"] = AnyCodable(standard.userTokens)
         usage.extra["standard.totalAllowance"] = AnyCodable(standard.totalAllowance)
@@ -586,18 +592,16 @@ public struct DroidProvider: ProviderFetcher, CredentialAcceptingProvider {
         var window = RawQuotaWindow()
         window.usedPercent = usage.usedPercent
         window.remainingPercent = usage.remainingPercent
-        window.resetAt = periodEnd.map { ISO8601DateFormatter().string(from: $0) }
+        window.resetAt = periodEnd.map { SharedFormatters.iso8601String(from: $0) }
         window.resetDescription = resetDesc
         window.unlimited = usage.unlimited
         return window
     }
 
     private func formatResetDescription(_ date: Date) -> String {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "MMM d"
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateFormat = "h:mma"
-        return "Resets \(dateFormatter.string(from: date)) at \(timeFormatter.string(from: date))"
+        let day = DateFormat.string(from: date, format: "MMM d")
+        let time = DateFormat.string(from: date, format: "h:mma")
+        return "Resets \(day) at \(time)"
     }
 
     // MARK: - Helpers

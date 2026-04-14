@@ -103,7 +103,7 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
     public func updateLastUsed(_ credential: AccountCredential) {
         var updated = credential
-        updated.lastUsedAt = ISO8601DateFormatter().string(from: Date())
+        updated.lastUsedAt = SharedFormatters.iso8601String(from: Date())
         try? saveCredential(updated)
     }
 
@@ -427,7 +427,7 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
     private func timestampOrNil(for value: String?) -> Date? {
         guard let value,
-              let date = ISO8601DateFormatter().date(from: value) else {
+              let date = SharedFormatters.parseISO8601(value) else {
             return nil
         }
         return date
@@ -435,7 +435,7 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
     private func timestamp(for value: String?) -> Date {
         guard let value,
-              let date = ISO8601DateFormatter().date(from: value) else {
+              let date = SharedFormatters.parseISO8601(value) else {
             return .distantPast
         }
         return date

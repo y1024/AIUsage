@@ -244,7 +244,9 @@ struct CostTrackingView: View {
 
     private var modelFilterLabel: String {
         if selectedModels.isEmpty { return t("All Models", "全部模型") }
-        if selectedModels.count == 1 { return shortModelName(selectedModels.first!) }
+        if selectedModels.count == 1, let only = selectedModels.first {
+            return shortModelName(only)
+        }
         return "\(selectedModels.count) " + t("models", "个模型")
     }
 
@@ -271,8 +273,8 @@ struct CostTrackingView: View {
             } else {
                 singleSeriesChart(points: points)
             }
-        } else if selectedModels.count == 1 {
-            let points = chartPointsForModel(selectedModels.first!)
+        } else if selectedModels.count == 1, let onlyModel = selectedModels.first {
+            let points = chartPointsForModel(onlyModel)
             if points.isEmpty {
                 Text(t("No data", "暂无数据"))
                     .font(.subheadline)

@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		5EF87F012F8D0E9E002FE291 /* ProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */; };
 		5EF87F042F8D0ED3002FE291 /* ProxyViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */; };
+		5EFREF012F93000100A15674 /* ProviderRefreshCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFREF002F93000100A15674 /* ProviderRefreshCoordinator.swift */; };
+		5EFACT012F94000100A15674 /* ProviderActivationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFACT002F94000100A15674 /* ProviderActivationManager.swift */; };
 		5EF87F072F8D0EED002FE291 /* ProxyConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */; };
 		5EF87F082F8D0EED002FE291 /* ProxyManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F062F8D0EED002FE291 /* ProxyManagementView.swift */; };
 		B3943D26F03B43809C53419E /* ProxyStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */; };
@@ -19,6 +21,8 @@
 		5EFAD7752F87AFE700A15674 /* ProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7492F87AC7100A15674 /* ProviderCard.swift */; };
 		5EFAD7762F87AFE700A15674 /* ProvidersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD74A2F87AC7100A15674 /* ProvidersView.swift */; };
 		5EFAD7772F87AFE700A15674 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD73D2F87AC7100A15674 /* AppState.swift */; };
+		A1ACCS022F92000000A15674 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1ACCS012F92000000A15674 /* AccountStore.swift */; };
+		7EFAD0022F87AC7100A15674 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EFAD0012F87AC7100A15674 /* AppSettings.swift */; };
 		5EFAD7782F87AFE700A15674 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD74B2F87AC7100A15674 /* SettingsView.swift */; };
 		5EFAD7792F87AFE700A15674 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7462F87AC7100A15674 /* ContentView.swift */; };
 		5EFAD77A2F87AFE700A15674 /* AIUsageApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD74E2F87AC7100A15674 /* AIUsageApp.swift */; };
@@ -33,6 +37,13 @@
 		5EFAD7832F87AFE700A15674 /* SecureAccountVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7572F87AC7200A15674 /* SecureAccountVault.swift */; };
 		5EFAD7842F87B00100A15674 /* WebLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7582F87B00100A15674 /* WebLoginView.swift */; };
 		5EFAD7862F87B10100A15674 /* ProviderAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7592F87B10100A15674 /* ProviderAuthManager.swift */; };
+		5EFPA0122F91000100A15674 /* ProviderAuthTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0112F91000100A15674 /* ProviderAuthTypes.swift */; };
+		5EFPA0222F91000200A15674 /* ProviderManagedImportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */; };
+		5EFPA0322F91000300A15674 /* CLIExecutableResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */; };
+		5EFPA0422F91000400A15674 /* CodexLoginCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0412F91000400A15674 /* CodexLoginCoordinator.swift */; };
+		5EFPA0522F91000500A15674 /* GeminiLoginCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0512F91000500A15674 /* GeminiLoginCoordinator.swift */; };
+		5EFPA0622F91000600A15674 /* ProviderAuthCandidateDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0612F91000600A15674 /* ProviderAuthCandidateDiscovery.swift */; };
+		5EFPA0722F91000700A15674 /* ProviderAuthParsing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0712F91000700A15674 /* ProviderAuthParsing.swift */; };
 		5EFAD7872F87B10200A15674 /* ProviderAccountEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7882F87B10200A15674 /* ProviderAccountEditorView.swift */; };
 		5EFAD7892F87B10300A15674 /* ProviderAccountGroupSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD78A2F87B10300A15674 /* ProviderAccountGroupSection.swift */; };
 		5EFAD78B2F87B10400A15674 /* SavedAccountViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD78C2F87B10400A15674 /* SavedAccountViews.swift */; };
@@ -45,11 +56,15 @@
 /* Begin PBXFileReference section */
 		5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyConfiguration.swift; sourceTree = "<group>"; };
 		5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyViewModel.swift; sourceTree = "<group>"; };
+		5EFREF002F93000100A15674 /* ProviderRefreshCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRefreshCoordinator.swift; sourceTree = "<group>"; };
+		5EFACT002F94000100A15674 /* ProviderActivationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderActivationManager.swift; sourceTree = "<group>"; };
 		5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyConfigEditorView.swift; sourceTree = "<group>"; };
 		5EF87F062F8D0EED002FE291 /* ProxyManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyManagementView.swift; sourceTree = "<group>"; };
 		F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyStatsView.swift; sourceTree = "<group>"; };
 		5EFAD72F2F87AC3300A15674 /* AIUsage.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIUsage.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5EFAD73D2F87AC7100A15674 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		A1ACCS012F92000000A15674 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
+		7EFAD0012F87AC7100A15674 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		5EFAD73E2F87AC7100A15674 /* ProviderModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderModels.swift; sourceTree = "<group>"; };
 		5EFAD7402F87AC7100A15674 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
 		5EFAD7422F87AC7100A15674 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -72,6 +87,13 @@
 		5EFAD7572F87AC7200A15674 /* SecureAccountVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureAccountVault.swift; sourceTree = "<group>"; };
 		5EFAD7582F87B00100A15674 /* WebLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebLoginView.swift; sourceTree = "<group>"; };
 		5EFAD7592F87B10100A15674 /* ProviderAuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAuthManager.swift; sourceTree = "<group>"; };
+		5EFPA0112F91000100A15674 /* ProviderAuthTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAuthTypes.swift; sourceTree = "<group>"; };
+		5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderManagedImportStore.swift; sourceTree = "<group>"; };
+		5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIExecutableResolver.swift; sourceTree = "<group>"; };
+		5EFPA0412F91000400A15674 /* CodexLoginCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLoginCoordinator.swift; sourceTree = "<group>"; };
+		5EFPA0512F91000500A15674 /* GeminiLoginCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLoginCoordinator.swift; sourceTree = "<group>"; };
+		5EFPA0612F91000600A15674 /* ProviderAuthCandidateDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAuthCandidateDiscovery.swift; sourceTree = "<group>"; };
+		5EFPA0712F91000700A15674 /* ProviderAuthParsing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAuthParsing.swift; sourceTree = "<group>"; };
 		5EFAD7882F87B10200A15674 /* ProviderAccountEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAccountEditorView.swift; sourceTree = "<group>"; };
 		5EFAD78A2F87B10300A15674 /* ProviderAccountGroupSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAccountGroupSection.swift; sourceTree = "<group>"; };
 		5EFAD78C2F87B10400A15674 /* SavedAccountViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedAccountViews.swift; sourceTree = "<group>"; };
@@ -96,6 +118,8 @@
 			isa = PBXGroup;
 			children = (
 				5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */,
+				5EFREF002F93000100A15674 /* ProviderRefreshCoordinator.swift */,
+				5EFACT002F94000100A15674 /* ProviderActivationManager.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -120,7 +144,9 @@
 			isa = PBXGroup;
 			children = (
 				5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */,
+				7EFAD0012F87AC7100A15674 /* AppSettings.swift */,
 				5EFAD73D2F87AC7100A15674 /* AppState.swift */,
+				A1ACCS012F92000000A15674 /* AccountStore.swift */,
 				5EFAD73E2F87AC7100A15674 /* ProviderModels.swift */,
 			);
 			path = Models;
@@ -142,10 +168,25 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		5EFPA0002F91000000A15674 /* ProviderAuth */ = {
+			isa = PBXGroup;
+			children = (
+				5EFPA0112F91000100A15674 /* ProviderAuthTypes.swift */,
+				5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */,
+				5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */,
+				5EFPA0412F91000400A15674 /* CodexLoginCoordinator.swift */,
+				5EFPA0512F91000500A15674 /* GeminiLoginCoordinator.swift */,
+				5EFPA0612F91000600A15674 /* ProviderAuthCandidateDiscovery.swift */,
+				5EFPA0712F91000700A15674 /* ProviderAuthParsing.swift */,
+			);
+			path = ProviderAuth;
+			sourceTree = "<group>";
+		};
 		5EFAD7452F87AC7100A15674 /* Services */ = {
 			isa = PBXGroup;
 			children = (
 				5EFAD7442F87AC7100A15674 /* APIService.swift */,
+				5EFPA0002F91000000A15674 /* ProviderAuth */,
 				5EFAD7592F87B10100A15674 /* ProviderAuthManager.swift */,
 				5EFAD7572F87AC7200A15674 /* SecureAccountVault.swift */,
 			);
@@ -281,7 +322,9 @@
 				5EFAD7742F87AFE700A15674 /* APIService.swift in Sources */,
 				5EFAD7752F87AFE700A15674 /* ProviderCard.swift in Sources */,
 				5EFAD7762F87AFE700A15674 /* ProvidersView.swift in Sources */,
+				7EFAD0022F87AC7100A15674 /* AppSettings.swift in Sources */,
 				5EFAD7772F87AFE700A15674 /* AppState.swift in Sources */,
+				A1ACCS022F92000000A15674 /* AccountStore.swift in Sources */,
 				5EFAD7782F87AFE700A15674 /* SettingsView.swift in Sources */,
 				5EFAD7792F87AFE700A15674 /* ContentView.swift in Sources */,
 				5EFAD77A2F87AFE700A15674 /* AIUsageApp.swift in Sources */,
@@ -299,6 +342,13 @@
 				5EF87F082F8D0EED002FE291 /* ProxyManagementView.swift in Sources */,
 				B3943D26F03B43809C53419E /* ProxyStatsView.swift in Sources */,
 				5EFAD7842F87B00100A15674 /* WebLoginView.swift in Sources */,
+				5EFPA0122F91000100A15674 /* ProviderAuthTypes.swift in Sources */,
+				5EFPA0222F91000200A15674 /* ProviderManagedImportStore.swift in Sources */,
+				5EFPA0322F91000300A15674 /* CLIExecutableResolver.swift in Sources */,
+				5EFPA0422F91000400A15674 /* CodexLoginCoordinator.swift in Sources */,
+				5EFPA0522F91000500A15674 /* GeminiLoginCoordinator.swift in Sources */,
+				5EFPA0622F91000600A15674 /* ProviderAuthCandidateDiscovery.swift in Sources */,
+				5EFPA0722F91000700A15674 /* ProviderAuthParsing.swift in Sources */,
 				5EFAD7862F87B10100A15674 /* ProviderAuthManager.swift in Sources */,
 				5EFAD7872F87B10200A15674 /* ProviderAccountEditorView.swift in Sources */,
 				5EFAD7892F87B10300A15674 /* ProviderAccountGroupSection.swift in Sources */,
@@ -306,6 +356,8 @@
 				5EFAD78D2F87B10500A15674 /* AccountNoteEditorView.swift in Sources */,
 				5EFAD78F2F87B10600A15674 /* Utilities.swift in Sources */,
 				5EF87F042F8D0ED3002FE291 /* ProxyViewModel.swift in Sources */,
+				5EFREF012F93000100A15674 /* ProviderRefreshCoordinator.swift in Sources */,
+				5EFACT012F94000100A15674 /* ProviderActivationManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

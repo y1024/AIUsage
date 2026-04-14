@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let upstreamLog = Logger(subsystem: "com.aiusage.quotaserver", category: "Upstream")
 
 // MARK: - OpenAI-Compatible HTTP Client
 
@@ -41,7 +44,7 @@ public actor OpenAICompatibleClient {
         }
         let body = try JSONEncoder().encode(nonStreamRequest)
         urlRequest.httpBody = body
-        print("  → Upstream: \(url.absoluteString) model=\(nonStreamRequest.model) maxTokens=\(nonStreamRequest.maxTokens.map { String($0) } ?? "nil")")
+        upstreamLog.debug("Upstream: \(url.absoluteString, privacy: .private) model=\(nonStreamRequest.model)")
 
         let (data, response) = try await session.data(for: urlRequest)
 
@@ -61,7 +64,7 @@ public actor OpenAICompatibleClient {
         }
 
         let errorBody = String(data: data, encoding: .utf8) ?? ""
-        print("  ⚠ Upstream \(httpResponse.statusCode): \(errorBody.prefix(500))")
+        upstreamLog.warning("Upstream \(httpResponse.statusCode): \(String(errorBody.prefix(500)), privacy: .private)")
 
         let isMaxTokensError = errorBody.contains("max_tokens") || errorBody.contains("model output limit")
         if isMaxTokensError {
@@ -76,7 +79,7 @@ public actor OpenAICompatibleClient {
                 tools: request.tools,
                 toolChoice: request.toolChoice
             )
-            print("  ↻ Retrying without max_tokens")
+            upstreamLog.info("Retrying without max_tokens")
             var retryURLRequest = urlRequest
             retryURLRequest.httpBody = try JSONEncoder().encode(retryRequest)
 
@@ -311,11 +314,11 @@ public actor OpenAICompatibleClient {
             errorBody.append(Character(UnicodeScalar(byte)))
             if errorBody.count > 4096 { break }
         }
-        print("  ⚠ Upstream streaming \(httpResponse.statusCode): \(errorBody.prefix(500))")
+        upstreamLog.warning("Upstream streaming \(httpResponse.statusCode): \(String(errorBody.prefix(500)), privacy: .private)")
 
         let isMaxTokensError = errorBody.contains("max_tokens") || errorBody.contains("model output limit")
         if isMaxTokensError {
-            print("  ↻ Retrying streaming without max_tokens")
+            upstreamLog.info("Retrying streaming without max_tokens")
             let retryReq = OpenAIChatCompletionRequest(
                 model: request.model, messages: request.messages,
                 temperature: request.temperature, topP: request.topP,

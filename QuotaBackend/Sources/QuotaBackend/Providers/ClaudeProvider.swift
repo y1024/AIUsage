@@ -546,24 +546,15 @@ public struct ClaudeProvider: ProviderFetcher {
     // MARK: - Date helpers
 
     private func parseISO8601(_ s: String) -> Date? {
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: s) { return d }
-        return ISO8601DateFormatter().date(from: s)
+        SharedFormatters.parseISO8601(s)
     }
 
     private func dayKey(_ date: Date) -> String {
-        let fmt = DateFormatter()
-        fmt.timeZone = timeZone
-        fmt.dateFormat = "yyyy-MM-dd"
-        return fmt.string(from: date)
+        DateFormat.string(from: date, format: "yyyy-MM-dd", timeZone: timeZone)
     }
 
     private func monthKeyStr(_ date: Date) -> String {
-        let fmt = DateFormatter()
-        fmt.timeZone = timeZone
-        fmt.dateFormat = "yyyy-MM"
-        return fmt.string(from: date)
+        DateFormat.string(from: date, format: "yyyy-MM", timeZone: timeZone)
     }
 
     private func currentWeekRange(_ date: Date) -> (start: String, end: String, dayKeys: Set<String>) {
@@ -572,13 +563,18 @@ public struct ClaudeProvider: ProviderFetcher {
         let weekday = comps.weekday ?? 1 // 1=Sun in Gregorian
         // Convert to Mon=0 offset
         let offset = (weekday + 5) % 7
-        let monday = cal.date(byAdding: .day, value: -offset, to: date)!
+        guard let monday = cal.date(byAdding: .day, value: -offset, to: date) else {
+            let key = dayKey(date)
+            return (start: key, end: key, dayKeys: [key])
+        }
         var keys = Set<String>()
         for i in 0..<7 {
-            let d = cal.date(byAdding: .day, value: i, to: monday)!
-            keys.insert(dayKey(d))
+            if let d = cal.date(byAdding: .day, value: i, to: monday) {
+                keys.insert(dayKey(d))
+            }
         }
-        return (start: dayKey(monday), end: dayKey(cal.date(byAdding: .day, value: 6, to: monday)!), dayKeys: keys)
+        let endKey = cal.date(byAdding: .day, value: 6, to: monday).map(dayKey) ?? dayKey(monday)
+        return (start: dayKey(monday), end: endKey, dayKeys: keys)
     }
 
     private func calendar() -> Calendar {
@@ -588,24 +584,15 @@ public struct ClaudeProvider: ProviderFetcher {
     }
 
     private func hourBucketKey(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "yyyy-MM-dd-HH"
-        return formatter.string(from: date)
+        DateFormat.string(from: date, format: "yyyy-MM-dd-HH", timeZone: timeZone)
     }
 
     private func hourBucketLabel(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "HH:00"
-        return formatter.string(from: date)
+        DateFormat.string(from: date, format: "HH:00", timeZone: timeZone)
     }
 
     private func dayBucketLabel(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "MM/dd"
-        return formatter.string(from: date)
+        DateFormat.string(from: date, format: "MM/dd", timeZone: timeZone)
     }
 
     // MARK: - Misc helpers

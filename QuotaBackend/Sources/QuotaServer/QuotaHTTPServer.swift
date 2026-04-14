@@ -1,6 +1,20 @@
 import Foundation
 import Network
+import os.log
 import QuotaBackend
+
+private let httpLog = Logger(subsystem: "com.aiusage.quotaserver", category: "HTTP")
+
+private enum QuotaHTTPServerError: LocalizedError {
+    case invalidPort(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidPort(let port):
+            return "Invalid server port \(port). Use a value from 1 through 65535."
+        }
+    }
+}
 
 // MARK: - Lightweight HTTP Server
 // Uses Network.framework (no external dependencies) to serve the same JSON API
@@ -25,7 +39,10 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     }
 
     public func run() async throws {
-        let nwPort = NWEndpoint.Port(rawValue: UInt16(port))!
+        guard (1...65_535).contains(port),
+              let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else {
+            throw QuotaHTTPServerError.invalidPort(port)
+        }
         let nwHost = NWEndpoint.Host(host)
 
         // Create IPv4 listener with explicit local endpoint
@@ -59,26 +76,26 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             // Silently ignore — IPv4 on 0.0.0.0 handles most cases
         }
 
-        print("QuotaServer listening on \(host):\(port)\(ipv6Active ? " (IPv4 + IPv6)" : " (IPv4)")")
-        print("Endpoints:")
-        print("  GET /api/dashboard")
-        print("  GET /api/provider/:id")
-        print("  GET /api/providers")
-        print("  GET /api/health")
-        print("  GET /health")
+        httpLog.info("QuotaServer listening on \(host):\(port)\(ipv6Active ? " (IPv4 + IPv6)" : " (IPv4)")")
+        httpLog.info("Endpoints:")
+        httpLog.info("  GET /api/dashboard")
+        httpLog.info("  GET /api/provider/:id")
+        httpLog.info("  GET /api/providers")
+        httpLog.info("  GET /api/health")
+        httpLog.info("  GET /health")
         if proxyService != nil {
-            print("  POST /v1/messages (Claude Proxy - OpenAI Convert)")
-            print("  POST /v1/messages/count_tokens (Claude Proxy)")
+            httpLog.info("  POST /v1/messages (Claude Proxy - OpenAI Convert)")
+            httpLog.info("  POST /v1/messages/count_tokens (Claude Proxy)")
         }
         if isPassthrough {
-            print("  POST /v1/messages (Anthropic Passthrough)")
+            httpLog.info("  POST /v1/messages (Anthropic Passthrough)")
         }
 
         // Keep alive until IPv4 listener fails
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             listener4.stateUpdateHandler = { state in
                 if case .failed(let error) = state {
-                    print("Listener failed: \(error)")
+                    httpLog.error("Listener failed: \(error.localizedDescription)")
                     cont.resume()
                 }
             }
@@ -137,7 +154,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
         switch (request.method, path) {
         case ("GET", "/health"), ("GET", "/api/health"):
-            let generatedAt = ISO8601DateFormatter().string(from: Date())
+            let generatedAt = SharedFormatters.iso8601String(from: Date())
             return jsonResponse(
                 [
                     "ok": true,
@@ -167,7 +184,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             return jsonResponse(providers, headers: corsHeaders)
 
         case ("GET", "/api/dashboard"):
-            print("→ GET /api/dashboard")
+            httpLog.debug("→ GET /api/dashboard")
             let ids = queryItems["ids"]?
                 .split(separator: ",")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -177,7 +194,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
         case ("GET", _) where path.hasPrefix("/api/provider/"):
             let providerId = String(path.dropFirst("/api/provider/".count))
-            print("→ GET /api/provider/\(providerId)")
+            httpLog.debug("→ GET /api/provider/\(providerId)")
             guard let result = await engine.fetchSingle(id: providerId) else {
                 return jsonResponse(["error": "Provider '\(providerId)' not found"], status: 404, headers: corsHeaders)
             }
@@ -191,7 +208,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     // MARK: - Claude Proxy Handlers
 
     private func handleEventLoggingEndpoint(request: HTTPRequest, headers: [String: String]) async -> HTTPResponse {
-        print("→ POST /api/event_logging/batch")
+        httpLog.debug("→ POST /api/event_logging/batch")
 
         let batchId = UUID().uuidString
         var processedCount = 0
@@ -205,11 +222,11 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             let previewCount = min(5, events.count)
             for (index, event) in events.prefix(previewCount).enumerated() {
                 let eventType = event.eventType ?? "unknown"
-                print("  Event \(index + 1): \(eventType)")
+                httpLog.debug("  Event \(index + 1): \(eventType)")
             }
 
             if events.count > previewCount {
-                print("  ... and \(events.count - previewCount) more events")
+                httpLog.debug("  ... and \(events.count - previewCount) more events")
             }
         }
 
@@ -254,7 +271,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             )
         }
 
-        print("→ POST /v1/messages (model: \(claudeRequest.model), stream: \(claudeRequest.stream ?? false))")
+        httpLog.debug("→ POST /v1/messages (model: \(claudeRequest.model), stream: \(claudeRequest.stream ?? false))")
 
         let startTime = Date()
         do {
@@ -281,7 +298,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
                 responseTimeMs: elapsed,
                 errorMessage: error.localizedDescription
             )
-            print("  ✗ Proxy error: \(error.localizedDescription)")
+            httpLog.error("  ✗ Proxy error: \(error.localizedDescription)")
             let errorResponse = await proxy.buildErrorResponse(error: error)
             return jsonResponse(encodable: errorResponse, status: 500, headers: headers)
         }
@@ -317,7 +334,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             )
         }
 
-        print("→ POST /v1/messages/count_tokens (model: \(tokenRequest.model))")
+        httpLog.debug("→ POST /v1/messages/count_tokens (model: \(tokenRequest.model))")
 
         do {
             let response = try await proxy.handleCountTokens(request: tokenRequest)
@@ -355,7 +372,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             ? config.upstreamBaseURL + cleanPath.dropFirst() + queryPart
             : config.upstreamBaseURL + cleanPath + queryPart
 
-        print("→ PASSTHROUGH \(request.method) \(request.path) → \(upstreamURL)")
+        httpLog.debug("→ PASSTHROUGH \(request.method) \(request.path, privacy: .public) → \(upstreamURL, privacy: .private)")
 
         guard let url = URL(string: upstreamURL) else {
             let resp = HTTPResponse(status: 502, headers: [:], body: "{\"error\":\"Invalid upstream URL\"}")
@@ -580,7 +597,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             return
         }
 
-        print("→ POST /v1/messages (streaming, model: \(claudeRequest.model))")
+        httpLog.debug("→ POST /v1/messages (streaming, model: \(claudeRequest.model))")
 
         let streamStartTime = Date()
         let streamer = StreamingResponse(connection: connection)
@@ -706,7 +723,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             )
 
         } catch {
-            print("  ✗ Streaming proxy error: \(error.localizedDescription)")
+            httpLog.error("  ✗ Streaming proxy error: \(error.localizedDescription)")
             let errMsg = "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\(escapeJSON(error.localizedDescription))}}"
             await streamer.sendSSEEvent(event: "error", data: errMsg)
 
@@ -946,7 +963,9 @@ public final class QuotaHTTPServer: @unchecked Sendable {
                text.contains("\r\n\r\n") {
                 // Check Content-Length to see if we have the full body
                 if let contentLength = extractContentLength(from: text) {
-                    let headerEnd = text.range(of: "\r\n\r\n")!
+                    guard let headerEnd = text.range(of: "\r\n\r\n") else {
+                        continue
+                    }
                     let headerEndOffset = text.distance(from: text.startIndex, to: headerEnd.upperBound)
                     let bodySize = accumulated.count - headerEndOffset
                     if bodySize >= contentLength {

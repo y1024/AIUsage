@@ -1,4 +1,5 @@
 import SwiftUI
+import QuotaBackend
 
 struct InboxView: View {
     @EnvironmentObject var appState: AppState
@@ -15,9 +16,7 @@ struct InboxView: View {
     private var resettingSoon: [ProviderData] {
         appState.providers.filter { p in
             guard let next = p.nextResetAt else { return false }
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            guard let date = formatter.date(from: next) else { return false }
+            guard let date = SharedFormatters.parseISO8601(next) else { return false }
             let diff = date.timeIntervalSinceNow
             return diff > 0 && diff <= 86400
         }

@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import QuotaBackend
 
 // MARK: - Global Time Manager (单例，所有 View 共享一个 Timer)
 
@@ -100,11 +101,9 @@ func formatRelativeTimeFromDate(_ date: Date, language: String) -> String {
 }
 
 func formatRefreshTimestamp(_ date: Date, language: String) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: language == "zh" ? "zh_CN" : "en_US_POSIX")
-    formatter.dateFormat = "HH:mm:ss"
-
-    return "\(formatRelativeRefreshTime(date, language: language)) · \(formatter.string(from: date))"
+    let locale = Locale(identifier: language == "zh" ? "zh_CN" : "en_US_POSIX")
+    let clock = DateFormat.formatter("HH:mm:ss", timeZone: .current, locale: locale).string(from: date)
+    return "\(formatRelativeRefreshTime(date, language: language)) · \(clock)"
 }
 
 func formatRefreshTimestamp(_ isoString: String, language: String) -> String {
@@ -167,14 +166,7 @@ func formatNumber(_ value: Int) -> String {
 }
 
 func parseISO8601(_ value: String) -> Date? {
-    let withFractional = ISO8601DateFormatter()
-    withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = withFractional.date(from: value) {
-        return date
-    }
-    let standard = ISO8601DateFormatter()
-    standard.formatOptions = [.withInternetDateTime]
-    return standard.date(from: value)
+    SharedFormatters.parseISO8601(value)
 }
 
 func membershipBadgeTint(for label: String?) -> Color {

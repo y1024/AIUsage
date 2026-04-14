@@ -1,5 +1,8 @@
 import Foundation
+import os.log
 import QuotaBackend
+
+private let startupLog = Logger(subsystem: "com.aiusage.quotaserver", category: "Startup")
 
 setbuf(stdout, nil)
 setbuf(stderr, nil)
@@ -23,16 +26,16 @@ let args = parseArgs()
 let host = args["host"] ?? "127.0.0.1"
 let port = Int(args["port"] ?? "4318") ?? 4318
 
-print("QuotaServer starting on \(host):\(port)")
+startupLog.info("QuotaServer starting on \(host):\(port)")
 
 // Load proxy configuration from environment
 let proxyConfig = ClaudeProxyConfiguration.loadFromEnvironment()
 
 if let cfg = proxyConfig {
     let modeStr = cfg.mode == .anthropicPassthrough ? "passthrough" : "openai-convert"
-    print("Claude Code Proxy: enabled (mode=\(modeStr), upstream=\(cfg.upstreamBaseURL))")
+    startupLog.info("Claude Code Proxy: enabled (mode=\(modeStr), upstream=\(cfg.upstreamBaseURL, privacy: .private))")
 } else {
-    print("Claude Code Proxy: disabled (set OPENAI_API_KEY or PROXY_MODE=passthrough)")
+    startupLog.info("Claude Code Proxy: disabled")
 }
 
 let server = QuotaHTTPServer(host: host, port: port, proxyConfig: proxyConfig)

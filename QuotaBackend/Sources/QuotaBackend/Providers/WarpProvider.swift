@@ -150,7 +150,7 @@ public struct WarpProvider: ProviderFetcher {
         window.unlimited = isUnlimited
         window.entitlement = isUnlimited ? nil : limit
         window.remaining = isUnlimited ? nil : max(0, limit - used)
-        window.resetAt = nextRefresh.map { ISO8601DateFormatter().string(from: $0) }
+        window.resetAt = nextRefresh.map { SharedFormatters.iso8601String(from: $0) }
 
         if isUnlimited {
             window.usedPercent = 0
@@ -196,20 +196,12 @@ public struct WarpProvider: ProviderFetcher {
     }
 
     private func parseDate(_ s: String) -> Date? {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: s) { return d }
-        let f2 = ISO8601DateFormatter()
-        return f2.date(from: s)
+        SharedFormatters.parseISO8601(s)
     }
 
     private func formatResetDescription(_ date: Date, usage: String?) -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d"
-        let day = fmt.string(from: date)
-        let timeFmt = DateFormatter()
-        timeFmt.dateFormat = "h:mma"
-        let time = timeFmt.string(from: date)
+        let day = DateFormat.string(from: date, format: "MMM d")
+        let time = DateFormat.string(from: date, format: "h:mma")
         let base = "Resets \(day) at \(time)"
         return usage.map { "\($0), \(base)" } ?? base
     }

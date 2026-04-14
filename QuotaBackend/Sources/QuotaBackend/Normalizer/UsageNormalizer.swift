@@ -197,7 +197,7 @@ public enum UsageNormalizer {
         base.status = status
         base.statusLabel = statusLabel
         base.remainingPercent = remainingPercent
-        base.nextResetAt = trackedModels.compactMap { $0.resetAt }.compactMap(parseDate).min().map { ISO8601DateFormatter().string(from: $0) }
+        base.nextResetAt = trackedModels.compactMap { $0.resetAt }.compactMap(parseDate).min().map { SharedFormatters.iso8601String(from: $0) }
         base.nextResetLabel = formatShortDateTime(base.nextResetAt)
         base.headline = HeadlineInfo(
             eyebrow: "Plan · \(plan)",
@@ -372,7 +372,7 @@ public enum UsageNormalizer {
         base.status = status
         base.statusLabel = statusLabel
         base.remainingPercent = remainingPercent
-        base.nextResetAt = rawWindows.compactMap { $0.resetAt }.compactMap(parseDate).min().map { ISO8601DateFormatter().string(from: $0) }
+        base.nextResetAt = rawWindows.compactMap { $0.resetAt }.compactMap(parseDate).min().map { SharedFormatters.iso8601String(from: $0) }
         base.nextResetLabel = formatShortDateTime(base.nextResetAt)
         base.headline = HeadlineInfo(
             eyebrow: "Plan · \(plan)",
@@ -502,7 +502,15 @@ public enum UsageNormalizer {
         )
         base.metrics = [
             MetricInfo(label: "Account",      value: usage.accountEmail ?? usage.accountName ?? "Unknown"),
-            MetricInfo(label: "Included Plan", value: (includedUsed != nil && includedLimit != nil) ? "\(formatCurrency(includedUsed!)) / \(formatCurrency(includedLimit!))" : "Not available"),
+            MetricInfo(
+                label: "Included Plan",
+                value: {
+                    if let includedUsed, let includedLimit {
+                        return "\(formatCurrency(includedUsed)) / \(formatCurrency(includedLimit))"
+                    }
+                    return "Not available"
+                }()
+            ),
             MetricInfo(label: "On-demand",    value: onDemandUsed.map { "\(formatCurrency($0)) used" } ?? "Not available"),
             MetricInfo(label: "Source",       value: formatSourceLabel(usage.source))
         ]
@@ -980,27 +988,18 @@ public enum UsageNormalizer {
 
     private static func formatRange(_ start: String?, _ end: String?) -> String {
         [start, end].compactMap { $0 }.compactMap { s -> String? in
-            guard let d = ISO8601DateFormatter().date(from: s) else { return nil }
-            let fmt = DateFormatter()
-            fmt.dateFormat = "MMM d"
-            return fmt.string(from: d)
+            guard let d = SharedFormatters.parseISO8601(s) else { return nil }
+            return DateFormat.string(from: d, format: "MMM d")
         }.joined(separator: " → ")
     }
 
     static func formatShortDateTime(_ value: String?) -> String? {
         guard let v = value, let date = parseDate(v) else { return nil }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d, HH:mm"
-        return fmt.string(from: date)
+        return DateFormat.string(from: date, format: "MMM d, HH:mm")
     }
 
     private static func parseDate(_ s: String) -> Date? {
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: s) { return d }
-        let f2 = ISO8601DateFormatter()
-        if let d = f2.date(from: s) { return d }
-        return nil
+        SharedFormatters.parseISO8601(s)
     }
 
     private static func isWithinHours(_ value: String, hours: Double) -> Bool {

@@ -610,12 +610,7 @@ private struct MultiWindowBarRow: View {
     }
 
     private func parseISO8601(_ value: String) -> Date? {
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: value) { return d }
-        let f2 = ISO8601DateFormatter()
-        f2.formatOptions = [.withInternetDateTime]
-        return f2.date(from: value)
+        SharedFormatters.parseISO8601(value)
     }
 }
 
@@ -723,12 +718,7 @@ private struct MultiWindowRingItem: View {
     }
 
     private func parseISO8601(_ value: String) -> Date? {
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: value) { return d }
-        let f2 = ISO8601DateFormatter()
-        f2.formatOptions = [.withInternetDateTime]
-        return f2.date(from: value)
+        SharedFormatters.parseISO8601(value)
     }
 }
 
@@ -836,12 +826,7 @@ private struct MultiWindowSegmentsRow: View {
     }
 
     private func parseISO8601(_ value: String) -> Date? {
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: value) { return d }
-        let f2 = ISO8601DateFormatter()
-        f2.formatOptions = [.withInternetDateTime]
-        return f2.date(from: value)
+        SharedFormatters.parseISO8601(value)
     }
 
     private func segmentView(at index: Int, height: CGFloat) -> some View {
@@ -916,12 +901,7 @@ struct QuotaIndicatorView: View {
     }
 
     private func parseResetDate(_ value: String) -> Date? {
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: value) { return d }
-        let f2 = ISO8601DateFormatter()
-        f2.formatOptions = [.withInternetDateTime]
-        return f2.date(from: value)
+        SharedFormatters.parseISO8601(value)
     }
 
     private var riskColor: Color {
@@ -1176,7 +1156,7 @@ struct QuotaIndicatorView: View {
         theme: ProviderTheme(accent: "blue", glow: "#5aa2ff"),
         sourceLabel: "GitHub CLI",
         sourceType: "gh-cli",
-        fetchedAt: ISO8601DateFormatter().string(from: Date()),
+        fetchedAt: SharedFormatters.iso8601String(from: Date()),
         accountLabel: "copilot@example.com",
         membershipLabel: "Pro",
         headline: Headline(
@@ -1275,10 +1255,9 @@ struct ResetCountdownView: View {
     }
 
     private func absoluteResetText(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: appState.language == "zh" ? "zh_CN" : "en_US")
-        formatter.dateFormat = appState.language == "zh" ? "M月d日 HH:mm" : "MMM d, HH:mm"
-        return formatter.string(from: date)
+        let locale = Locale(identifier: appState.language == "zh" ? "zh_CN" : "en_US")
+        let format = appState.language == "zh" ? "M月d日 HH:mm" : "MMM d, HH:mm"
+        return DateFormat.formatter(format, timeZone: .current, locale: locale).string(from: date)
     }
 
     private func countdownSnapshot(to target: Date, now: Date) -> CountdownSnapshot {
@@ -1290,15 +1269,7 @@ struct ResetCountdownView: View {
     }
 
     private static func parseISO8601(_ value: String) -> Date? {
-        let withFractional = ISO8601DateFormatter()
-        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFractional.date(from: value) {
-            return date
-        }
-
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        return standard.date(from: value)
+        SharedFormatters.parseISO8601(value)
     }
 }
 

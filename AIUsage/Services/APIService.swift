@@ -1,4 +1,5 @@
 import Foundation
+import QuotaBackend
 
 class APIService {
     static let shared = APIService()
@@ -25,14 +26,18 @@ class APIService {
     // MARK: - Dashboard API
     
     func fetchDashboard(providerIds: [String] = []) async throws -> DashboardResponse {
-        var components = URLComponents(string: "\(baseURL)/api/dashboard")!
+        guard var components = URLComponents(string: "\(baseURL)/api/dashboard") else {
+            throw APIError.invalidURL
+        }
         if !providerIds.isEmpty {
             components.queryItems = [
                 URLQueryItem(name: "ids", value: providerIds.joined(separator: ","))
             ]
         }
-        let url = components.url!
-        
+        guard let url = components.url else {
+            throw APIError.invalidURL
+        }
+
         return try await decode(DashboardResponse.self, from: url)
     }
     
@@ -42,7 +47,9 @@ class APIService {
     }
     
     func checkHealth() async throws -> HealthResponse {
-        let url = URL(string: "\(baseURL)/health")!
+        guard let url = URL(string: "\(baseURL)/health") else {
+            throw APIError.invalidURL
+        }
         return try await decode(HealthResponse.self, from: url)
     }
 
@@ -96,7 +103,7 @@ struct HealthResponse: Decodable {
         let status = try container.decodeIfPresent(String.self, forKey: .status)
         let time = try container.decodeIfPresent(String.self, forKey: .time)
         self.ok = status?.lowercased() == "ok"
-        self.generatedAt = time ?? ISO8601DateFormatter().string(from: Date())
+        self.generatedAt = time ?? SharedFormatters.iso8601String(from: Date())
     }
 }
 
@@ -104,6 +111,7 @@ struct HealthResponse: Decodable {
 
 enum APIError: LocalizedError {
     case invalidResponse
+    case invalidURL
     case httpError(statusCode: Int)
     case decodingError(Error)
     case networkError(Error)
@@ -112,6 +120,8 @@ enum APIError: LocalizedError {
         switch self {
         case .invalidResponse:
             return "Invalid server response"
+        case .invalidURL:
+            return "Invalid server URL"
         case .httpError(let code):
             return "HTTP error: \(code)"
         case .decodingError(let error):

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import QuotaBackend
 
 struct ProviderDetailView: View {
     let provider: ProviderData
@@ -658,7 +659,7 @@ struct CostPeriodCard: View {
         theme: ProviderTheme(accent: "blue", glow: "#5aa2ff"),
         sourceLabel: "GitHub CLI",
         sourceType: "gh-cli",
-        fetchedAt: ISO8601DateFormatter().string(from: Date()),
+        fetchedAt: SharedFormatters.iso8601String(from: Date()),
         accountLabel: "copilot@example.com",
         membershipLabel: "Pro",
         headline: Headline(
