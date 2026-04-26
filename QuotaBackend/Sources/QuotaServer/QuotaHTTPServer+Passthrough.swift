@@ -57,6 +57,7 @@ extension QuotaHTTPServer {
         for (key, value) in mutableHeaders {
             let lk = key.lowercased()
             if lk == "host" || lk == "content-length" { continue }
+            if lk == "authorization" && !config.upstreamAPIKey.isEmpty { continue }
             upstreamReq.setValue(value, forHTTPHeaderField: key)
         }
         if !config.upstreamAPIKey.isEmpty {
@@ -273,6 +274,7 @@ extension QuotaHTTPServer {
         for (key, value) in request.headers {
             let lk = key.lowercased()
             if lk == "host" || lk == "content-length" { continue }
+            if lk == "authorization" && !config.upstreamAPIKey.isEmpty { continue }
             upstreamReq.setValue(value, forHTTPHeaderField: key)
         }
         if !config.upstreamAPIKey.isEmpty {
