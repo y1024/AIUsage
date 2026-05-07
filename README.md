@@ -15,7 +15,7 @@
 <p align="center">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-14%2B-111827?style=flat-square&logo=apple&logoColor=white">
   <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-Native%20App-f97316?style=flat-square&logo=swift&logoColor=white">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.6.1-22c55e?style=flat-square">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-22c55e?style=flat-square">
   <img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-0ea5e9?style=flat-square">
 </p>
 
