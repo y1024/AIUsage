@@ -335,19 +335,34 @@ class ProxyViewModel: ObservableObject {
         let sonnet = m.middleModel.name.isEmpty ? nil : m.middleModel.name
         let haiku  = m.smallModel.name.isEmpty  ? nil : m.smallModel.name
 
+        let certPath: String? = config.enableHTTPS ? TLSCertificateManager.shared.certFilePath : nil
+
         switch config.nodeType {
         case .anthropicDirect:
             if config.usePassthroughProxy {
-                let proxyURL = "http://\(config.host):\(config.port)"
+                let proxyURL: String
+                if config.enableHTTPS {
+                    proxyURL = "https://\(config.host):\(config.effectiveHTTPSPort)"
+                } else {
+                    proxyURL = "http://\(config.host):\(config.port)"
+                }
                 return .init(baseURL: proxyURL, authToken: config.anthropicAPIKey,
-                             defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
+                             defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku,
+                             nodeExtraCACerts: certPath)
             }
             return .init(baseURL: config.anthropicBaseURL, authToken: config.anthropicAPIKey,
                          defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
         case .openaiProxy:
             let proxyKey = config.expectedClientKey.isEmpty ? "proxy-key" : config.expectedClientKey
-            return .init(baseURL: config.displayURL, authToken: proxyKey,
-                         defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
+            let baseURL: String
+            if config.enableHTTPS {
+                baseURL = "https://\(config.host):\(config.effectiveHTTPSPort)"
+            } else {
+                baseURL = config.displayURL
+            }
+            return .init(baseURL: baseURL, authToken: proxyKey,
+                         defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku,
+                         nodeExtraCACerts: certPath)
         }
     }
 

@@ -351,7 +351,7 @@ struct ProxyConfigEditorView: View {
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text(L("Port", "端口")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        TextField("8080", value: $profile.metadata.proxy.port, format: .number)
+                        TextField("8080", value: $profile.metadata.proxy.port, format: .number.grouping(.never))
                             .textFieldStyle(.roundedBorder).frame(width: 80)
                     }
                 }
@@ -422,7 +422,7 @@ struct ProxyConfigEditorView: View {
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(L("Port", "端口")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    TextField("8080", value: $profile.metadata.proxy.port, format: .number)
+                    TextField("8080", value: $profile.metadata.proxy.port, format: .number.grouping(.never))
                         .textFieldStyle(.roundedBorder).frame(width: 100)
                 }
             }
@@ -596,13 +596,13 @@ struct ProxyConfigEditorView: View {
                                     get: { profile.metadata.proxy.httpsPort ?? (profile.metadata.proxy.port + 1) },
                                     set: { profile.metadata.proxy.httpsPort = $0 }
                                   ),
-                                  format: .number)
+                                  format: .number.grouping(.never))
                             .textFieldStyle(.roundedBorder).frame(width: 100)
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text(L("HTTPS URL", "HTTPS 地址")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         let httpsPort = profile.metadata.proxy.httpsPort ?? (profile.metadata.proxy.port + 1)
-                        Text("https://\(profile.metadata.proxy.host):\(httpsPort)")
+                        Text(verbatim: "https://\(profile.metadata.proxy.host):\(httpsPort)")
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)

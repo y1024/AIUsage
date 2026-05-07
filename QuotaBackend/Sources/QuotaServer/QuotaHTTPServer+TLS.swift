@@ -21,11 +21,20 @@ public struct HTTPSConfig: Sendable {
 extension QuotaHTTPServer {
 
     func startHTTPSListener(config: HTTPSConfig, host: NWEndpoint.Host) async throws -> NWListener {
-        let identity = try loadTLSIdentity(from: config.identityPath)
+        let (identity, chain) = try loadTLSIdentity(from: config.identityPath)
 
         let tlsOptions = NWProtocolTLS.Options()
-        guard let secIdentity = sec_identity_create(identity) else {
-            throw TLSSetupError.identityCreationFailed
+        let secIdentity: sec_identity_t
+        if !chain.isEmpty {
+            guard let id = sec_identity_create_with_certificates(identity, chain as CFArray) else {
+                throw TLSSetupError.identityCreationFailed
+            }
+            secIdentity = id
+        } else {
+            guard let id = sec_identity_create(identity) else {
+                throw TLSSetupError.identityCreationFailed
+            }
+            secIdentity = id
         }
         sec_protocol_options_set_local_identity(
             tlsOptions.securityProtocolOptions,
@@ -74,22 +83,41 @@ extension QuotaHTTPServer {
 
     // MARK: - Identity Loading
 
-    private func loadTLSIdentity(from path: String) throws -> SecIdentity {
+    private func loadTLSIdentity(from path: String) throws -> (SecIdentity, [SecCertificate]) {
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
 
-        var items: CFArray?
-        let options: NSDictionary = [kSecImportExportPassphrase: "aiusage-proxy-tls"]
-        let status = SecPKCS12Import(data as CFData, options, &items)
+        let password = "aiusage-proxy-tls"
+        var importItems: CFArray?
+        let importParams: [String: Any] = [
+            kSecImportExportPassphrase as String: password
+        ]
+        let status = SecPKCS12Import(data as CFData, importParams as CFDictionary, &importItems)
 
-        guard status == errSecSuccess,
-              let array = items as? [[String: Any]],
-              let first = array.first,
-              let identity = first[kSecImportItemIdentity as String] else {
+        guard status == errSecSuccess else {
             throw TLSSetupError.identityLoadFailed(status)
         }
 
-        // swiftlint:disable:next force_cast
-        return identity as! SecIdentity
+        guard let array = importItems as? [[String: Any]],
+              let first = array.first else {
+            throw TLSSetupError.identityLoadFailed(errSecItemNotFound)
+        }
+
+        let chain = first[kSecImportItemCertChain as String] as? [SecCertificate] ?? []
+
+        if let identity = first[kSecImportItemIdentity as String] {
+            return (identity as! SecIdentity, chain) // swiftlint:disable:this force_cast
+        }
+
+        guard let cert = chain.first else {
+            throw TLSSetupError.identityLoadFailed(errSecItemNotFound)
+        }
+
+        var identityRef: SecIdentity?
+        let matchStatus = SecIdentityCreateWithCertificate(nil, cert, &identityRef)
+        guard matchStatus == errSecSuccess, let identity = identityRef else {
+            throw TLSSetupError.identityLoadFailed(matchStatus)
+        }
+        return (identity, chain)
     }
 }
 

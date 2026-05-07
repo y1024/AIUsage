@@ -98,9 +98,19 @@ extension ProxyViewModel {
             } else {
                 finalSettings = profile.settings
             }
+
+            var settingsToWrite = finalSettings
+            if config.enableHTTPS {
+                var env = settingsToWrite["env"] as? [String: Any] ?? [:]
+                env["NODE_EXTRA_CA_CERTS"] = TLSCertificateManager.shared.certFilePath
+                let httpsURL = "https://\(config.host):\(config.effectiveHTTPSPort)"
+                env["ANTHROPIC_BASE_URL"] = httpsURL
+                settingsToWrite["env"] = env
+            }
+
             try await runtimeService.activateRuntime(
                 for: config,
-                settings: finalSettings
+                settings: settingsToWrite
             )
         } else {
             try await runtimeService.activateRuntime(

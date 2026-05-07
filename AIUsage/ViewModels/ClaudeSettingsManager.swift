@@ -67,6 +67,7 @@ class ClaudeSettingsManager {
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "NODE_EXTRA_CA_CERTS",
     ]
 
     struct EnvConfig {
@@ -76,6 +77,7 @@ class ClaudeSettingsManager {
         var opusModel: String?
         var sonnetModel: String?
         var haikuModel: String?
+        var nodeExtraCACerts: String?
     }
 
     /// Legacy partial write: only updates managed env keys + model (kept for backward compat).
@@ -89,6 +91,7 @@ class ClaudeSettingsManager {
             ("ANTHROPIC_DEFAULT_OPUS_MODEL", config.opusModel),
             ("ANTHROPIC_DEFAULT_SONNET_MODEL", config.sonnetModel),
             ("ANTHROPIC_DEFAULT_HAIKU_MODEL", config.haikuModel),
+            ("NODE_EXTRA_CA_CERTS", config.nodeExtraCACerts),
         ]
         for (key, value) in pairs {
             if let value = value {
