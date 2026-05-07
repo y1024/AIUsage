@@ -26,17 +26,20 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     let engine = ProviderEngine()
     var proxyService: ClaudeProxyService?
     var proxyConfig: ClaudeProxyConfiguration?
+    var httpsConfig: HTTPSConfig?
     private let lifecycleQueue = DispatchQueue(label: "com.aiusage.quotaserver.lifecycle")
     private var ipv4Listener: NWListener?
     private var ipv6Listener: NWListener?
+    private var httpsListener: NWListener?
     private var stopContinuation: CheckedContinuation<Void, Never>?
 
     var isPassthrough: Bool { proxyConfig?.mode == .anthropicPassthrough }
 
-    public init(host: String, port: Int, proxyConfig: ClaudeProxyConfiguration? = nil) {
+    public init(host: String, port: Int, proxyConfig: ClaudeProxyConfiguration? = nil, httpsConfig: HTTPSConfig? = nil) {
         self.host = host
         self.port = port
         self.proxyConfig = proxyConfig
+        self.httpsConfig = httpsConfig
         if let config = proxyConfig, config.enabled, config.mode == .openaiConvert {
             self.proxyService = try? ClaudeProxyService(configuration: config)
         }
@@ -61,26 +64,38 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         let listener4 = try await startIPv4Listener(host: nwHost, port: nwPort)
         let (listener6, ipv6Active) = startIPv6Listener(port: nwPort)
 
+        var tlsListener: NWListener?
+        if let httpsConfig {
+            do {
+                tlsListener = try await startHTTPSListener(config: httpsConfig, host: nwHost)
+            } catch {
+                httpLog.error("HTTPS listener failed to start: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
         lifecycleQueue.sync {
             ipv4Listener = listener4
             ipv6Listener = listener6
+            httpsListener = tlsListener
         }
 
-        logStartup(ipv6Active: ipv6Active)
+        logStartup(ipv6Active: ipv6Active, httpsPort: tlsListener != nil ? httpsConfig?.port : nil)
     }
 
     public func stop() {
-        let state = lifecycleQueue.sync { () -> (NWListener?, NWListener?, CheckedContinuation<Void, Never>?) in
-            let currentState = (ipv4Listener, ipv6Listener, stopContinuation)
+        let state = lifecycleQueue.sync { () -> (NWListener?, NWListener?, NWListener?, CheckedContinuation<Void, Never>?) in
+            let currentState = (ipv4Listener, ipv6Listener, httpsListener, stopContinuation)
             ipv4Listener = nil
             ipv6Listener = nil
+            httpsListener = nil
             stopContinuation = nil
             return currentState
         }
 
         state.0?.cancel()
         state.1?.cancel()
-        state.2?.resume()
+        state.2?.cancel()
+        state.3?.resume()
     }
 
     public func run() async throws {
@@ -182,8 +197,10 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         continuation?.resume()
     }
 
-    private func logStartup(ipv6Active: Bool) {
-        httpLog.info("QuotaServer listening on \(self.host):\(self.port)\(ipv6Active ? " (IPv4 + IPv6)" : " (IPv4)")")
+    private func logStartup(ipv6Active: Bool, httpsPort: Int? = nil) {
+        var proto = ipv6Active ? "(IPv4 + IPv6)" : "(IPv4)"
+        if let httpsPort { proto += " + HTTPS:\(httpsPort)" }
+        httpLog.info("QuotaServer listening on \(self.host):\(self.port) \(proto)")
         httpLog.info("Endpoints:")
         httpLog.info("  GET /api/dashboard")
         httpLog.info("  GET /api/provider/:id")
@@ -205,7 +222,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
     // MARK: - Connection Handling
 
-    private func handleConnection(_ connection: NWConnection) async {
+    func handleConnection(_ connection: NWConnection) async {
         connection.start(queue: .global())
         guard let requestData = await receiveData(connection) else {
             connection.cancel()

@@ -250,6 +250,10 @@ struct ProxySettings: Codable, Equatable {
     var anthropicAPIKey: String
     var usePassthroughProxy: Bool
     var enableModelAliasMapping: Bool?
+    var enableHTTPS: Bool?
+    var httpsPort: Int?
+
+    var effectiveHTTPSPort: Int { httpsPort ?? (port + 1) }
 
     static var defaultOpenAI: ProxySettings {
         ProxySettings(
@@ -261,7 +265,8 @@ struct ProxySettings: Codable, Equatable {
             modelMapping: .openAIDefault,
             anthropicBaseURL: "https://api.anthropic.com",
             anthropicAPIKey: "", usePassthroughProxy: false,
-            enableModelAliasMapping: false
+            enableModelAliasMapping: false,
+            enableHTTPS: true, httpsPort: nil
         )
     }
 
@@ -275,7 +280,8 @@ struct ProxySettings: Codable, Equatable {
             modelMapping: .anthropicDefault,
             anthropicBaseURL: "https://api.anthropic.com",
             anthropicAPIKey: "", usePassthroughProxy: false,
-            enableModelAliasMapping: false
+            enableModelAliasMapping: false,
+            enableHTTPS: true, httpsPort: nil
         )
     }
 
@@ -294,6 +300,8 @@ struct ProxySettings: Codable, Equatable {
         anthropicAPIKey = config.anthropicAPIKey
         usePassthroughProxy = config.usePassthroughProxy
         enableModelAliasMapping = config.enableModelAliasMapping
+        enableHTTPS = config.enableHTTPS
+        httpsPort = config.httpsPort
     }
 
     init(
@@ -303,7 +311,8 @@ struct ProxySettings: Codable, Equatable {
         maxOutputTokens: Int, defaultModel: String,
         modelMapping: ProxyConfiguration.ModelMapping,
         anthropicBaseURL: String, anthropicAPIKey: String, usePassthroughProxy: Bool,
-        enableModelAliasMapping: Bool = false
+        enableModelAliasMapping: Bool = false,
+        enableHTTPS: Bool? = nil, httpsPort: Int? = nil
     ) {
         self.host = host
         self.port = port
@@ -319,6 +328,8 @@ struct ProxySettings: Codable, Equatable {
         self.anthropicAPIKey = anthropicAPIKey
         self.usePassthroughProxy = usePassthroughProxy
         self.enableModelAliasMapping = enableModelAliasMapping
+        self.enableHTTPS = enableHTTPS
+        self.httpsPort = httpsPort
     }
 
     var bindAddress: String { allowLAN ? "0.0.0.0" : host }
@@ -385,7 +396,9 @@ struct ProxySettings: Codable, Equatable {
             maxOutputTokens: maxOutputTokens,
             createdAt: metadata.createdAt,
             lastUsedAt: metadata.lastUsedAt,
-            enableModelAliasMapping: enableModelAliasMapping ?? false
+            enableModelAliasMapping: enableModelAliasMapping ?? false,
+            enableHTTPS: enableHTTPS ?? false,
+            httpsPort: httpsPort
         )
     }
 }

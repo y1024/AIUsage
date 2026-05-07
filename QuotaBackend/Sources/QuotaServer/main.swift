@@ -41,7 +41,15 @@ if let cfg = proxyConfig {
     startupLog.info("Claude Code Proxy: disabled")
 }
 
-let server = QuotaHTTPServer(host: host, port: port, proxyConfig: proxyConfig)
+var httpsConfig: HTTPSConfig?
+if ProcessInfo.processInfo.environment["ENABLE_HTTPS"] == "1",
+   let tlsPath = ProcessInfo.processInfo.environment["TLS_IDENTITY_PATH"] {
+    let httpsPort = Int(ProcessInfo.processInfo.environment["HTTPS_PORT"] ?? "") ?? (port + 1)
+    httpsConfig = HTTPSConfig(port: httpsPort, identityPath: tlsPath)
+    startupLog.info("HTTPS: enabled on port \(httpsPort)")
+}
+
+let server = QuotaHTTPServer(host: host, port: port, proxyConfig: proxyConfig, httpsConfig: httpsConfig)
 try await server.run()
 
 private func parseArgs() -> [String: String] {

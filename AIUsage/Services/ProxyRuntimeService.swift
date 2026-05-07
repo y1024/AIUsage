@@ -298,6 +298,17 @@ final class ProxyRuntimeService {
             }
         }
 
+        if config.enableHTTPS {
+            do {
+                try await TLSCertificateManager.shared.ensureCertificate()
+                environment["ENABLE_HTTPS"] = "1"
+                environment["TLS_IDENTITY_PATH"] = TLSCertificateManager.shared.identityFilePath
+                environment["HTTPS_PORT"] = "\(config.effectiveHTTPSPort)"
+            } catch {
+                proxyRuntimeLog.error("TLS certificate setup failed, HTTPS disabled: \(String(describing: error), privacy: .public)")
+            }
+        }
+
         guard let executablePath = await findQuotaServerExecutable() else {
             runtimeLog.error("QuotaServer executable not found while starting node \(config.name, privacy: .public)")
             throw ProxyRuntimeError.quotaServerNotFound
