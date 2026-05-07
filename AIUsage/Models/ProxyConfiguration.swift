@@ -33,6 +33,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
     var defaultModel: String
     var modelMapping: ModelMapping
     var maxOutputTokens: Int // 0 = no cap, pass through original value
+    var enableModelAliasMapping: Bool
     var createdAt: Date
     var lastUsedAt: Date?
 
@@ -207,7 +208,8 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         modelMapping: ModelMapping = .default,
         maxOutputTokens: Int = 0,
         createdAt: Date = Date(),
-        lastUsedAt: Date? = nil
+        lastUsedAt: Date? = nil,
+        enableModelAliasMapping: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -226,6 +228,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         self.defaultModel = defaultModel
         self.modelMapping = modelMapping
         self.maxOutputTokens = maxOutputTokens
+        self.enableModelAliasMapping = enableModelAliasMapping
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
     }
@@ -251,6 +254,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel) ?? ""
         modelMapping = try container.decode(ModelMapping.self, forKey: .modelMapping)
         maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens) ?? 0
+        enableModelAliasMapping = try container.decodeIfPresent(Bool.self, forKey: .enableModelAliasMapping) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
     }

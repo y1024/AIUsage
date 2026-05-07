@@ -50,6 +50,27 @@ extension QuotaHTTPServer {
             )
         }
 
+        // Parse request metadata and apply model alias mapping before building the upstream request
+        var isStreaming = false
+        var requestModel = "unknown"
+        var upstreamModel = "unknown"
+        if var json = try? JSONSerialization.jsonObject(with: mutableBody) as? [String: Any] {
+            isStreaming = json["stream"] as? Bool ?? false
+            requestModel = json["model"] as? String ?? "unknown"
+            upstreamModel = requestModel
+
+            if config.enableModelAliasMapping, requestModel != "unknown" {
+                let mapped = config.mapToUpstreamModel(requestModel)
+                if mapped != requestModel {
+                    upstreamModel = mapped
+                    json["model"] = mapped
+                    if let rewritten = try? JSONSerialization.data(withJSONObject: json) {
+                        mutableBody = rewritten
+                    }
+                }
+            }
+        }
+
         var upstreamReq = URLRequest(url: url)
         upstreamReq.httpMethod = request.method
         upstreamReq.httpBody = mutableBody
@@ -67,24 +88,14 @@ extension QuotaHTTPServer {
             upstreamReq.setValue("application/json", forHTTPHeaderField: "content-type")
         }
 
-        let isStreaming: Bool
-        let requestModel: String
-        if let json = try? JSONSerialization.jsonObject(with: mutableBody) as? [String: Any] {
-            isStreaming = json["stream"] as? Bool ?? false
-            requestModel = json["model"] as? String ?? "unknown"
-        } else {
-            isStreaming = false
-            requestModel = "unknown"
-        }
-
         if isStreaming {
-            await handlePassthroughStreaming(connection, upstreamRequest: upstreamReq, requestModel: requestModel, startTime: startTime)
+            await handlePassthroughStreaming(connection, upstreamRequest: upstreamReq, requestModel: requestModel, upstreamModel: upstreamModel, startTime: startTime)
         } else {
-            await handlePassthroughNonStreaming(connection, upstreamRequest: upstreamReq, requestModel: requestModel, startTime: startTime)
+            await handlePassthroughNonStreaming(connection, upstreamRequest: upstreamReq, requestModel: requestModel, upstreamModel: upstreamModel, startTime: startTime)
         }
     }
 
-    func handlePassthroughNonStreaming(_ connection: NWConnection, upstreamRequest: URLRequest, requestModel: String, startTime: Date) async {
+    func handlePassthroughNonStreaming(_ connection: NWConnection, upstreamRequest: URLRequest, requestModel: String, upstreamModel: String, startTime: Date) async {
         do {
             let (data, response) = try await URLSession.shared.data(for: upstreamRequest)
             let httpResp = response as? HTTPURLResponse
@@ -122,6 +133,7 @@ extension QuotaHTTPServer {
 
             emitPassthroughLog(
                 model: requestModel,
+                upstreamModel: upstreamModel,
                 usage: usage,
                 responseTimeMs: Int(elapsed),
                 success: isSuccess,
@@ -137,6 +149,7 @@ extension QuotaHTTPServer {
             let elapsed = Date().timeIntervalSince(startTime) * 1000
             emitPassthroughLog(
                 model: requestModel,
+                upstreamModel: upstreamModel,
                 usage: [:],
                 responseTimeMs: Int(elapsed),
                 success: false,
@@ -151,7 +164,7 @@ extension QuotaHTTPServer {
         }
     }
 
-    func handlePassthroughStreaming(_ connection: NWConnection, upstreamRequest: URLRequest, requestModel: String, startTime: Date) async {
+    func handlePassthroughStreaming(_ connection: NWConnection, upstreamRequest: URLRequest, requestModel: String, upstreamModel: String, startTime: Date) async {
         let streamer = StreamingResponse(connection: connection)
 
         do {
@@ -229,6 +242,7 @@ extension QuotaHTTPServer {
             ]
             emitPassthroughLog(
                 model: requestModel,
+                upstreamModel: upstreamModel,
                 usage: usageDict,
                 responseTimeMs: Int(elapsed),
                 success: isSuccess,
@@ -242,6 +256,7 @@ extension QuotaHTTPServer {
             let elapsed = Date().timeIntervalSince(startTime) * 1000
             emitPassthroughLog(
                 model: requestModel,
+                upstreamModel: upstreamModel,
                 usage: [:],
                 responseTimeMs: Int(elapsed),
                 success: false,
@@ -297,6 +312,7 @@ extension QuotaHTTPServer {
 
     func emitPassthroughLog(
         model: String,
+        upstreamModel: String? = nil,
         usage: [String: Any],
         responseTimeMs: Int,
         success: Bool,
@@ -312,7 +328,7 @@ extension QuotaHTTPServer {
         var log: [String: Any] = [
             "type": "proxy_request_log",
             "claude_model": model,
-            "upstream_model": model,
+            "upstream_model": upstreamModel ?? model,
             "success": success,
             "response_time_ms": responseTimeMs,
             "input_tokens": inputTokens,

@@ -275,6 +275,12 @@ final class ProxyRuntimeService {
                 || upstreamLower.contains("a-ocnfniawgw.cn-shanghai.fcapp.run") {
                 environment["ENABLE_THINKING_REWRITE"] = "1"
             }
+            if config.enableModelAliasMapping {
+                environment["ENABLE_MODEL_ALIAS_MAPPING"] = "1"
+                environment["BIG_MODEL"] = config.modelMapping.bigModel.name
+                environment["MIDDLE_MODEL"] = config.modelMapping.middleModel.name
+                environment["SMALL_MODEL"] = config.modelMapping.smallModel.name
+            }
         } else {
             environment["OPENAI_API_KEY"] = config.upstreamAPIKey
             environment["OPENAI_BASE_URL"] = config.normalizedUpstreamBaseURL

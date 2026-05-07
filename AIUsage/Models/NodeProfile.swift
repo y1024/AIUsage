@@ -249,6 +249,7 @@ struct ProxySettings: Codable, Equatable {
     var anthropicBaseURL: String
     var anthropicAPIKey: String
     var usePassthroughProxy: Bool
+    var enableModelAliasMapping: Bool?
 
     static var defaultOpenAI: ProxySettings {
         ProxySettings(
@@ -259,7 +260,8 @@ struct ProxySettings: Codable, Equatable {
             maxOutputTokens: 0, defaultModel: "gpt-5.4",
             modelMapping: .openAIDefault,
             anthropicBaseURL: "https://api.anthropic.com",
-            anthropicAPIKey: "", usePassthroughProxy: false
+            anthropicAPIKey: "", usePassthroughProxy: false,
+            enableModelAliasMapping: false
         )
     }
 
@@ -272,7 +274,8 @@ struct ProxySettings: Codable, Equatable {
             maxOutputTokens: 0, defaultModel: "claude-sonnet-4-6",
             modelMapping: .anthropicDefault,
             anthropicBaseURL: "https://api.anthropic.com",
-            anthropicAPIKey: "", usePassthroughProxy: false
+            anthropicAPIKey: "", usePassthroughProxy: false,
+            enableModelAliasMapping: false
         )
     }
 
@@ -290,6 +293,7 @@ struct ProxySettings: Codable, Equatable {
         anthropicBaseURL = config.anthropicBaseURL
         anthropicAPIKey = config.anthropicAPIKey
         usePassthroughProxy = config.usePassthroughProxy
+        enableModelAliasMapping = config.enableModelAliasMapping
     }
 
     init(
@@ -298,7 +302,8 @@ struct ProxySettings: Codable, Equatable {
         upstreamAPIKey: String, expectedClientKey: String,
         maxOutputTokens: Int, defaultModel: String,
         modelMapping: ProxyConfiguration.ModelMapping,
-        anthropicBaseURL: String, anthropicAPIKey: String, usePassthroughProxy: Bool
+        anthropicBaseURL: String, anthropicAPIKey: String, usePassthroughProxy: Bool,
+        enableModelAliasMapping: Bool = false
     ) {
         self.host = host
         self.port = port
@@ -313,6 +318,7 @@ struct ProxySettings: Codable, Equatable {
         self.anthropicBaseURL = anthropicBaseURL
         self.anthropicAPIKey = anthropicAPIKey
         self.usePassthroughProxy = usePassthroughProxy
+        self.enableModelAliasMapping = enableModelAliasMapping
     }
 
     var bindAddress: String { allowLAN ? "0.0.0.0" : host }
@@ -378,7 +384,8 @@ struct ProxySettings: Codable, Equatable {
             modelMapping: modelMapping,
             maxOutputTokens: maxOutputTokens,
             createdAt: metadata.createdAt,
-            lastUsedAt: metadata.lastUsedAt
+            lastUsedAt: metadata.lastUsedAt,
+            enableModelAliasMapping: enableModelAliasMapping ?? false
         )
     }
 }

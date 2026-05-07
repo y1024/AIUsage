@@ -34,6 +34,7 @@ public struct ClaudeProxyConfiguration: Sendable {
     public let middleModel: String
     public let smallModel: String
     public let maxOutputTokens: Int?
+    public let enableModelAliasMapping: Bool
     public let requestTimeout: TimeInterval
     public let customHeaders: [String: String]
     public let interceptor: (any PassthroughInterceptor)?
@@ -50,6 +51,7 @@ public struct ClaudeProxyConfiguration: Sendable {
         middleModel: String = "gpt-4o-mini",
         smallModel: String = "gpt-3.5-turbo",
         maxOutputTokens: Int? = nil,
+        enableModelAliasMapping: Bool = false,
         requestTimeout: TimeInterval = 60,
         customHeaders: [String: String] = [:],
         interceptor: (any PassthroughInterceptor)? = nil
@@ -67,6 +69,7 @@ public struct ClaudeProxyConfiguration: Sendable {
         self.middleModel = middleModel
         self.smallModel = smallModel
         self.maxOutputTokens = maxOutputTokens
+        self.enableModelAliasMapping = enableModelAliasMapping
         self.requestTimeout = requestTimeout
         self.customHeaders = customHeaders
         self.interceptor = interceptor
@@ -163,6 +166,11 @@ public struct ClaudeProxyConfiguration: Sendable {
 
             let enableRewrite = ProcessInfo.processInfo
                 .environment["ENABLE_THINKING_REWRITE"] == "1"
+            let aliasMapping = ProcessInfo.processInfo
+                .environment["ENABLE_MODEL_ALIAS_MAPPING"] == "1"
+            let bigModel = ProcessInfo.processInfo.environment["BIG_MODEL"] ?? "claude-opus-4-6"
+            let middleModel = ProcessInfo.processInfo.environment["MIDDLE_MODEL"] ?? "claude-sonnet-4-6"
+            let smallModel = ProcessInfo.processInfo.environment["SMALL_MODEL"] ?? "claude-haiku-4-5"
 
             return ClaudeProxyConfiguration(
                 enabled: true,
@@ -170,6 +178,10 @@ public struct ClaudeProxyConfiguration: Sendable {
                 upstreamBaseURL: baseURL,
                 upstreamAPIKey: apiKey,
                 expectedClientKey: clientKey,
+                bigModel: bigModel,
+                middleModel: middleModel,
+                smallModel: smallModel,
+                enableModelAliasMapping: aliasMapping,
                 interceptor: enableRewrite ? AnyRouterInterceptor() : nil
             )
         }

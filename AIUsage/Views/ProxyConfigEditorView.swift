@@ -370,6 +370,23 @@ struct ProxyConfigEditorView: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
                 }
 
+                Divider()
+
+                Toggle(isOn: Binding(
+                    get: { profile.metadata.proxy.enableModelAliasMapping ?? false },
+                    set: { profile.metadata.proxy.enableModelAliasMapping = $0 }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Model Alias Mapping", "模型别名映射"))
+                            .font(.subheadline.weight(.semibold))
+                        Text(L("Replace Opus/Sonnet/Haiku aliases in the request with model slot values before forwarding. Useful when the upstream supports non-Claude models via Anthropic API format.",
+                               "转发前将请求中的 Opus/Sonnet/Haiku 别名替换为模型槽位中配置的值。适用于上游通过 Anthropic API 格式支持非 Claude 模型的场景。"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle.fill").foregroundStyle(.teal)
                     Text(L("ANTHROPIC_BASE_URL will point to the local proxy. Requests are forwarded to the upstream API as-is.",
