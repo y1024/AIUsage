@@ -91,6 +91,24 @@
 
 灵感参考自 [`CodexBar`](https://github.com/steipete/CodexBar) 与 [`Quotio`](https://github.com/nguyenphutrong/quotio)。
 
+## 赞助商
+
+<p align="center">
+  <a href="https://sucloud.vip">
+    <img src="docs/images/sucloud-logo.png" alt="Sucloud" width="180">
+  </a>
+</p>
+
+感谢 [Sucloud](https://sucloud.vip) 对 AIUsage 的支持。Sucloud 是一个 AI 接口聚合管理平台，支持按量计费接入多种 AI 模型与服务。
+
+## 支持作者
+
+如果 AIUsage 对你有帮助，欢迎请作者喝一杯咖啡。你的支持会帮助项目持续维护与改进。
+
+<p align="center">
+  <img src="docs/images/donate-qrcode.jpg" alt="打赏二维码" width="220">
+</p>
+
 ## 友链
 
 - [Linux.do 社区](https://linux.do)

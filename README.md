@@ -91,6 +91,24 @@ Use Claude Code CLI with any OpenAI-compatible model, or transparently log Anthr
 
 Inspired by [`CodexBar`](https://github.com/steipete/CodexBar) and [`Quotio`](https://github.com/nguyenphutrong/quotio).
 
+## Sponsor
+
+<p align="center">
+  <a href="https://sucloud.vip">
+    <img src="docs/images/sucloud-logo.png" alt="Sucloud" width="180">
+  </a>
+</p>
+
+Thanks to [Sucloud](https://sucloud.vip) for supporting AIUsage. Sucloud is an AI API aggregation and management platform with pay-as-you-go access to a variety of AI models and services.
+
+## Support the Author
+
+If AIUsage helps you, consider buying the author a coffee. Your support helps keep the project maintained and improved.
+
+<p align="center">
+  <img src="docs/images/donate-qrcode.jpg" alt="Donation QR code" width="220">
+</p>
+
 ## Friendly Links
 
 - [Linux.do Community](https://linux.do)
