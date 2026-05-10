@@ -296,7 +296,7 @@ private func mapClaudeBlocks(
             items.append(.toolCall(try CanonicalToolCall(
                 id: toolUse.id,
                 name: toolUse.name,
-                inputJSON: canonicalJSONString(from: toolUse.input.mapValues(\.value), context: "Claude tool_use")
+                inputJSON: canonicalJSONString(from: toolUse.input.mapValues(\.foundationValue), context: "Claude tool_use")
             )))
         case .toolResult(let toolResult):
             flushMessageIfNeeded()

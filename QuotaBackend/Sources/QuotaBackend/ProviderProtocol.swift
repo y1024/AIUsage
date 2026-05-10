@@ -202,6 +202,19 @@ public struct AnyCodable: Codable, @unchecked Sendable {
         self.value = value
     }
 
+    /// Recursively unwraps nested `AnyCodable` into plain Foundation types
+    /// that `JSONSerialization` can handle.
+    public var foundationValue: Any {
+        switch value {
+        case let dict as [String: AnyCodable]:
+            return dict.mapValues(\.foundationValue)
+        case let array as [AnyCodable]:
+            return array.map(\.foundationValue)
+        default:
+            return value
+        }
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let v = try? container.decode(Bool.self) { value = v }

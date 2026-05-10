@@ -1138,10 +1138,11 @@ private func decodeFromAnyCodable<T: Decodable>(
     _ payload: AnyCodable,
     as type: T.Type
 ) throws -> T {
-    guard JSONSerialization.isValidJSONObject(payload.value) else {
+    let unwrapped = payload.foundationValue
+    guard JSONSerialization.isValidJSONObject(unwrapped) else {
         throw CanonicalMappingError.invalidJSONObject("Canonical raw extension decode")
     }
-    let data = try JSONSerialization.data(withJSONObject: payload.value)
+    let data = try JSONSerialization.data(withJSONObject: unwrapped)
     return try JSONDecoder().decode(type, from: data)
 }
 

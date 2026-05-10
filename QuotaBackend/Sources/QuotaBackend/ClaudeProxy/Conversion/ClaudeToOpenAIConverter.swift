@@ -159,7 +159,7 @@ public struct ClaudeToOpenAIConverter {
     }
 
     private func convertToolUseToToolCall(_ toolUse: ClaudeToolUseBlock) throws -> OpenAIToolCall {
-        let argumentsData = try JSONSerialization.data(withJSONObject: toolUse.input.mapValues { $0.value })
+        let argumentsData = try JSONSerialization.data(withJSONObject: toolUse.input.mapValues(\.foundationValue))
         let argumentsString = String(data: argumentsData, encoding: .utf8) ?? "{}"
 
         return OpenAIToolCall(
