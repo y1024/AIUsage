@@ -25,9 +25,11 @@
 </p>
 
 <p align="center">
+  <sup>赞助商</sup><br>
   <a href="https://sucloud.vip">
-    <img src="docs/images/sponsor-banner-zh.svg" alt="赞助商 Sucloud" width="560">
-  </a>
+    <img src="docs/images/sucloud-logo.png" alt="Sucloud" width="180">
+  </a><br>
+  <sub>500+ AI 模型 · 文本/图像/视频/音频全模态覆盖 · 顶级模型全接入 · 按量计费</sub>
 </p>
 
 <p align="center">
@@ -126,12 +128,13 @@
 </p>
 
 <p align="center">
-  <a href="https://sucloud.vip"><strong>Sucloud</strong></a> — 为国内开发者提供稳定高效的生产力基座。<br>
-  支持 Claude / Claude Code / Codex / GPT / Gemini 等多模型按量计费，人民币充值，无需海外卡。
+  <a href="https://sucloud.vip"><strong>Sucloud</strong></a> — 为国内开发者提供稳定高效的 AI 生产力基座。<br>
+  500+ 模型全模态覆盖（文本/图像/视频/音频），Claude、GPT、Gemini 等顶级模型全部接入。<br>
+  人民币充值，无需海外卡，0.7¥ = $1 超高性价比。
 </p>
 
 <p align="center">
-  <img alt="模型" src="https://img.shields.io/badge/Claude%20%7C%20Codex%20%7C%20GPT%20%7C%20Gemini-多模型接入-6366f1?style=flat-square">
+  <img alt="模型" src="https://img.shields.io/badge/500%2B%20模型-全模态覆盖-6366f1?style=flat-square">
   <img alt="费率" src="https://img.shields.io/badge/0.7%C2%A5%20%3D%20%241-按量计费-22c55e?style=flat-square">
   <img alt="福利" src="https://img.shields.io/badge/%240.2-注册即送-f59e0b?style=flat-square">
 </p>

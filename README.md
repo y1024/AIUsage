@@ -25,9 +25,11 @@
 </p>
 
 <p align="center">
+  <sup>Sponsored by</sup><br>
   <a href="https://sucloud.vip">
-    <img src="docs/images/sponsor-banner.svg" alt="Sponsored by Sucloud" width="560">
-  </a>
+    <img src="docs/images/sucloud-logo.png" alt="Sucloud" width="180">
+  </a><br>
+  <sub>500+ AI models · Text, image, video & audio · Top models included · Pay-as-you-go</sub>
 </p>
 
 <p align="center">
@@ -126,12 +128,13 @@ Inspired by [`CodexBar`](https://github.com/steipete/CodexBar) and [`Quotio`](ht
 </p>
 
 <p align="center">
-  <a href="https://sucloud.vip"><strong>Sucloud</strong></a> — AI API aggregation platform for developers.<br>
-  Pay-as-you-go access to Claude, Claude Code, Codex, GPT, Gemini and more. No overseas card required.
+  <a href="https://sucloud.vip"><strong>Sucloud</strong></a> — AI API aggregation platform with 500+ models.<br>
+  Full modality coverage (text, image, video, audio) including Claude, GPT, Gemini and more.<br>
+  RMB payment supported, no overseas card required.
 </p>
 
 <p align="center">
-  <img alt="Models" src="https://img.shields.io/badge/Claude%20%7C%20Codex%20%7C%20GPT%20%7C%20Gemini-multi--model-6366f1?style=flat-square">
+  <img alt="Models" src="https://img.shields.io/badge/500%2B%20Models-full%20modality-6366f1?style=flat-square">
   <img alt="Pricing" src="https://img.shields.io/badge/0.7%C2%A5%20%3D%20%241-pay--as--you--go-22c55e?style=flat-square">
   <img alt="Bonus" src="https://img.shields.io/badge/%240.2-welcome%20bonus-f59e0b?style=flat-square">
 </p>
