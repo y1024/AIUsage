@@ -1,11 +1,14 @@
-# AIUsage
-
 <p align="center">
-  <img src="docs/images/app-icon.png" alt="AIUsage 图标" width="120">
+  <img src="docs/images/app-icon.png" alt="AIUsage 图标" width="128">
 </p>
 
+<h1 align="center">AIUsage</h1>
+
+<h4 align="center">AI 订阅一站式看板</h4>
+
 <p align="center">
-  <strong>AI 订阅一站式看板 — 额度、费用、多账号、Claude Code 代理，尽在掌控。</strong>
+  额度、费用、多账号、Claude Code 代理，尽在掌控。<br>
+  内置 Claude Code 代理，接入任意 OpenAI 兼容模型。
 </p>
 
 <p align="center">
@@ -13,15 +16,36 @@
 </p>
 
 <p align="center">
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-14%2B-111827?style=flat-square&logo=apple&logoColor=white">
-  <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-Native%20App-f97316?style=flat-square&logo=swift&logoColor=white">
-  <img alt="版本" src="https://img.shields.io/badge/version-0.6.3-22c55e?style=flat-square">
-  <img alt="许可证" src="https://img.shields.io/badge/license-Apache%202.0-0ea5e9?style=flat-square">
+  <a href="https://github.com/sylearn/AIUsage/releases"><img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-111827?style=flat-square&logo=apple&logoColor=white"></a>
+  <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-Native-f97316?style=flat-square&logo=swift&logoColor=white">
+  <a href="https://github.com/sylearn/AIUsage/releases/latest"><img alt="版本" src="https://img.shields.io/github/v/release/sylearn/AIUsage?style=flat-square&color=22c55e&label=release"></a>
+  <a href="LICENSE"><img alt="许可证" src="https://img.shields.io/badge/license-Apache%202.0-0ea5e9?style=flat-square"></a>
+  <a href="https://github.com/sylearn/AIUsage/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/sylearn/AIUsage?style=flat-square&color=f59e0b"></a>
+  <a href="https://github.com/sylearn/AIUsage/releases"><img alt="下载量" src="https://img.shields.io/github/downloads/sylearn/AIUsage/total?style=flat-square&color=6366f1&label=downloads"></a>
+</p>
+
+<p align="center">
+  <a href="https://sucloud.vip">
+    <img src="docs/images/sponsor-banner-zh.svg" alt="赞助商 Sucloud" width="560">
+  </a>
 </p>
 
 <p align="center">
   <img src="docs/images/dashboard-overview.png" alt="AIUsage 仪表盘" width="100%">
 </p>
+
+---
+
+## 目录
+
+- [功能](#功能)
+- [界面预览](#界面预览)
+- [安装](#安装)
+- [Claude Code 代理](#claude-code-代理)
+- [致谢](#致谢)
+- [赞助商](#赞助商)
+- [支持作者](#支持作者)
+- [许可证](#许可证)
 
 ## 功能
 
@@ -87,6 +111,8 @@
 
 **快速开始：** 打开 AIUsage → Claude Code 代理 → 新建节点 → 配置 → 激活。`~/.claude/settings.json` 自动更新。
 
+---
+
 ## 致谢
 
 灵感参考自 [`CodexBar`](https://github.com/steipete/CodexBar) 与 [`Quotio`](https://github.com/nguyenphutrong/quotio)。
@@ -99,7 +125,16 @@
   </a>
 </p>
 
-感谢 [Sucloud](https://sucloud.vip) 对 AIUsage 的支持。Sucloud 是一个 AI 接口聚合管理平台，支持按量计费接入多种 AI 模型与服务。
+<p align="center">
+  <a href="https://sucloud.vip"><strong>Sucloud</strong></a> — 为国内开发者提供稳定高效的生产力基座。<br>
+  支持 Claude / Claude Code / Codex / GPT / Gemini 等多模型按量计费，人民币充值，无需海外卡。
+</p>
+
+<p align="center">
+  <img alt="模型" src="https://img.shields.io/badge/Claude%20%7C%20Codex%20%7C%20GPT%20%7C%20Gemini-多模型接入-6366f1?style=flat-square">
+  <img alt="费率" src="https://img.shields.io/badge/0.7%C2%A5%20%3D%20%241-按量计费-22c55e?style=flat-square">
+  <img alt="福利" src="https://img.shields.io/badge/%240.2-注册即送-f59e0b?style=flat-square">
+</p>
 
 ## 支持作者
 

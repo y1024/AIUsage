@@ -1,11 +1,14 @@
-# AIUsage
-
 <p align="center">
-  <img src="docs/images/app-icon.png" alt="AIUsage icon" width="120">
+  <img src="docs/images/app-icon.png" alt="AIUsage icon" width="128">
 </p>
 
+<h1 align="center">AIUsage</h1>
+
+<h4 align="center">One dashboard for all your AI subscriptions</h4>
+
 <p align="center">
-  <strong>One dashboard for all your AI subscriptions — quotas, costs, accounts, and Claude Code proxy.</strong>
+  Track quotas, costs, and accounts across 10+ AI providers.<br>
+  Built-in Claude Code proxy for any OpenAI-compatible model.
 </p>
 
 <p align="center">
@@ -13,27 +16,48 @@
 </p>
 
 <p align="center">
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-14%2B-111827?style=flat-square&logo=apple&logoColor=white">
-  <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-Native%20App-f97316?style=flat-square&logo=swift&logoColor=white">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.6.3-22c55e?style=flat-square">
-  <img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-0ea5e9?style=flat-square">
+  <a href="https://github.com/sylearn/AIUsage/releases"><img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-111827?style=flat-square&logo=apple&logoColor=white"></a>
+  <img alt="SwiftUI" src="https://img.shields.io/badge/SwiftUI-Native-f97316?style=flat-square&logo=swift&logoColor=white">
+  <a href="https://github.com/sylearn/AIUsage/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/sylearn/AIUsage?style=flat-square&color=22c55e&label=release"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-0ea5e9?style=flat-square"></a>
+  <a href="https://github.com/sylearn/AIUsage/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/sylearn/AIUsage?style=flat-square&color=f59e0b"></a>
+  <a href="https://github.com/sylearn/AIUsage/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/sylearn/AIUsage/total?style=flat-square&color=6366f1&label=downloads"></a>
+</p>
+
+<p align="center">
+  <a href="https://sucloud.vip">
+    <img src="docs/images/sponsor-banner.svg" alt="Sponsored by Sucloud" width="560">
+  </a>
 </p>
 
 <p align="center">
   <img src="docs/images/dashboard-overview_en.png" alt="AIUsage dashboard" width="100%">
 </p>
 
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Preview](#preview)
+- [Install](#install)
+- [Claude Code Proxy](#claude-code-proxy)
+- [Acknowledgements](#acknowledgements)
+- [Sponsor](#sponsor)
+- [Support the Author](#support-the-author)
+- [License](#license)
+
 ## Features
 
 | Feature | Description |
 | --- | --- |
-| **10+ AI providers** | Codex, Copilot, Cursor, Antigravity, Kiro, Warp, Gemini CLI, Amp, Droid, Claude Code — one dashboard |
+| **10+ AI Providers** | Codex, Copilot, Cursor, Antigravity, Kiro, Warp, Gemini CLI, Amp, Droid, Claude Code — one dashboard |
 | **Multi-account** | Multiple accounts per provider, independent refresh, one-click CLI switching |
-| **Claude Code stats** | Per-model cost & token breakdown, trend charts, time-period analysis |
-| **Claude Code proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
-| **Proxy stats** | Per-model cost/token trends, distribution charts, configurable log retention |
-| **Menu bar** | Multi-account status bar icons with quota/cost metrics, quick-glance popover with summary stats, colored progress bars, and cost tracking |
-| **Credential vault** | macOS Keychain storage for managed credentials |
+| **Claude Code Stats** | Per-model cost & token breakdown, trend charts, time-period analysis |
+| **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
+| **Proxy Stats** | Per-model cost/token trends, distribution charts, configurable log retention |
+| **Menu Bar** | Multi-account status bar icons, quota/cost metrics, quick-glance popover, colored progress bars |
+| **Credential Vault** | macOS Keychain storage for all managed credentials |
 
 ## Preview
 
@@ -44,31 +68,31 @@
   </tr>
   <tr>
     <td align="center"><strong>Dashboard</strong></td>
-    <td align="center"><strong>Provider & multi-account monitoring</strong></td>
+    <td align="center"><strong>Provider & Multi-account Monitoring</strong></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/claude-code-stats_en.png" alt="Claude Code stats"></td>
     <td width="50%"><img src="docs/images/codex-account-detail_en.png" alt="Account detail"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Claude Code stats</strong></td>
-    <td align="center"><strong>Account detail</strong></td>
+    <td align="center"><strong>Claude Code Stats</strong></td>
+    <td align="center"><strong>Account Detail</strong></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/Claude-Code-Proxy-1_en.png" alt="Proxy management"></td>
     <td width="50%"><img src="docs/images/Claude-Code-Proxy-2_en.png" alt="Proxy configuration"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Proxy node management</strong></td>
-    <td align="center"><strong>Proxy configuration</strong></td>
+    <td align="center"><strong>Proxy Node Management</strong></td>
+    <td align="center"><strong>Proxy Configuration</strong></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/proxy-stats_en.png" alt="Proxy stats"></td>
     <td width="50%"><img src="docs/images/menu_bar_en.png" alt="Menu bar"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Proxy statistics</strong></td>
-    <td align="center"><strong>Menu bar</strong></td>
+    <td align="center"><strong>Proxy Statistics</strong></td>
+    <td align="center"><strong>Menu Bar</strong></td>
   </tr>
 </table>
 
@@ -87,6 +111,8 @@ Use Claude Code CLI with any OpenAI-compatible model, or transparently log Anthr
 
 **Quick start:** Open AIUsage → Claude Code Proxy → New Node → Configure → Activate. Settings are written to `~/.claude/settings.json` automatically.
 
+---
+
 ## Acknowledgements
 
 Inspired by [`CodexBar`](https://github.com/steipete/CodexBar) and [`Quotio`](https://github.com/nguyenphutrong/quotio).
@@ -99,7 +125,16 @@ Inspired by [`CodexBar`](https://github.com/steipete/CodexBar) and [`Quotio`](ht
   </a>
 </p>
 
-Thanks to [Sucloud](https://sucloud.vip) for supporting AIUsage. Sucloud is an AI API aggregation and management platform with pay-as-you-go access to a variety of AI models and services.
+<p align="center">
+  <a href="https://sucloud.vip"><strong>Sucloud</strong></a> — AI API aggregation platform for developers.<br>
+  Pay-as-you-go access to Claude, Claude Code, Codex, GPT, Gemini and more. No overseas card required.
+</p>
+
+<p align="center">
+  <img alt="Models" src="https://img.shields.io/badge/Claude%20%7C%20Codex%20%7C%20GPT%20%7C%20Gemini-multi--model-6366f1?style=flat-square">
+  <img alt="Pricing" src="https://img.shields.io/badge/0.7%C2%A5%20%3D%20%241-pay--as--you--go-22c55e?style=flat-square">
+  <img alt="Bonus" src="https://img.shields.io/badge/%240.2-welcome%20bonus-f59e0b?style=flat-square">
+</p>
 
 ## Support the Author
 
