@@ -1,9 +1,10 @@
 import SwiftUI
-import Charts
 
 // MARK: - Main View
 
 struct CostTrackingView: View {
+    static let allSourcesId = "__all-local-token-sources__"
+
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @AppStorage(DefaultsKey.ccStatsMetric) var selectedMetric: CostMetric = .usd
@@ -15,23 +16,74 @@ struct CostTrackingView: View {
     @State var expandedModels: Set<String> = []
     @State var contentWidth: CGFloat = 0
     @State var chartHoverDate: Date?
+    @State var selectedCostProviderId: String = ""
+    @State var aggregateCostSummary: CostSummary?
+    @State var aggregateCostSignature: String = ""
+    @State var derivedCostSignature: String = ""
+    @State var cachedAggregateChartPoints: [CostTimelinePoint] = []
+    @State var cachedSortedChartSeries: [ChartSeriesDescriptor] = []
+    @State var cachedModelColorMap: [String: Color] = [:]
+    @State var cachedDistributionModels: [ModelCostBreakdown] = []
+    @State var cachedRankedDistributionModels: [ModelCostBreakdown] = []
+    @State var cachedSparklineValuesByModel: [String: [Double]] = [:]
 
     var selectedGranularity: CostGranularity { chartTimeRange.isHourly ? .hourly : .daily }
 
     var costProviders: [ProviderData] {
-        refreshCoordinator.providers.filter { $0.category == "local-cost" }
+        refreshCoordinator.providers.filter { provider in
+            provider.category == "local-cost"
+                || appState.providerCatalogItem(for: provider.baseProviderId)?.kind == .costTracking
+        }
     }
 
     var primaryProvider: ProviderData? {
-        costProviders.first
+        if selectedCostProviderId == Self.allSourcesId { return nil }
+        return costProviders.first { $0.id == selectedCostProviderId } ?? costProviders.first
     }
 
     var costSummary: CostSummary? {
-        primaryProvider?.costSummary
+        if selectedCostProviderId == Self.allSourcesId, costProviders.count > 1 {
+            return aggregateCostSummary
+        }
+        return primaryProvider?.costSummary
     }
 
-    var models: [ModelCostBreakdown] {
-        distributionModels
+    var selectedCostIncludesCodex: Bool {
+        if selectedCostProviderId == Self.allSourcesId, costProviders.count > 1 {
+            return costProviders.contains { $0.baseProviderId == "codex-cost" }
+        }
+        return primaryProvider?.baseProviderId == "codex-cost"
+    }
+
+    var costProviderSummarySignature: String {
+        costProviders.map { provider in
+            guard let summary = provider.costSummary else {
+                return [
+                    provider.id,
+                    provider.status.rawValue,
+                    provider.fetchedAt ?? "",
+                    "empty"
+                ].joined(separator: ":")
+            }
+
+            return [
+                provider.id,
+                provider.status.rawValue,
+                provider.fetchedAt ?? "",
+                summary.today.signatureFragment,
+                summary.week.signatureFragment,
+                summary.month.signatureFragment,
+                summary.overall.signatureFragment,
+                "\(summary.timeline?.hourly.count ?? 0)",
+                "\(summary.timeline?.daily.count ?? 0)",
+                "\(summary.modelBreakdownToday?.count ?? 0)",
+                "\(summary.modelBreakdownWeek?.count ?? 0)",
+                "\(summary.modelBreakdown?.count ?? 0)",
+                "\(summary.modelBreakdownOverall?.count ?? 0)",
+                "\(summary.modelTimelines?.count ?? 0)"
+            ].joined(separator: ":")
+        }
+        .joined(separator: "|")
     }
 
     var body: some View {
@@ -41,6 +93,7 @@ struct CostTrackingView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 16) {
+                        sourceSelector
                         summaryStrip
                         chartSection
                         insightPanels
@@ -59,6 +112,35 @@ struct CostTrackingView: View {
         .sheet(item: $detailProvider) { provider in
             ProviderDetailView(provider: provider)
         }
+        .onAppear {
+            normalizeInitialCostRangeDefaultsIfNeeded()
+            ensureSelectedCostProvider()
+            refreshAggregateCostSummaryIfNeeded(force: true)
+            refreshDerivedCostCachesIfNeeded(force: true)
+            requestCodexFullHistoryImportIfNeeded()
+        }
+        .onChange(of: costProviders.map(\.id)) { _, _ in
+            ensureSelectedCostProvider()
+            refreshAggregateCostSummaryIfNeeded(force: true)
+            refreshDerivedCostCachesIfNeeded(force: true)
+            requestCodexFullHistoryImportIfNeeded()
+        }
+        .onChange(of: costProviderSummarySignature) { _, _ in
+            refreshAggregateCostSummaryIfNeeded()
+            refreshDerivedCostCachesIfNeeded(force: true)
+        }
+        .onChange(of: selectedMetric) { _, _ in
+            refreshDerivedCostCachesIfNeeded(force: true)
+        }
+        .onChange(of: chartTimeRange) { _, _ in
+            refreshDerivedCostCachesIfNeeded(force: true)
+        }
+        .onChange(of: distributionMetric) { _, _ in
+            refreshDerivedCostCachesIfNeeded(force: true)
+        }
+        .onChange(of: distributionPeriod) { _, _ in
+            refreshDerivedCostCachesIfNeeded(force: true)
+        }
         .onPreferenceChange(CostTrackingContentWidthPreferenceKey.self) { newWidth in
             // Threshold avoids rebuilding the whole body on sub-pixel width jitter
             // during scroll or expand/collapse. 8pt is well below the 1080pt
@@ -67,6 +149,140 @@ struct CostTrackingView: View {
                 contentWidth = newWidth
             }
         }
+    }
+
+    @ViewBuilder
+    var sourceSelector: some View {
+        if costProviders.count > 1 {
+            HStack(spacing: 10) {
+                Text(L("Local Source", "本地来源"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: Binding(
+                    get: { selectedCostProviderId.isEmpty ? defaultCostProviderSelection : selectedCostProviderId },
+                    set: { newValue in
+                        selectedCostProviderId = newValue
+                        selectedModels.removeAll()
+                        expandedModels.removeAll()
+                        chartHoverDate = nil
+                        if newValue == Self.allSourcesId {
+                            refreshAggregateCostSummaryIfNeeded()
+                        }
+                        refreshDerivedCostCachesIfNeeded(force: true)
+                        requestCodexFullHistoryImportIfNeeded()
+                    }
+                )) {
+                    Text(L("All Sources", "综合")).tag(Self.allSourcesId)
+                    ForEach(costProviders) { provider in
+                        Text(provider.label).tag(provider.id)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Spacer()
+            }
+        }
+    }
+
+    var defaultCostProviderSelection: String {
+        costProviders.count > 1 ? Self.allSourcesId : (costProviders.first?.id ?? "")
+    }
+
+    func ensureSelectedCostProvider() {
+        guard !costProviders.isEmpty else {
+            selectedCostProviderId = ""
+            return
+        }
+        let isValidAggregate = costProviders.count > 1 && selectedCostProviderId == Self.allSourcesId
+        let isValidProvider = costProviders.contains { $0.id == selectedCostProviderId }
+        if !isValidAggregate && !isValidProvider {
+            selectedCostProviderId = defaultCostProviderSelection
+            selectedModels.removeAll()
+            expandedModels.removeAll()
+            chartHoverDate = nil
+            refreshDerivedCostCachesIfNeeded(force: true)
+        }
+    }
+
+    func selectChartTimeRange(_ newValue: ChartTimeRange) {
+        chartTimeRange = newValue
+        chartHoverDate = nil
+        refreshDerivedCostCachesIfNeeded(force: true)
+        requestCodexFullHistoryImportIfNeeded()
+    }
+
+    func selectDistributionPeriod(_ newValue: DistributionPeriod) {
+        distributionPeriod = newValue
+        refreshDerivedCostCachesIfNeeded(force: true)
+        requestCodexFullHistoryImportIfNeeded()
+    }
+
+    func requestCodexFullHistoryImportIfNeeded() {
+        guard selectedCostIncludesCodex,
+              chartTimeRange == .all || distributionPeriod == .overall else {
+            return
+        }
+        refreshCoordinator.refreshCodexCostFullHistoryIfNeeded()
+    }
+
+    func normalizeInitialCostRangeDefaultsIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: DefaultsKey.ccStatsDidDefaultToTodayForCodexArchive) else {
+            return
+        }
+        if chartTimeRange == .all {
+            chartTimeRange = .today
+        }
+        if distributionPeriod == .overall {
+            distributionPeriod = .today
+        }
+        defaults.set(true, forKey: DefaultsKey.ccStatsDidDefaultToTodayForCodexArchive)
+    }
+
+    func refreshAggregateCostSummaryIfNeeded(force: Bool = false) {
+        let signature = costProviderSummarySignature
+        guard force || signature != aggregateCostSignature else { return }
+
+        aggregateCostSignature = signature
+        aggregateCostSummary = costProviders.count > 1
+            ? aggregateCostSummaries(costProviders.compactMap(\.costSummary))
+            : nil
+    }
+
+    var derivedCostCacheSignature: String {
+        [
+            selectedCostProviderId.isEmpty ? defaultCostProviderSelection : selectedCostProviderId,
+            costProviderSummarySignature,
+            selectedMetric.rawValue,
+            chartTimeRange.rawValue,
+            distributionMetric.rawValue,
+            distributionPeriod.rawValue
+        ].joined(separator: "|")
+    }
+
+    func refreshDerivedCostCachesIfNeeded(force: Bool = false) {
+        let signature = derivedCostCacheSignature
+        guard force || signature != derivedCostSignature else { return }
+        derivedCostSignature = signature
+
+        guard let summary = costSummary else {
+            cachedAggregateChartPoints = []
+            cachedSortedChartSeries = []
+            cachedModelColorMap = [:]
+            cachedDistributionModels = []
+            cachedRankedDistributionModels = []
+            cachedSparklineValuesByModel = [:]
+            return
+        }
+
+        cachedAggregateChartPoints = makeAggregateChartPoints(from: summary)
+        cachedSortedChartSeries = makeSortedChartSeries(from: summary)
+        selectedModels.formIntersection(Set(cachedSortedChartSeries.map(\.model)))
+        cachedModelColorMap = makeModelColorMap(from: cachedSortedChartSeries)
+        cachedDistributionModels = makeDistributionModels(from: summary)
+        cachedRankedDistributionModels = makeRankedDistributionModels(from: cachedDistributionModels)
+        cachedSparklineValuesByModel = makeSparklineValuesByModel(from: cachedSortedChartSeries)
     }
 
     // MARK: - Empty State
@@ -78,7 +294,7 @@ struct CostTrackingView: View {
                 .foregroundStyle(.secondary)
             Text(L("No cost data found", "未发现费用数据"))
                 .font(.title3.weight(.bold))
-            Text(L("Claude Code usage logs will appear here.", "Claude Code 使用日志将在这里显示。"))
+            Text(L("Local Claude and Codex token logs will appear here.", "本地 Claude 与 Codex Token 日志将在这里显示。"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -96,5 +312,12 @@ private struct CostTrackingContentWidthPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private extension Optional where Wrapped == CostPeriod {
+    var signatureFragment: String {
+        guard let period = self else { return "nil" }
+        return "\(period.usd):\(period.tokens ?? -1):\(period.rangeLabel ?? "")"
     }
 }

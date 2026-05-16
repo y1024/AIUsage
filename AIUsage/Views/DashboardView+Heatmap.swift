@@ -1,8 +1,8 @@
 import SwiftUI
 
-// MARK: - Claude Code Usage Heatmap
+// MARK: - Local Token Usage Heatmap
 
-struct ClaudeCodeUsageHeatmap: View {
+struct LocalTokenUsageHeatmap: View {
     let providers: [ProviderData]
 
     @EnvironmentObject private var appState: AppState
@@ -153,7 +153,7 @@ struct ClaudeCodeUsageHeatmap: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(L("Claude Code Usage Heatmap", "Claude Code 使用热力图"))
+            Text(L("Local Token Usage Heatmap", "本地 Token 使用热力图"))
                 .font(.headline.weight(.bold))
             Text(L("Daily token volume", "每日 Token 总量"))
                 .font(.caption2)
@@ -516,8 +516,8 @@ struct ClaudeCodeUsageHeatmap: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(L("No usage recorded yet", "暂无使用记录"))
                     .font(.subheadline.weight(.semibold))
-                Text(L("Claude Code daily token data will appear here once logs are imported.",
-                       "当 Claude Code 日志被导入后，这里将显示每日 Token 数据。"))
+                Text(L("Local daily token data will appear here once logs are imported.",
+                       "当本地日志被导入后，这里将显示每日 Token 数据。"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -560,4 +560,3 @@ private struct HeatmapCellID: Equatable {
     let week: Int
     let day: Int
 }
-

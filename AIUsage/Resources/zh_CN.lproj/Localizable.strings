@@ -14,7 +14,7 @@
 "AIUsage/AIUsageApp.swift::Refresh All" = "全部刷新";
 
 /* AIUsageApp.swift */
-"AIUsage/AIUsageApp.swift::Refresh Claude Code" = "刷新 Claude Code";
+"AIUsage/AIUsageApp.swift::Refresh Token Stats" = "刷新 Token 统计";
 
 /* AIUsageApp.swift */
 "AIUsage/AIUsageApp.swift::Settings..." = "设置...";
@@ -125,7 +125,7 @@
 "AIUsage/Views/CostTrackingView+Summary.swift::Total Tokens" = "总 Tokens";
 
 /* Views/CostTrackingView.swift */
-"AIUsage/Views/CostTrackingView.swift::Claude Code usage logs will appear here." = "Claude Code 使用日志将在这里显示。";
+"AIUsage/Views/CostTrackingView.swift::Local Claude and Codex token logs will appear here." = "本地 Claude 与 Codex Token 日志将在这里显示。";
 
 /* Views/CostTrackingView.swift */
 "AIUsage/Views/CostTrackingView.swift::No cost data found" = "未发现费用数据";
@@ -140,7 +140,7 @@
 "AIUsage/Views/DashboardView.swift::Choose the apps and sources you want to scan first." = "先选择你想扫描的应用和来源。";
 
 /* Views/DashboardView.swift */
-"AIUsage/Views/DashboardView.swift::Claude Code Stats" = "Claude Code 统计";
+"AIUsage/Views/DashboardView.swift::Token Stats" = "Token 统计";
 
 /* Views/DashboardView.swift */
 "AIUsage/Views/DashboardView.swift::Cost" = "费用";
@@ -155,7 +155,7 @@
 "AIUsage/Views/DashboardView.swift::Loading dashboard..." = "加载中...";
 
 /* Views/DashboardView.swift */
-"AIUsage/Views/DashboardView.swift::No Claude Code stats source yet" = "还没有 Claude Code 统计来源";
+"AIUsage/Views/DashboardView.swift::No local token stats source yet" = "还没有本地 Token 统计来源";
 
 /* Views/DashboardView.swift */
 "AIUsage/Views/DashboardView.swift::No account has been saved yet" = "还没有保存账号";
@@ -440,7 +440,7 @@
 "AIUsage/Views/ProviderDetailView.swift::Cancel" = "取消";
 
 /* Views/ProviderDetailView.swift */
-"AIUsage/Views/ProviderDetailView.swift::Claude Code Stats" = "Claude Code 统计";
+"AIUsage/Views/ProviderDetailView.swift::Token Stats" = "Token 统计";
 
 /* Views/ProviderDetailView.swift */
 "AIUsage/Views/ProviderDetailView.swift::Copied" = "已复制";
@@ -518,7 +518,7 @@
 "AIUsage/Views/ProviderPickerView.swift::Choose Sources to Scan" = "选择要扫描的来源";
 
 /* Views/ProviderPickerView.swift */
-"AIUsage/Views/ProviderPickerView.swift::Claude Code Stats" = "Claude Code 统计";
+"AIUsage/Views/ProviderPickerView.swift::Local Token Stats" = "本地 Token 统计";
 
 /* Views/ProviderPickerView.swift */
 "AIUsage/Views/ProviderPickerView.swift::Clear" = "清空";
@@ -1007,10 +1007,10 @@
 "AIUsage/Views/SettingsView+Cards.swift::Choose whether AIUsage reads data locally or from a remote QuotaServer." = "选择 AIUsage 从本地还是远程 QuotaServer 读取数据。";
 
 /* Views/SettingsView+Cards.swift */
-"AIUsage/Views/SettingsView+Cards.swift::Claude Code auto-refresh" = "Claude Code 自动刷新";
+"AIUsage/Views/SettingsView+Cards.swift::Local token stats auto-refresh" = "本地 Token 统计自动刷新";
 
 /* Views/SettingsView+Cards.swift */
-"AIUsage/Views/SettingsView+Cards.swift::Claude Code daily cost alert" = "Claude Code 每日消费提醒";
+"AIUsage/Views/SettingsView+Cards.swift::Claude daily cost alert" = "Claude 每日消费提醒";
 
 /* Views/SettingsView+Cards.swift */
 "AIUsage/Views/SettingsView+Cards.swift::Connect to a QuotaServer running on another machine. Start server: swift run QuotaServer --host 0.0.0.0 --port 4318" = "连接到其他机器上的 QuotaServer。启动命令：swift run QuotaServer --host 0.0.0.0 --port 4318";
@@ -1097,7 +1097,7 @@
 "AIUsage/Views/SettingsView+Cards.swift::Refresh interval for API-based providers (OpenAI, Anthropic, etc.)" = "API 服务商的刷新间隔（OpenAI、Anthropic 等）";
 
 /* Views/SettingsView+Cards.swift */
-"AIUsage/Views/SettingsView+Cards.swift::Refresh interval for local Claude Code stats (faster intervals available)" = "本地 Claude Code 统计的刷新间隔（支持更短间隔）";
+"AIUsage/Views/SettingsView+Cards.swift::Refresh interval for local Claude and Codex token stats (faster intervals available)" = "本地 Claude 与 Codex Token 统计的刷新间隔（支持更短间隔）";
 
 /* Views/SettingsView+Cards.swift */
 "AIUsage/Views/SettingsView+Cards.swift::Remote" = "远程";
@@ -1244,7 +1244,7 @@
 "dashboard.providers" = "服务商";
 
 /* Views/DashboardView.swift */
-"dashboard.summary.cost_tracking" = "Claude Code 统计";
+"dashboard.summary.cost_tracking" = "Token 统计";
 
 /* Views/DashboardView.swift */
 "dashboard.summary.live_accounts" = "在线账号";
@@ -1262,7 +1262,7 @@
 "help.refresh_all" = "刷新所有应用和所有账号";
 
 /* Views/ContentView.swift */
-"nav.cost_tracking" = "Claude Code 统计";
+"nav.cost_tracking" = "Token 统计";
 
 /* Views/ContentView.swift */
 "nav.dashboard" = "仪表盘";

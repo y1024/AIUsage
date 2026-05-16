@@ -12,7 +12,7 @@ struct ProviderIconView: View {
     // Map provider id → asset name (openai covers codex)
     private var assetName: String {
         switch providerId {
-        case "codex": return "openai"
+        case "codex", "codex-cost": return "openai"
         default: return providerId
         }
     }
@@ -49,7 +49,7 @@ struct ProviderIconView: View {
         case "cursor":  return "cursorarrow.rays"
         case "gemini":  return "star.fill"
         case "kiro":    return "cloud.fill"
-        case "codex":   return "brain.head.profile"
+        case "codex", "codex-cost": return "brain.head.profile"
         case "droid":   return "cpu"
         case "warp":    return "terminal"
         case "amp":     return "bolt.fill"
@@ -65,7 +65,7 @@ struct ProviderIconView: View {
         case "cursor":  return .green
         case "gemini":  return .orange
         case "kiro":    return .purple
-        case "codex":   return .indigo
+        case "codex", "codex-cost": return .indigo
         case "droid":   return .yellow
         case "warp":    return .pink
         case "amp":     return .teal

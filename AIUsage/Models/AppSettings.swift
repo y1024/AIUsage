@@ -100,6 +100,7 @@ enum DefaultsKey {
     static let ccStatsChartRange = "ccStatsChartRange"
     static let ccStatsDistMetric = "ccStatsDistMetric"
     static let ccStatsDistPeriod = "ccStatsDistPeriod"
+    static let ccStatsDidDefaultToTodayForCodexArchive = "ccStatsDidDefaultToTodayForCodexArchive"
     static let ccStatsGranularity = "ccStatsGranularity"
     static let ccStatsMetric = "ccStatsMetric"
     static let claudeCodeDailyThreshold = "claudeCodeDailyThreshold"

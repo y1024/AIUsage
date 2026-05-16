@@ -37,7 +37,7 @@ struct ContentView: View {
                 Label(L("Providers", "服务商", key: "nav.providers"), systemImage: "square.grid.2x2")
                     .tag(AppSection.providers)
 
-                Label(L("Claude Code Stats", "Claude Code 统计", key: "nav.cost_tracking"), systemImage: "chart.bar.xaxis")
+                Label(L("Token Stats", "Token 统计", key: "nav.cost_tracking"), systemImage: "chart.bar.xaxis")
                     .tag(AppSection.costTracking)
 
                 Label(L("Claude Code Proxy", "Claude Code 代理", key: "nav.proxy_management"), systemImage: "server.rack")
@@ -101,7 +101,7 @@ struct ContentView: View {
             ToolbarItemGroup(placement: .automatic) {
                 Button(action: { refreshCoordinator.refreshAllProviders() }) {
                     HStack(spacing: 5) {
-                        if refreshCoordinator.isLoading || refreshCoordinator.isRefreshingAllProviders {
+                        if refreshCoordinator.isAnyRefreshInProgress {
                             SmallProgressView().frame(width: 14, height: 14)
                         } else {
                             Image(systemName: "arrow.clockwise")
@@ -111,7 +111,7 @@ struct ContentView: View {
                     }
                 }
                 .help(L("Refresh every app and every account", "刷新所有应用和所有账号", key: "help.refresh_all"))
-                .disabled(refreshCoordinator.isLoading || refreshCoordinator.isRefreshingAllProviders)
+                .disabled(refreshCoordinator.isAnyRefreshInProgress)
             }
         }
     }

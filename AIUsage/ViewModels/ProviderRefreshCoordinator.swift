@@ -26,6 +26,13 @@ final class ProviderRefreshCoordinator: ObservableObject {
     private var refreshTimer: Timer?
     private var claudeCodeRefreshTimer: Timer?
 
+    var isAnyRefreshInProgress: Bool {
+        isLoading
+            || isRefreshingAllProviders
+            || !refreshingProviderIDs.isEmpty
+            || !refreshingAccountIDs.isEmpty
+    }
+
     let settings = AppSettings.shared
     let accountStore = AccountStore.shared
 
@@ -79,7 +86,7 @@ final class ProviderRefreshCoordinator: ObservableObject {
 
         if settings.claudeCodeRefreshInterval > 0 {
             claudeCodeRefreshTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(settings.claudeCodeRefreshInterval), repeats: true) { [weak self] _ in
-                self?.refreshClaudeCodeOnly()
+                self?.refreshLocalTokenStatsOnly()
             }
         }
     }
@@ -95,10 +102,26 @@ final class ProviderRefreshCoordinator: ObservableObject {
         }
     }
 
-    func refreshClaudeCodeOnly() {
+    func refreshLocalTokenStatsOnly() {
         Task { @MainActor in
-            await refreshProviderNow("claude")
+            for providerId in ["claude", "codex-cost"] where selectedProviderIds().contains(providerId) {
+                await refreshProviderNow(providerId)
+            }
             checkClaudeCodeDailyThreshold()
+        }
+    }
+
+    func refreshCodexCostFullHistoryIfNeeded() {
+        Task { @MainActor in
+            let providerId = "codex-cost"
+            guard settings.backendMode == "local",
+                  selectedProviderIds().contains(providerId),
+                  !refreshingProviderIDs.contains(providerId),
+                  await CodexCostProvider.needsFullHistoryImport() else {
+                return
+            }
+            await CodexCostProvider.requestFullHistoryImport()
+            await refreshProviderNow(providerId)
         }
     }
 

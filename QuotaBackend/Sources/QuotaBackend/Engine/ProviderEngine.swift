@@ -9,6 +9,7 @@ private let engineLog = Logger(subsystem: "com.aiusage.desktop", category: "Prov
 
 public actor ProviderEngine {
     static let timeoutSeconds: Double = 15
+    static let codexCostTimeoutSeconds: Double = 120
 
     public init() {}
 
@@ -125,7 +126,7 @@ public actor ProviderEngine {
     private func fetchOne(provider: any ProviderFetcher) async -> ProviderResult {
         let start = Date()
         do {
-            let usage = try await withTimeout(seconds: Self.timeoutSeconds) {
+            let usage = try await withTimeout(seconds: Self.timeoutSeconds(for: provider)) {
                 try await provider.fetchUsage()
             }
             let elapsed = Date().timeIntervalSince(start)
@@ -143,6 +144,10 @@ public actor ProviderEngine {
             summary.id = autoId
             return ProviderResult(id: autoId, providerId: provider.id, ok: false, summary: summary, error: redactedError)
         }
+    }
+
+    private static func timeoutSeconds(for provider: any ProviderFetcher) -> Double {
+        provider.id == "codex-cost" ? codexCostTimeoutSeconds : timeoutSeconds
     }
 
     // MARK: - Internal: Multi-Account Fetch

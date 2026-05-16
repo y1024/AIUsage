@@ -14,7 +14,7 @@
 "AIUsage/AIUsageApp.swift::Refresh All" = "Refresh All";
 
 /* AIUsageApp.swift */
-"AIUsage/AIUsageApp.swift::Refresh Claude Code" = "Refresh Claude Code";
+"AIUsage/AIUsageApp.swift::Refresh Token Stats" = "Refresh Token Stats";
 
 /* AIUsageApp.swift */
 "AIUsage/AIUsageApp.swift::Settings..." = "Settings...";
@@ -125,7 +125,7 @@
 "AIUsage/Views/CostTrackingView+Summary.swift::Total Tokens" = "Total Tokens";
 
 /* Views/CostTrackingView.swift */
-"AIUsage/Views/CostTrackingView.swift::Claude Code usage logs will appear here." = "Claude Code usage logs will appear here.";
+"AIUsage/Views/CostTrackingView.swift::Local Claude and Codex token logs will appear here." = "Local Claude and Codex token logs will appear here.";
 
 /* Views/CostTrackingView.swift */
 "AIUsage/Views/CostTrackingView.swift::No cost data found" = "No cost data found";
@@ -140,7 +140,7 @@
 "AIUsage/Views/DashboardView.swift::Choose the apps and sources you want to scan first." = "Choose the apps and sources you want to scan first.";
 
 /* Views/DashboardView.swift */
-"AIUsage/Views/DashboardView.swift::Claude Code Stats" = "Claude Code Stats";
+"AIUsage/Views/DashboardView.swift::Token Stats" = "Token Stats";
 
 /* Views/DashboardView.swift */
 "AIUsage/Views/DashboardView.swift::Cost" = "Cost";
@@ -155,7 +155,7 @@
 "AIUsage/Views/DashboardView.swift::Loading dashboard..." = "Loading dashboard...";
 
 /* Views/DashboardView.swift */
-"AIUsage/Views/DashboardView.swift::No Claude Code stats source yet" = "No Claude Code stats source yet";
+"AIUsage/Views/DashboardView.swift::No local token stats source yet" = "No local token stats source yet";
 
 /* Views/DashboardView.swift */
 "AIUsage/Views/DashboardView.swift::No account has been saved yet" = "No account has been saved yet";
@@ -440,7 +440,7 @@
 "AIUsage/Views/ProviderDetailView.swift::Cancel" = "Cancel";
 
 /* Views/ProviderDetailView.swift */
-"AIUsage/Views/ProviderDetailView.swift::Claude Code Stats" = "Claude Code Stats";
+"AIUsage/Views/ProviderDetailView.swift::Token Stats" = "Token Stats";
 
 /* Views/ProviderDetailView.swift */
 "AIUsage/Views/ProviderDetailView.swift::Copied" = "Copied";
@@ -518,7 +518,7 @@
 "AIUsage/Views/ProviderPickerView.swift::Choose Sources to Scan" = "Choose Sources to Scan";
 
 /* Views/ProviderPickerView.swift */
-"AIUsage/Views/ProviderPickerView.swift::Claude Code Stats" = "Claude Code Stats";
+"AIUsage/Views/ProviderPickerView.swift::Local Token Stats" = "Local Token Stats";
 
 /* Views/ProviderPickerView.swift */
 "AIUsage/Views/ProviderPickerView.swift::Clear" = "Clear";
@@ -1007,10 +1007,10 @@
 "AIUsage/Views/SettingsView+Cards.swift::Choose whether AIUsage reads data locally or from a remote QuotaServer." = "Choose whether AIUsage reads data locally or from a remote QuotaServer.";
 
 /* Views/SettingsView+Cards.swift */
-"AIUsage/Views/SettingsView+Cards.swift::Claude Code auto-refresh" = "Claude Code auto-refresh";
+"AIUsage/Views/SettingsView+Cards.swift::Local token stats auto-refresh" = "Local token stats auto-refresh";
 
 /* Views/SettingsView+Cards.swift */
-"AIUsage/Views/SettingsView+Cards.swift::Claude Code daily cost alert" = "Claude Code daily cost alert";
+"AIUsage/Views/SettingsView+Cards.swift::Claude daily cost alert" = "Claude daily cost alert";
 
 /* Views/SettingsView+Cards.swift */
 "AIUsage/Views/SettingsView+Cards.swift::Connect to a QuotaServer running on another machine. Start server: swift run QuotaServer --host 0.0.0.0 --port 4318" = "Connect to a QuotaServer running on another machine. Start server: swift run QuotaServer --host 0.0.0.0 --port 4318";
@@ -1097,7 +1097,7 @@
 "AIUsage/Views/SettingsView+Cards.swift::Refresh interval for API-based providers (OpenAI, Anthropic, etc.)" = "Refresh interval for API-based providers (OpenAI, Anthropic, etc.)";
 
 /* Views/SettingsView+Cards.swift */
-"AIUsage/Views/SettingsView+Cards.swift::Refresh interval for local Claude Code stats (faster intervals available)" = "Refresh interval for local Claude Code stats (faster intervals available)";
+"AIUsage/Views/SettingsView+Cards.swift::Refresh interval for local Claude and Codex token stats (faster intervals available)" = "Refresh interval for local Claude and Codex token stats (faster intervals available)";
 
 /* Views/SettingsView+Cards.swift */
 "AIUsage/Views/SettingsView+Cards.swift::Remote" = "Remote";
@@ -1244,7 +1244,7 @@
 "dashboard.providers" = "Providers";
 
 /* Views/DashboardView.swift */
-"dashboard.summary.cost_tracking" = "Claude Code Stats";
+"dashboard.summary.cost_tracking" = "Token Stats";
 
 /* Views/DashboardView.swift */
 "dashboard.summary.live_accounts" = "Live Accounts";
@@ -1262,7 +1262,7 @@
 "help.refresh_all" = "Refresh every app and every account";
 
 /* Views/ContentView.swift */
-"nav.cost_tracking" = "Claude Code Stats";
+"nav.cost_tracking" = "Token Stats";
 
 /* Views/ContentView.swift */
 "nav.dashboard" = "Dashboard";

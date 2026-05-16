@@ -14,7 +14,7 @@ struct DashboardView: View {
                 } else if let overview = refreshCoordinator.overview {
                     overviewSection(overview)
                     if !costTrackingProviders.isEmpty {
-                        ClaudeCodeUsageHeatmap(providers: costTrackingProviders)
+                        LocalTokenUsageHeatmap(providers: costTrackingProviders)
                     }
                     unifiedStatsSection
                     if !serviceProviders.isEmpty {
@@ -120,7 +120,7 @@ struct DashboardView: View {
 
         let costNote: String
         if costTrackingProviders.isEmpty {
-            costNote = L("No Claude Code stats source yet", "还没有 Claude Code 统计来源")
+            costNote = L("No local token stats source yet", "还没有本地 Token 统计来源")
         } else {
             costNote = L(
                 "\(costTrackingProviders.count) source tracked this week",
@@ -147,7 +147,7 @@ struct DashboardView: View {
                 color: .green
             ),
             DashboardSummaryCard(
-                title: L("Claude Code Stats", "Claude Code 统计", key: "dashboard.summary.cost_tracking"),
+                title: L("Token Stats", "Token 统计", key: "dashboard.summary.cost_tracking"),
                 value: formatCurrency(overview.localCostMonthUsd),
                 note: costNote,
                 icon: "chart.line.uptrend.xyaxis.circle.fill",
@@ -225,7 +225,7 @@ struct DashboardView: View {
                 spacing: 16
             ) {
                 if showCC {
-                    ClaudeCodeAggregateCard(providers: costTrackingProviders) {
+                    LocalTokenAggregateCard(providers: costTrackingProviders) {
                         appState.selectedSection = .costTracking
                     }
                 }
@@ -396,7 +396,7 @@ private struct StatCard: View {
     }
 }
 
-// MARK: - Aggregate Stats Cards (Claude Code / Proxy)
+// MARK: - Aggregate Stats Cards (Token Stats / Proxy)
 
 private struct AggregateStatsCard<Footer: View>: View {
     let tint: Color
@@ -482,7 +482,7 @@ private struct AggregateStatsCard<Footer: View>: View {
     }
 }
 
-private struct ClaudeCodeAggregateCard: View {
+private struct LocalTokenAggregateCard: View {
     let providers: [ProviderData]
     let onTap: () -> Void
 
@@ -499,7 +499,7 @@ private struct ClaudeCodeAggregateCard: View {
         AggregateStatsCard(
             tint: .orange,
             icon: "chart.line.uptrend.xyaxis",
-            title: L("Claude Code Stats", "Claude Code 统计"),
+            title: L("Token Stats", "Token 统计"),
             subtitle: L("\(providers.count) accounts · monthly view",
                         "\(providers.count) 个账号 · 本月视图"),
             primaryValue: formatCurrency(monthUsd),

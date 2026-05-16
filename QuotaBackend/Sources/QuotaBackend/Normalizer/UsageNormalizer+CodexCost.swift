@@ -2,34 +2,39 @@ import Foundation
 
 extension UsageNormalizer {
 
-    // MARK: - Claude
+    // MARK: - Codex Cost
 
-    static func normalizeClaude(base: inout ProviderSummary, usage: ProviderUsage) -> ProviderSummary {
-        let monthUsd   = extraDouble(usage, "currentMonth.estimatedCostUsd") ?? 0
-        let weekUsd    = extraDouble(usage, "currentWeek.estimatedCostUsd") ?? 0
-        let todayUsd   = extraDouble(usage, "today.estimatedCostUsd") ?? 0
+    static func normalizeCodexCost(base: inout ProviderSummary, usage: ProviderUsage) -> ProviderSummary {
+        let monthUsd = extraDouble(usage, "currentMonth.estimatedCostUsd") ?? 0
+        let weekUsd = extraDouble(usage, "currentWeek.estimatedCostUsd") ?? 0
+        let todayUsd = extraDouble(usage, "today.estimatedCostUsd") ?? 0
         let overallUsd = extraDouble(usage, "overall.estimatedCostUsd") ?? 0
         let monthTokens = extraInt(usage, "currentMonth.totalTokens") ?? 0
-        let weekTokens  = extraInt(usage, "currentWeek.totalTokens") ?? 0
+        let weekTokens = extraInt(usage, "currentWeek.totalTokens") ?? 0
         let todayTokens = extraInt(usage, "today.totalTokens") ?? 0
         let overallTokens = extraInt(usage, "overall.totalTokens") ?? 0
-        let usageRows   = extraInt(usage, "overall.usageRows") ?? 0
-        let dupRows     = extraInt(usage, "overall.duplicateRowsRemoved") ?? 0
+        let usageRows = extraInt(usage, "overall.usageRows") ?? 0
+        let sessionCount = extraInt(usage, "overall.sessionCount") ?? 0
         let unpricedModels = extraStringArray(usage, "overall.unpricedModels")
 
         let rawModelItems = (usage.extra["currentMonth.models"]?.value as? [AnyCodable]) ?? []
         let topModels: [ModelInfo] = rawModelItems
             .prefix(5)
             .compactMap { item in
-                guard let m = item.value as? [String: AnyCodable],
-                      let model = m["model"]?.value as? String,
-                      let cost = m["estimatedCostDisplay"]?.value as? String else { return nil }
-                let tokens: Int
-                switch m["totalTokens"]?.value {
-                case let v as Int: tokens = v
-                case let v as Double: tokens = Int(v)
-                default: tokens = 0
+                guard let model = (item.value as? [String: AnyCodable])?["model"]?.value as? String else {
+                    return nil
                 }
+                let itemDict = item.value as? [String: AnyCodable]
+                let tokens: Int
+                switch itemDict?["totalTokens"]?.value {
+                case let value as Int:
+                    tokens = value
+                case let value as Double:
+                    tokens = Int(value)
+                default:
+                    tokens = 0
+                }
+                let cost = itemDict?["estimatedCostDisplay"]?.value as? String
                 return ModelInfo(label: model, value: formatInt(tokens), note: cost)
             }
 
@@ -37,8 +42,7 @@ extension UsageNormalizer {
         let modelBreakdownToday = extractModelBreakdown(usage, "today.models")
         let modelBreakdownWeek = extractModelBreakdown(usage, "currentWeek.models")
         let modelBreakdownOverall = extractModelBreakdown(usage, "overall.models")
-
-        let modelTimelines: [ModelTimelineSeries] = extraModelTimelines(usage, "timeline.byModel")
+        let modelTimelines = extraModelTimelines(usage, "timeline.byModel")
 
         base.accountLabel = preferredAccountEmail(usage)
         base.category = "local-cost"
@@ -46,22 +50,22 @@ extension UsageNormalizer {
         base.statusLabel = "Healthy"
         base.headline = HeadlineInfo(
             eyebrow: "Local token ledger",
-            primary: formatCurrency(monthUsd),
-            secondary: "\(formatInt(monthTokens)) tokens this month",
-            supporting: "Week \(formatCurrency(weekUsd)) • Today \(formatCurrency(todayUsd))"
+            primary: "\(formatInt(monthTokens)) tokens",
+            secondary: "Codex session logs this month",
+            supporting: "Week \(formatInt(weekTokens)) tokens / Today \(formatInt(todayTokens))"
         )
         base.metrics = [
-            MetricInfo(label: "Today",      value: formatCurrency(todayUsd),  note: "\(formatInt(todayTokens)) tokens"),
-            MetricInfo(label: "This Week",  value: formatCurrency(weekUsd),   note: "\(formatInt(weekTokens)) tokens"),
-            MetricInfo(label: "This Month", value: formatCurrency(monthUsd),  note: "\(formatInt(monthTokens)) tokens"),
-            MetricInfo(label: "Scanned Calls", value: formatInt(usageRows),   note: "\(formatInt(dupRows)) duplicate rows removed")
+            MetricInfo(label: "Today", value: formatInt(todayTokens), note: formatCurrency(todayUsd)),
+            MetricInfo(label: "This Week", value: formatInt(weekTokens), note: formatCurrency(weekUsd)),
+            MetricInfo(label: "This Month", value: formatInt(monthTokens), note: formatCurrency(monthUsd)),
+            MetricInfo(label: "Scanned Turns", value: formatInt(usageRows), note: "\(formatInt(sessionCount)) sessions")
         ]
         base.windows = []
         base.costSummary = CostSummaryInfo(
             today: CostPeriod(usd: todayUsd, tokens: todayTokens, rangeLabel: extraString(usage, "today.key") ?? "Today"),
-            week:  CostPeriod(usd: weekUsd,  tokens: weekTokens,  rangeLabel: extraString(usage, "currentWeek.key") ?? "This week"),
+            week: CostPeriod(usd: weekUsd, tokens: weekTokens, rangeLabel: extraString(usage, "currentWeek.key") ?? "This week"),
             month: CostPeriod(usd: monthUsd, tokens: monthTokens, rangeLabel: extraString(usage, "currentMonth.key") ?? "This month"),
-            overall: CostPeriod(usd: overallUsd, tokens: overallTokens, rangeLabel: "Overall"),
+            overall: CostPeriod(usd: overallUsd, tokens: overallTokens, rangeLabel: extraString(usage, "overall.rangeLabel") ?? "Overall"),
             timeline: CostTimelineInfo(
                 hourly: extraCostTimeline(usage, "timeline.hourly"),
                 daily: extraCostTimeline(usage, "timeline.daily")
@@ -74,7 +78,7 @@ extension UsageNormalizer {
         )
         base.models = topModels.isEmpty ? nil : topModels
         base.nextResetAt = nil
-        base.spotlight = "This tracker reads local Claude Code JSONL logs and derives token and cost totals from usage entries, so it works best as a local ledger rather than an official subscription meter."
+        base.spotlight = "This tracker reads local Codex session JSONL logs and derives token deltas from token_count events, using turn_context model markers when available."
         base.unpricedModels = unpricedModels.isEmpty ? nil : unpricedModels
         return base
     }

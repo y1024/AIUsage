@@ -4,16 +4,26 @@ import Charts
 extension CostTrackingView {
 
     var distributionModels: [ModelCostBreakdown] {
+        cachedDistributionModels
+    }
+
+    func makeDistributionModels(from summary: CostSummary) -> [ModelCostBreakdown] {
+        let models: [ModelCostBreakdown]
         switch distributionPeriod {
-        case .today: return costSummary?.modelBreakdownToday ?? []
-        case .week: return costSummary?.modelBreakdownWeek ?? []
-        case .month: return costSummary?.modelBreakdown ?? []
-        case .overall: return costSummary?.modelBreakdownOverall ?? []
+        case .today: models = summary.modelBreakdownToday ?? []
+        case .week: models = summary.modelBreakdownWeek ?? []
+        case .month: models = summary.modelBreakdown ?? []
+        case .overall: models = summary.modelBreakdownOverall ?? []
         }
+        return models.filter(hasUsage)
     }
 
     var rankedDistributionModels: [ModelCostBreakdown] {
-        distributionModels.sorted { lhs, rhs in
+        cachedRankedDistributionModels
+    }
+
+    func makeRankedDistributionModels(from models: [ModelCostBreakdown]) -> [ModelCostBreakdown] {
+        models.sorted { lhs, rhs in
             let lhsValue = distributionMetric == .usd ? lhs.estimatedCostUsd : Double(lhs.totalTokens)
             let rhsValue = distributionMetric == .usd ? rhs.estimatedCostUsd : Double(rhs.totalTokens)
             if lhsValue == rhsValue {
@@ -65,7 +75,10 @@ extension CostTrackingView {
 
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
-                    Picker("", selection: $distributionPeriod) {
+                    Picker("", selection: Binding(
+                        get: { distributionPeriod },
+                        set: { selectDistributionPeriod($0) }
+                    )) {
                         Text(L("Today", "今日")).tag(DistributionPeriod.today)
                         Text(L("Week", "本周")).tag(DistributionPeriod.week)
                         Text(L("Month", "本月")).tag(DistributionPeriod.month)
@@ -85,7 +98,10 @@ extension CostTrackingView {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Picker("", selection: $distributionPeriod) {
+                    Picker("", selection: Binding(
+                        get: { distributionPeriod },
+                        set: { selectDistributionPeriod($0) }
+                    )) {
                         Text(L("Today", "今日")).tag(DistributionPeriod.today)
                         Text(L("Week", "本周")).tag(DistributionPeriod.week)
                         Text(L("Month", "本月")).tag(DistributionPeriod.month)

@@ -13,6 +13,7 @@ struct CostTrackingCard: View {
     private var color: Color {
         switch provider.providerId {
         case "claude": return .orange
+        case "codex-cost": return .indigo
         default: return .blue
         }
     }

@@ -11,6 +11,7 @@ final class ProviderRegistryTests: XCTestCase {
                 "amp",
                 "antigravity",
                 "claude",
+                "codex-cost",
                 "codex",
                 "copilot",
                 "cursor",
