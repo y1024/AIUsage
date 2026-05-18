@@ -4,6 +4,7 @@ import Combine
 import QuotaBackend
 
 // MARK: - Global Time Manager (单例，所有 View 共享一个 Timer)
+// Relative time display is minute-granularity; 30s refresh is sufficient.
 
 class GlobalTimeManager: ObservableObject {
     static let shared = GlobalTimeManager()
@@ -17,7 +18,7 @@ class GlobalTimeManager: ObservableObject {
     func startIfNeeded() {
         activeViewCount += 1
         if timer == nil {
-            timer = Timer.publish(every: 1, on: .main, in: .common)
+            timer = Timer.publish(every: 30, on: .main, in: .common)
                 .autoconnect()
                 .sink { [weak self] time in
                     self?.currentTime = time
@@ -37,14 +38,13 @@ class GlobalTimeManager: ObservableObject {
 
 // MARK: - Refreshable Time Views
 
-/// A view that displays a timestamp and automatically refreshes to keep the relative time accurate
 struct RefreshableTimeView: View {
     let date: Date
     let language: String
     let font: Font
     let foregroundStyle: Color
 
-    @StateObject private var timeManager = GlobalTimeManager.shared
+    @ObservedObject private var timeManager = GlobalTimeManager.shared
 
     init(date: Date, language: String, font: Font = .caption2, foregroundStyle: Color = .secondary) {
         self.date = date
@@ -54,7 +54,6 @@ struct RefreshableTimeView: View {
     }
 
     private var formattedTime: String {
-        // 使用 timeManager.currentTime 来触发重新计算
         _ = timeManager.currentTime
         return formatRefreshTimestamp(date, language: language)
     }
@@ -116,8 +115,7 @@ func formatRelativeRefreshTime(_ date: Date, language: String) -> String {
     let isZh = language == "zh"
 
     if interval < 60 {
-        let seconds = max(1, Int(interval.rounded(.down)))
-        return isZh ? "\(seconds) 秒前" : "\(seconds)s ago"
+        return isZh ? "刚刚" : "Just now"
     } else if interval < 3600 {
         let minutes = Int(interval / 60)
         return isZh ? "\(minutes) 分钟前" : "\(minutes)m ago"

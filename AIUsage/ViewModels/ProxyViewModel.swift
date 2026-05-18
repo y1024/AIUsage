@@ -52,8 +52,8 @@ class ProxyViewModel: ObservableObject {
     // proxied request (potentially many per second during streaming) and each publish would
     // force every observing view to rebuild body + re-aggregate on the main thread. Instead,
     // mutations feed `logsChangeSubject`, which throttles UI notifications to `logsPublishInterval`
-    // via `objectWillChange.send()`. Persistence (`saveLogs()`, `saveStatistics()`) is NOT throttled —
-    // only the SwiftUI refresh is.
+    // via `objectWillChange.send()`. Persistence is debounced via `schedulePersistence()` to
+    // avoid redundant full-JSON encodes on every request; critical exit points flush immediately.
     var statistics: [String: ProxyStatistics] = [:]
     var recentLogs: [String: [ProxyRequestLog]] = [:]
     @Published var operationErrorMessage: String?
@@ -92,6 +92,9 @@ class ProxyViewModel: ObservableObject {
     /// Throttle window for coalescing log-driven UI refreshes. Individual log writes still hit
     /// storage immediately; only the SwiftUI invalidation is batched.
     static let logsPublishInterval: TimeInterval = 0.5
+
+    var persistenceWorkItem: DispatchWorkItem?
+    static let persistenceDebounceInterval: TimeInterval = 2.0
 
     let runtimeService: ProxyRuntimeService
 

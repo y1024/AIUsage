@@ -108,6 +108,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        ProxyViewModel.shared.flushPersistence()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard !flag else { return true }
         AppState.shared.presentMainWindow(section: AppState.shared.selectedSection)

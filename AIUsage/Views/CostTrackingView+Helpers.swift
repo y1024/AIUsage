@@ -74,11 +74,13 @@ extension CostTrackingView {
     }
 
     func displayedChartSeries(limit: Int = 8) -> [ChartSeriesDescriptor] {
-        let series = sortedChartSeries()
-        guard !selectedModels.isEmpty else { return Array(series.prefix(limit)) }
+        computeDisplayedSeries(from: sortedChartSeries(), limit: limit)
+    }
 
-        let selected = series.filter { selectedModels.contains($0.model) }
-        return selected.isEmpty ? Array(series.prefix(limit)) : selected
+    func computeDisplayedSeries(from sorted: [ChartSeriesDescriptor], limit: Int = 8) -> [ChartSeriesDescriptor] {
+        guard !selectedModels.isEmpty else { return Array(sorted.prefix(limit)) }
+        let selected = sorted.filter { selectedModels.contains($0.model) }
+        return selected.isEmpty ? Array(sorted.prefix(limit)) : selected
     }
 
     var hiddenChartSeriesCount: Int {
@@ -89,6 +91,15 @@ extension CostTrackingView {
 
     var chartSelectableModels: [String] {
         sortedChartSeries().map(\.model)
+    }
+
+    func buildColorMap(from sorted: [ChartSeriesDescriptor]) -> [String: Color] {
+        let palette = Self.modelPalette
+        var map: [String: Color] = [:]
+        for (idx, series) in sorted.enumerated() {
+            map[series.model] = palette[idx % palette.count]
+        }
+        return map
     }
 
     func timelineFromSeries(_ series: ModelTimelineSeries?) -> [CostTimelinePoint] {

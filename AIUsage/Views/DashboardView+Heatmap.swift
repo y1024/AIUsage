@@ -71,18 +71,6 @@ struct ClaudeCodeUsageHeatmap: View {
         Calendar.current.date(byAdding: .day, value: week * 7 + day, to: startDate) ?? .distantPast
     }
 
-    private var thresholds: [Int] {
-        let values = dailyTokens.values.filter { $0 > 0 }.sorted()
-        guard values.count >= 2 else {
-            return values.isEmpty ? [] : [values[0], values[0], values[0]]
-        }
-        func percentile(_ p: Double) -> Int {
-            let idx = Int((Double(values.count) - 1) * p)
-            return values[max(0, min(values.count - 1, idx))]
-        }
-        return [percentile(0.25), percentile(0.50), percentile(0.75)]
-    }
-
     private func bin(for tokens: Int, thresholds: [Int]) -> Int {
         guard tokens > 0 else { return 0 }
         guard thresholds.count == 3 else { return 1 }
@@ -107,29 +95,53 @@ struct ClaudeCodeUsageHeatmap: View {
         }
     }
 
-    private var totalTokens: Int {
-        dailyTokens.values.reduce(0, +)
+    // MARK: - Precomputed Heatmap Data
+
+    private struct HeatmapSnapshot {
+        let tokens: [Date: Int]
+        let usd: [Date: Double]
+        let thresholds: [Int]
+        let totalTokens: Int
+        let activeDayCount: Int
+        let maxDayTokens: (date: Date, tokens: Int)?
     }
 
-    private var activeDayCount: Int {
-        dailyTokens.values.filter { $0 > 0 }.count
-    }
-
-    private var maxDayTokens: (date: Date, tokens: Int)? {
-        dailyTokens.max(by: { $0.value < $1.value }).map { ($0.key, $0.value) }
+    private var snapshot: HeatmapSnapshot {
+        let tokens = dailyTokens
+        let usd = dailyUsd
+        let values = tokens.values.filter { $0 > 0 }.sorted()
+        let computedThresholds: [Int]
+        if values.count < 2 {
+            computedThresholds = values.isEmpty ? [] : [values[0], values[0], values[0]]
+        } else {
+            func percentile(_ p: Double) -> Int {
+                let idx = Int((Double(values.count) - 1) * p)
+                return values[max(0, min(values.count - 1, idx))]
+            }
+            computedThresholds = [percentile(0.25), percentile(0.50), percentile(0.75)]
+        }
+        return HeatmapSnapshot(
+            tokens: tokens,
+            usd: usd,
+            thresholds: computedThresholds,
+            totalTokens: tokens.values.reduce(0, +),
+            activeDayCount: values.count,
+            maxDayTokens: tokens.max(by: { $0.value < $1.value }).map { ($0.key, $0.value) }
+        )
     }
 
     // MARK: - Body
 
     var body: some View {
+        let snap = snapshot
         VStack(alignment: .leading, spacing: 14) {
             header
-            if dailyTokens.isEmpty {
+            if snap.tokens.isEmpty {
                 emptyState
             } else {
-                gridSection
+                gridSection(snap: snap)
                     .zIndex(1)
-                footer
+                footerView(snap: snap)
             }
         }
         .padding(16)
@@ -151,7 +163,7 @@ struct ClaudeCodeUsageHeatmap: View {
 
     // MARK: - Grid
 
-    private var gridSection: some View {
+    private func gridSection(snap: HeatmapSnapshot) -> some View {
         GeometryReader { proxy in
             let spacing: CGFloat = 3
             let weekdayLabelWidth: CGFloat = 28
@@ -169,13 +181,14 @@ struct ClaudeCodeUsageHeatmap: View {
                     weekdayLabels(cellSide: cellSide, spacing: spacing)
                         .frame(width: weekdayLabelWidth, height: gridHeight, alignment: .topLeading)
 
-                    gridColumns(cellSide: cellSide, spacing: spacing)
+                    gridColumns(cellSide: cellSide, spacing: spacing, snap: snap)
                 }
             }
             .overlay {
                 if let hovered = hoveredCell {
                     heatmapTooltipOverlay(
                         cell: hovered,
+                        snap: snap,
                         cellSide: cellSide,
                         spacing: spacing,
                         columnPitch: columnPitch,
@@ -189,11 +202,23 @@ struct ClaudeCodeUsageHeatmap: View {
         .frame(height: 170)
     }
 
+    private static let monthFormatterZh: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月"
+        return f
+    }()
+
+    private static let monthFormatterEn: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMM"
+        return f
+    }()
+
     private func monthLabelsRow(cellSide: CGFloat, columnPitch: CGFloat, height: CGFloat) -> some View {
         let weekdayLabelWidth: CGFloat = 28
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: appState.language == "zh" ? "zh_CN" : "en_US_POSIX")
-        formatter.dateFormat = appState.language == "zh" ? "M月" : "MMM"
+        let formatter = appState.language == "zh" ? Self.monthFormatterZh : Self.monthFormatterEn
 
         let calendar = Calendar.current
         var labels: [(column: Int, text: String)] = []
@@ -244,9 +269,9 @@ struct ClaudeCodeUsageHeatmap: View {
         }
     }
 
-    private func gridColumns(cellSide: CGFloat, spacing: CGFloat) -> some View {
-        let tokens = dailyTokens
-        let computedThresholds = thresholds
+    private func gridColumns(cellSide: CGFloat, spacing: CGFloat, snap: HeatmapSnapshot) -> some View {
+        let tokens = snap.tokens
+        let computedThresholds = snap.thresholds
         let today = Calendar.current.startOfDay(for: Date())
         let accent = Self.heatmapAccent
 
@@ -290,6 +315,7 @@ struct ClaudeCodeUsageHeatmap: View {
     @ViewBuilder
     private func heatmapTooltipOverlay(
         cell: HeatmapCellID,
+        snap: HeatmapSnapshot,
         cellSide: CGFloat,
         spacing: CGFloat,
         columnPitch: CGFloat,
@@ -300,8 +326,8 @@ struct ClaudeCodeUsageHeatmap: View {
         let cellDate = date(forWeek: cell.week, day: cell.day)
         let today = Calendar.current.startOfDay(for: Date())
         let isActive = cellDate <= today
-        let tokens = isActive ? (dailyTokens[cellDate] ?? 0) : 0
-        let usd = isActive ? (dailyUsd[cellDate] ?? 0) : 0
+        let tokens = isActive ? (snap.tokens[cellDate] ?? 0) : 0
+        let usd = isActive ? (snap.usd[cellDate] ?? 0) : 0
         let models = (isActive && tokens > 0) ? modelBreakdown(for: cellDate) : []
 
         let cellCenterX = weekdayLabelWidth + CGFloat(cell.week) * columnPitch + cellSide / 2
@@ -358,10 +384,22 @@ struct ClaudeCodeUsageHeatmap: View {
         )
     }
 
+    private static let tooltipDateFormatterZh: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "yyyy年M月d日 EEE"
+        return f
+    }()
+
+    private static let tooltipDateFormatterEn: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "EEE, MMM d, yyyy"
+        return f
+    }()
+
     private func tooltipDateHeader(date: Date, isActive: Bool) -> some View {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: appState.language == "zh" ? "zh_CN" : "en_US_POSIX")
-        formatter.dateFormat = appState.language == "zh" ? "yyyy年M月d日 EEE" : "EEE, MMM d, yyyy"
+        let formatter = appState.language == "zh" ? Self.tooltipDateFormatterZh : Self.tooltipDateFormatterEn
         let dateStr = formatter.string(from: date)
 
         return HStack(spacing: 4) {
@@ -437,14 +475,14 @@ struct ClaudeCodeUsageHeatmap: View {
 
     // MARK: - Footer
 
-    private var footer: some View {
+    private func footerView(snap: HeatmapSnapshot) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(L("Total \(formatCompactNumber(Double(totalTokens))) tokens",
-                       "合计 \(formatCompactNumber(Double(totalTokens))) tokens"))
+                Text(L("Total \(formatCompactNumber(Double(snap.totalTokens))) tokens",
+                       "合计 \(formatCompactNumber(Double(snap.totalTokens))) tokens"))
                     .font(.caption.weight(.semibold))
-                if let peak = maxDayTokens {
-                    Text(peakSummaryText(for: peak))
+                if let peak = snap.maxDayTokens {
+                    Text(peakSummaryText(for: peak, activeDays: snap.activeDayCount))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -491,15 +529,27 @@ struct ClaudeCodeUsageHeatmap: View {
 
     // MARK: - Helpers
 
-    private func peakSummaryText(for peak: (date: Date, tokens: Int)) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: appState.language == "zh" ? "zh_CN" : "en_US_POSIX")
-        formatter.dateFormat = appState.language == "zh" ? "M月d日" : "MMM d"
+    private static let peakDateFormatterZh: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M月d日"
+        return f
+    }()
+
+    private static let peakDateFormatterEn: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
+    private func peakSummaryText(for peak: (date: Date, tokens: Int), activeDays: Int) -> String {
+        let formatter = appState.language == "zh" ? Self.peakDateFormatterZh : Self.peakDateFormatterEn
         let peakDate = formatter.string(from: peak.date)
         let peakValue = formatCompactNumber(Double(peak.tokens))
         return L(
-            "\(activeDayCount) active days · peak \(peakValue) on \(peakDate)",
-            "活跃 \(activeDayCount) 天 · 最高 \(peakValue) 于 \(peakDate)"
+            "\(activeDays) active days · peak \(peakValue) on \(peakDate)",
+            "活跃 \(activeDays) 天 · 最高 \(peakValue) 于 \(peakDate)"
         )
     }
 }

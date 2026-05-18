@@ -6,14 +6,19 @@ extension CostTrackingView {
     private var maxVisibleChartModels: Int { 8 }
 
     var chartSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let allSorted = sortedChartSeries()
+        let displayed = computeDisplayedSeries(from: allSorted, limit: maxVisibleChartModels)
+        let colorMap = buildColorMap(from: allSorted)
+        let hiddenCount = max(0, allSorted.count - displayed.count)
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(L("Spend Trend", "消费趋势"))
                     .font(.headline.weight(.bold))
 
                 Spacer()
 
-                modelFilterMenu
+                modelFilterMenuView(selectableModels: allSorted.map(\.model))
 
                 Picker("", selection: $selectedMetric) {
                     Text("USD").tag(CostMetric.usd)
@@ -32,10 +37,10 @@ extension CostTrackingView {
                 .frame(width: 220)
             }
 
-            spendChart
+            spendChartView(series: displayed, colorMap: colorMap)
                 .frame(height: 220)
 
-            chartLegendSection
+            chartLegendView(series: displayed, colorMap: colorMap, hiddenCount: hiddenCount)
         }
         .padding(16)
         .background(
@@ -49,6 +54,10 @@ extension CostTrackingView {
     }
 
     var modelFilterMenu: some View {
+        modelFilterMenuView(selectableModels: chartSelectableModels)
+    }
+
+    func modelFilterMenuView(selectableModels: [String]) -> some View {
         Menu {
             Button(action: { selectedModels = [] }) {
                 HStack {
@@ -59,7 +68,7 @@ extension CostTrackingView {
                 }
             }
             Divider()
-            ForEach(chartSelectableModels, id: \.self) { model in
+            ForEach(selectableModels, id: \.self) { model in
                 Button(action: { toggleModelSelection(model) }) {
                     HStack {
                         Text(model)
@@ -107,7 +116,11 @@ extension CostTrackingView {
 
     @ViewBuilder
     var spendChart: some View {
-        let series = displayedChartSeries(limit: maxVisibleChartModels)
+        spendChartView(series: displayedChartSeries(limit: maxVisibleChartModels), colorMap: modelColorMap)
+    }
+
+    @ViewBuilder
+    func spendChartView(series: [ChartSeriesDescriptor], colorMap: [String: Color]) -> some View {
         if selectedModels.isEmpty {
             let points = aggregateChartPoints()
             if points.isEmpty {
@@ -116,7 +129,7 @@ extension CostTrackingView {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if series.count > 1 {
-                multiModelChart
+                multiModelChartFor(series, colorMap: colorMap)
             } else {
                 singleSeriesChart(points: points)
             }
@@ -131,20 +144,11 @@ extension CostTrackingView {
                 singleSeriesChart(points: points)
             }
         } else {
-            multiModelChartFiltered
+            multiModelChartFor(series, colorMap: colorMap)
         }
     }
 
-    var multiModelChart: some View {
-        multiModelChartFor(displayedChartSeries(limit: maxVisibleChartModels))
-    }
-
-    var multiModelChartFiltered: some View {
-        multiModelChartFor(displayedChartSeries(limit: maxVisibleChartModels))
-    }
-
-    func multiModelChartFor(_ allSeries: [ChartSeriesDescriptor]) -> some View {
-        let colorMap = modelColorMap
+    func multiModelChartFor(_ allSeries: [ChartSeriesDescriptor], colorMap: [String: Color]) -> some View {
         let isUsd = selectedMetric == .usd
         let hoverDate = chartHoverDate
         return Chart {
@@ -201,11 +205,14 @@ extension CostTrackingView {
 
     @ViewBuilder
     var chartLegendSection: some View {
-        let series = displayedChartSeries(limit: maxVisibleChartModels)
-        let colorMap = modelColorMap
+        chartLegendView(series: displayedChartSeries(limit: maxVisibleChartModels), colorMap: modelColorMap, hiddenCount: hiddenChartSeriesCount)
+    }
+
+    @ViewBuilder
+    func chartLegendView(series: [ChartSeriesDescriptor], colorMap: [String: Color], hiddenCount: Int) -> some View {
         if series.count > 1 {
             VStack(alignment: .leading, spacing: 8) {
-                if hiddenChartSeriesCount > 0 && selectedModels.isEmpty {
+                if hiddenCount > 0 && selectedModels.isEmpty {
                     Text(
                         L(
                             "Showing Top \(series.count) models by current metric",

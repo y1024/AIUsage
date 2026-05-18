@@ -530,9 +530,10 @@ struct ProxyManagementView: View {
                     .frame(maxWidth: .infinity, minHeight: 100)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(logs.prefix(10).enumerated()), id: \.element.id) { index, log in
+                    let displayedLogs = Array(logs.suffix(10).reversed())
+                    ForEach(Array(displayedLogs.enumerated()), id: \.element.id) { index, log in
                         requestLogRow(log)
-                        if index < min(9, logs.count - 1) {
+                        if index < displayedLogs.count - 1 {
                             Divider().padding(.horizontal, 12)
                         }
                     }
@@ -816,7 +817,9 @@ private struct ConfigurationCardView: View, Equatable {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            nodeTypeBadge
+
             HStack(spacing: 8) {
                 Image(systemName: "line.3.horizontal")
                     .font(.system(size: 11, weight: .medium))
@@ -832,16 +835,18 @@ private struct ConfigurationCardView: View, Equatable {
                         return NSItemProvider(object: config.id as NSString)
                     }
 
-                Circle()
-                    .fill(isActive ? brandColor : isProxyOnlyRunning ? .purple : Color.gray.opacity(0.4))
-                    .frame(width: 10, height: 10)
+                VStack(alignment: .trailing, spacing: 4) {
+                    statPill(icon: "arrow.up.arrow.down", value: "\(statsRequests)", color: .blue)
+                        .help(L("Total Requests", "总请求数"))
+                    statPill(icon: "checkmark.circle", value: String(format: "%.0f%%", statsSuccessRate), color: .green)
+                        .help(L("Success Rate", "成功率"))
+                }
+                .frame(width: 80)
+                .opacity(config.needsProxyProcess ? 1 : 0)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(config.name)
-                            .font(.system(size: 15, weight: .bold))
-                        nodeTypeBadge
-                    }
+                    Text(config.name)
+                        .font(.system(size: 15, weight: .bold))
                     Text(config.displayURL)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -850,43 +855,32 @@ private struct ConfigurationCardView: View, Equatable {
 
                 Spacer()
 
-                if config.needsProxyProcess {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        statPill(icon: "arrow.up.arrow.down", value: "\(statsRequests)", color: .blue)
-                        statPill(icon: "checkmark.circle", value: String(format: "%.0f%%", statsSuccessRate), color: .green)
-                    }
-                }
-
                 HStack(spacing: 6) {
-                    Button(action: onToggleActivation) {
-                        Group {
-                            if isBusy {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: isActive ? "stop.circle.fill" : "power.circle.fill")
-                                    .font(.system(size: 20))
-                                    .foregroundStyle(isActive ? .orange : .green)
-                            }
-                        }
-                        .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
+                    Toggle("", isOn: Binding(
+                        get: { isActive },
+                        set: { newValue in if newValue != isActive { onToggleActivation() } }
+                    ))
+                    .toggleStyle(ProxyActivationToggleStyle(
+                        brandColor: brandColor,
+                        isBusy: isBusy
+                    ))
                     .disabled(isBusy)
-                    .help(isActive
+                    .instantTooltip(isActive
                           ? L("Disconnect Claude", "断开 Claude")
                           : L("Apply to Claude", "接入 Claude"))
 
-                    if config.needsProxyProcess && !isActive {
+                    if config.needsProxyProcess {
                         Button(action: onToggleProxyOnly) {
                             Image(systemName: "antenna.radiowaves.left.and.right")
                                 .font(.system(size: 14))
-                                .foregroundStyle(isProxyOnlyRunning ? .orange : .purple)
+                                .foregroundStyle(isActive ? .gray.opacity(0.4) : isProxyOnlyRunning ? .orange : .purple)
                                 .frame(width: 20, height: 20)
                         }
                         .buttonStyle(.plain)
-                        .disabled(isBusy)
-                        .help(isProxyOnlyRunning
+                        .disabled(isBusy || isActive)
+                        .instantTooltip(isActive
+                              ? L("Unavailable while connected to Claude", "接入 Claude 时不可用")
+                              : isProxyOnlyRunning
                               ? L("Stop Proxy", "停止代理")
                               : L("Start Proxy", "启动代理"))
                     }
@@ -898,7 +892,7 @@ private struct ConfigurationCardView: View, Equatable {
                             .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.plain)
-                    .help(L("Copy Launch Command", "复制启动命令"))
+                    .instantTooltip(L("Copy Launch Command", "复制启动命令"))
 
                     Button(action: onEdit) {
                         Image(systemName: "pencil.circle.fill")
@@ -907,7 +901,7 @@ private struct ConfigurationCardView: View, Equatable {
                     }
                     .buttonStyle(.plain)
                     .disabled(isBusy)
-                    .help(L("Edit", "编辑"))
+                    .instantTooltip(L("Edit", "编辑"))
 
                     Button(action: onDelete) {
                         Image(systemName: "trash.circle.fill")
@@ -916,7 +910,7 @@ private struct ConfigurationCardView: View, Equatable {
                     }
                     .buttonStyle(.plain)
                     .disabled(isBusy)
-                    .help(L("Delete", "删除"))
+                    .instantTooltip(L("Delete", "删除"))
                 }
             }
 
@@ -930,6 +924,17 @@ private struct ConfigurationCardView: View, Equatable {
             RoundedRectangle(cornerRadius: 14)
                 .fill(cardBackgroundColor)
         )
+        .overlay(alignment: .leading) {
+            if isActive || isProxyOnlyRunning {
+                let statusColor = isActive ? brandColor : Color.purple
+                Capsule()
+                    .fill(statusColor)
+                    .frame(width: 3)
+                    .padding(.vertical, 10)
+                    .padding(.leading, 3)
+                    .shadow(color: statusColor.opacity(0.4), radius: 4, x: 0, y: 0)
+            }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .stroke(cardBorderColor, lineWidth: (isActive || isProxyOnlyRunning) ? 1.5 : 1)
@@ -967,14 +972,16 @@ private struct ConfigurationCardView: View, Equatable {
         }
         .disabled(isBusy)
 
-        if config.needsProxyProcess && !isActive {
+        if config.needsProxyProcess {
             Button { onToggleProxyOnly() } label: {
                 Label(
-                    isProxyOnlyRunning ? L("Stop Proxy", "停止代理") : L("Start Proxy", "启动代理"),
+                    isActive
+                        ? L("Unavailable while connected to Claude", "接入 Claude 时不可用")
+                        : isProxyOnlyRunning ? L("Stop Proxy", "停止代理") : L("Start Proxy", "启动代理"),
                     systemImage: "antenna.radiowaves.left.and.right"
                 )
             }
-            .disabled(isBusy)
+            .disabled(isBusy || isActive)
         }
 
         Button { onCopyLaunchCommand() } label: {
@@ -1096,7 +1103,7 @@ private struct CardDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         guard draggingId != nil else { return }
-        withAnimation(.easeInOut(duration: 0.15)) {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
             dropTarget = targetIndex
         }
     }
@@ -1107,7 +1114,7 @@ private struct CardDropDelegate: DropDelegate {
 
     func dropExited(info: DropInfo) {
         if dropTarget == targetIndex {
-            withAnimation(.easeInOut(duration: 0.15)) {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                 dropTarget = nil
             }
         }
@@ -1115,7 +1122,7 @@ private struct CardDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         guard let id = draggingId else { return false }
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             viewModel.moveConfiguration(fromId: id, toIndex: targetIndex)
         }
         draggingId = nil
@@ -1125,6 +1132,96 @@ private struct CardDropDelegate: DropDelegate {
 
     func validateDrop(info: DropInfo) -> Bool {
         draggingId != nil
+    }
+}
+
+// MARK: - Proxy Activation Toggle Style
+
+private struct ProxyActivationToggleStyle: ToggleStyle {
+    let brandColor: Color
+    let isBusy: Bool
+
+    private let trackWidth: CGFloat = 40
+    private let trackHeight: CGFloat = 22
+    private let thumbDiameter: CGFloat = 16
+    private let thumbPadding: CGFloat = 3
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isOn = configuration.isOn
+
+        Button {
+            guard !isBusy else { return }
+            configuration.isOn.toggle()
+        } label: {
+            ZStack {
+                Capsule()
+                    .fill(isOn ? brandColor : Color.gray.opacity(0.35))
+                    .frame(width: trackWidth, height: trackHeight)
+
+                Capsule()
+                    .strokeBorder(isOn ? brandColor.opacity(0.6) : Color.gray.opacity(0.2), lineWidth: 0.5)
+                    .frame(width: trackWidth, height: trackHeight)
+
+                HStack {
+                    if isOn { Spacer() }
+
+                    Group {
+                        if isBusy {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .frame(width: thumbDiameter, height: thumbDiameter)
+                        } else {
+                            Circle()
+                                .fill(.white)
+                                .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+                                .frame(width: thumbDiameter, height: thumbDiameter)
+                        }
+                    }
+
+                    if !isOn { Spacer() }
+                }
+                .padding(.horizontal, thumbPadding)
+                .frame(width: trackWidth)
+            }
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isOn)
+    }
+}
+
+// MARK: - Instant Tooltip Modifier
+
+private struct InstantTooltip: ViewModifier {
+    let text: String
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottom) {
+                if isHovering {
+                    Text(text)
+                        .font(.caption2)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.black.opacity(0.8)))
+                        .fixedSize()
+                        .offset(y: 26)
+                        .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .top)))
+                        .zIndex(100)
+                }
+            }
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    isHovering = hovering
+                }
+            }
+    }
+}
+
+extension View {
+    fileprivate func instantTooltip(_ text: String) -> some View {
+        modifier(InstantTooltip(text: text))
     }
 }
 

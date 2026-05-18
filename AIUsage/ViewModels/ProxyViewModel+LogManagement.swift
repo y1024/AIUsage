@@ -53,12 +53,37 @@ extension ProxyViewModel {
         statistics[log.configId] = stats
 
         var logs = recentLogs[log.configId] ?? []
-        logs.insert(log, at: 0)
+        logs.append(log)
         recentLogs[log.configId] = logs
 
+        schedulePersistence()
+        scheduleLogsRefresh()
+    }
+
+    /// Coalesce persistence writes: waits `persistenceDebounceInterval` after the first dirty event,
+    /// then flushes. A running timer is NOT cancelled by subsequent events; this guarantees an upper
+    /// bound on data loss even during sustained streaming (unlike a pure debounce).
+    func schedulePersistence() {
+        guard persistenceWorkItem == nil else { return }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.persistenceWorkItem = nil
+            self.saveStatistics()
+            self.saveLogs()
+        }
+        persistenceWorkItem = item
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.persistenceDebounceInterval,
+            execute: item
+        )
+    }
+
+    /// Immediately flush any pending debounced persistence.
+    func flushPersistence() {
+        persistenceWorkItem?.cancel()
+        persistenceWorkItem = nil
         saveStatistics()
         saveLogs()
-        scheduleLogsRefresh()
     }
 
     /// Fill in costs for logs that have estimatedCostUSD == 0 (pricing was missing at creation time).
