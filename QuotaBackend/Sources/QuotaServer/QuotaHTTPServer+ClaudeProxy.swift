@@ -140,26 +140,29 @@ extension QuotaHTTPServer {
     }
 
     func handleCountTokensEndpoint(request: HTTPRequest, headers: [String: String]) async -> HTTPResponse {
-        guard let proxy = proxyService else {
-            return claudeErrorResponse(
-                type: "api_error",
-                message: "Claude proxy is not enabled",
-                status: 503,
-                headers: headers
-            )
+        // Authenticate: OpenAI Convert mode uses proxyService, Passthrough mode uses proxyConfig key
+        if let proxy = proxyService {
+            guard await proxy.authenticate(headers: request.headers) else {
+                return claudeErrorResponse(
+                    type: "authentication_error",
+                    message: "Invalid API key",
+                    status: 401,
+                    headers: headers
+                )
+            }
+        } else if let config = proxyConfig, let expectedKey = config.expectedClientKey, !expectedKey.isEmpty {
+            let clientKey = request.headers["x-api-key"]
+                ?? request.headers["authorization"]?.replacingOccurrences(of: "Bearer ", with: "")
+            if clientKey != expectedKey {
+                return claudeErrorResponse(
+                    type: "authentication_error",
+                    message: "Invalid API key",
+                    status: 401,
+                    headers: headers
+                )
+            }
         }
 
-        // Authenticate
-        guard await proxy.authenticate(headers: request.headers) else {
-            return claudeErrorResponse(
-                type: "authentication_error",
-                message: "Invalid API key",
-                status: 401,
-                headers: headers
-            )
-        }
-
-        // Parse request
         guard let tokenRequest = try? JSONDecoder().decode(ClaudeTokenCountRequest.self, from: request.body) else {
             return claudeErrorResponse(
                 type: "invalid_request_error",
@@ -171,13 +174,91 @@ extension QuotaHTTPServer {
 
         httpLog.debug("→ POST /v1/messages/count_tokens (model: \(tokenRequest.model))")
 
-        do {
-            // `input_tokens` in the body is a heuristic estimate from the proxy, not tokenizer-exact.
-            let response = try await proxy.handleCountTokens(request: tokenRequest)
-            return jsonResponse(encodable: response, headers: headers)
-        } catch {
-            return await proxyErrorHTTPResponse(proxy: proxy, error: error, headers: headers)
+        if let proxy = proxyService {
+            do {
+                let response = try await proxy.handleCountTokens(request: tokenRequest)
+                return jsonResponse(encodable: response, headers: headers)
+            } catch {
+                return await proxyErrorHTTPResponse(proxy: proxy, error: error, headers: headers)
+            }
         }
+
+        // Passthrough mode fallback: local heuristic estimate (upstream does not support count_tokens)
+        let estimated = estimateTokenCount(request: tokenRequest)
+        return jsonResponse(encodable: ClaudeTokenCountResponse(inputTokens: estimated), headers: headers)
+    }
+
+    /// Local heuristic token estimate for passthrough mode where upstream
+    /// does not support `/v1/messages/count_tokens`.
+    /// Uses character-count / 4 approximation; not tokenizer-exact.
+    /// Algorithm mirrors `ClaudeProxyService.handleCountTokens`.
+    private func estimateTokenCount(request: ClaudeTokenCountRequest) -> Int {
+        var totalChars = 0
+
+        if let system = request.system {
+            totalChars += system.count
+        }
+        if let systemBlocks = request.systemBlocks {
+            for block in systemBlocks {
+                totalChars += block.text?.count ?? 0
+                totalChars += block.cacheControl == nil ? 0 : 20
+            }
+        }
+
+        for message in request.messages {
+            switch message.content {
+            case .text(let text):
+                totalChars += text.count
+            case .blocks(let blocks):
+                for block in blocks {
+                    switch block {
+                    case .text(let textBlock):
+                        totalChars += textBlock.text.count
+                    case .toolUse(let toolUse):
+                        totalChars += toolUse.name.count
+                        totalChars += 50
+                    case .toolResult(let result):
+                        totalChars += result.content?.count ?? 0
+                        if let contentBlocks = result.contentBlocks {
+                            for contentBlock in contentBlocks {
+                                switch contentBlock {
+                                case .image:
+                                    totalChars += 4000
+                                case .document:
+                                    totalChars += 8000
+                                case .thinking(let thinking):
+                                    totalChars += thinking.thinking.count
+                                case .redactedThinking:
+                                    totalChars += 2000
+                                case .text, .toolUse, .toolResult, .unknown:
+                                    break
+                                }
+                            }
+                        }
+                    case .image:
+                        totalChars += 4000
+                    case .document:
+                        totalChars += 8000
+                    case .thinking(let thinking):
+                        totalChars += thinking.thinking.count
+                    case .redactedThinking:
+                        totalChars += 2000
+                    case .unknown:
+                        totalChars += 100
+                    }
+                }
+            }
+        }
+
+        if let tools = request.tools {
+            for tool in tools {
+                totalChars += tool.name.count
+                totalChars += tool.description?.count ?? 0
+                totalChars += 100
+            }
+        }
+
+        return max(1, totalChars / 4)
     }
 
     func handleListFilesEndpoint(

@@ -234,7 +234,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
         if request.method == "POST",
            cleanPath == "/v1/messages" || cleanPath.hasPrefix("/v1/messages/") {
-            if isPassthrough {
+            if isPassthrough && cleanPath != "/v1/messages/count_tokens" {
                 await handlePassthroughProxy(connection, request: request)
                 return
             }
