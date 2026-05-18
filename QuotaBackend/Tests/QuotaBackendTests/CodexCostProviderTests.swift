@@ -205,17 +205,86 @@ final class CodexCostProviderTests: XCTestCase {
         XCTAssertEqual(models.map(\.model), ["gpt-5-mini"])
     }
 
+    func testFullHistoryImportStateUsesCodexHomeScope() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let codexHome = tempRoot.appendingPathComponent("custom-codex-home", isDirectory: true)
+        let oldDate = Date().addingTimeInterval(-60 * 86_400)
+        let sessionDir = codexSessionDirectory(codexHome: codexHome, for: oldDate)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+
+        let ts = SharedFormatters.iso8601String(from: oldDate)
+        try writeJSONLines([
+            [
+                "type": "session_meta",
+                "timestamp": ts,
+                "payload": ["id": "custom-home-session"]
+            ],
+            [
+                "type": "turn_context",
+                "timestamp": ts,
+                "payload": ["model": "gpt-5.4"]
+            ],
+            [
+                "type": "event_msg",
+                "timestamp": ts,
+                "payload": [
+                    "type": "token_count",
+                    "info": [
+                        "total_token_usage": [
+                            "input_tokens": 42,
+                            "cached_input_tokens": 0,
+                            "output_tokens": 8
+                        ]
+                    ]
+                ]
+            ]
+        ], to: sessionDir.appendingPathComponent("custom-home-session.jsonl"))
+
+        let provider = CodexCostProvider(
+            homeDirectory: tempRoot.path,
+            timeZone: TimeZone(secondsFromGMT: 0)!,
+            environment: ["CODEX_HOME": codexHome.path]
+        )
+
+        let initiallyNeedsImport = await provider.needsFullHistoryImport()
+        XCTAssertTrue(initiallyNeedsImport)
+        await provider.requestFullHistoryImport()
+
+        let otherProvider = CodexCostProvider(
+            homeDirectory: tempRoot.path,
+            timeZone: TimeZone(secondsFromGMT: 0)!,
+            environment: ["CODEX_HOME": tempRoot.appendingPathComponent("other-codex-home").path]
+        )
+        do {
+            _ = try await otherProvider.fetchUsage()
+            XCTFail("Expected missing logs for unrelated Codex home")
+        } catch {
+            // The unrelated scope should not consume this provider's full-history request.
+        }
+
+        let usage = try await provider.fetchUsage()
+
+        XCTAssertEqual(usage.extra["overall.totalTokens"]?.value as? Int, 50)
+        let stillNeedsImport = await provider.needsFullHistoryImport()
+        XCTAssertFalse(stillNeedsImport)
+    }
+
     private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("aiusage-codex-cost-tests-\(UUID().uuidString)", isDirectory: true)
     }
 
     private func codexSessionDirectory(in tempRoot: URL, for date: Date) -> URL {
+        codexSessionDirectory(codexHome: tempRoot.appendingPathComponent(".codex", isDirectory: true), for: date)
+    }
+
+    private func codexSessionDirectory(codexHome: URL, for date: Date) -> URL {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let comps = calendar.dateComponents([.year, .month, .day], from: date)
-        return tempRoot
-            .appendingPathComponent(".codex", isDirectory: true)
+        return codexHome
             .appendingPathComponent("sessions", isDirectory: true)
             .appendingPathComponent(String(format: "%04d", comps.year ?? 1970), isDirectory: true)
             .appendingPathComponent(String(format: "%02d", comps.month ?? 1), isDirectory: true)

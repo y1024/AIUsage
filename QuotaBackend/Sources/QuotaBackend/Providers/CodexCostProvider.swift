@@ -28,12 +28,12 @@ public struct CodexCostProvider: ProviderFetcher {
     private static let defaultArchiveScopeID = "default"
     private static let filenameDateRegex = try? NSRegularExpression(pattern: "(\\d{4}-\\d{2}-\\d{2})")
 
-    public static func requestFullHistoryImport() async {
-        await usageArchive.requestFullHistoryImport()
+    public func requestFullHistoryImport() async {
+        await Self.usageArchive.requestFullHistoryImport(scope: archiveScopeID())
     }
 
-    public static func needsFullHistoryImport() async -> Bool {
-        await usageArchive.needsFullHistoryImport()
+    public func needsFullHistoryImport() async -> Bool {
+        await Self.usageArchive.needsFullHistoryImport(scope: archiveScopeID())
     }
 
     public init(
@@ -1371,25 +1371,24 @@ private actor CodexUsageArchiveStore {
     private static let defaultScopeID = "default"
     private var archives: [String: CodexUsageArchive] = [:]
     private var loadedScopes: Set<String> = []
-    private var fullHistoryImportRequestedForAllScopes = false
+    private var fullHistoryImportRequests: Set<String> = []
 
-    func requestFullHistoryImport() {
-        fullHistoryImportRequestedForAllScopes = true
+    func requestFullHistoryImport(scope: String) {
+        fullHistoryImportRequests.insert(scope)
     }
 
-    func needsFullHistoryImport() -> Bool {
-        let archive = loadArchiveIfNeeded(scope: Self.defaultScopeID)
+    func needsFullHistoryImport(scope: String) -> Bool {
+        let archive = loadArchiveIfNeeded(scope: scope)
         return archive.fullHistoryImportedAt == nil
     }
 
     func consumeFullHistoryImportRequest(scope: String) -> Bool {
         let archive = loadArchiveIfNeeded(scope: scope)
-        guard fullHistoryImportRequestedForAllScopes, archive.fullHistoryImportedAt == nil else {
-            fullHistoryImportRequestedForAllScopes = false
+        guard archive.fullHistoryImportedAt == nil else {
+            fullHistoryImportRequests.remove(scope)
             return false
         }
-        fullHistoryImportRequestedForAllScopes = false
-        return true
+        return fullHistoryImportRequests.remove(scope) != nil
     }
 
     func merge(

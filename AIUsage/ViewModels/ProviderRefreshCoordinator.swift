@@ -114,13 +114,15 @@ final class ProviderRefreshCoordinator: ObservableObject {
     func refreshCodexCostFullHistoryIfNeeded() {
         Task { @MainActor in
             let providerId = "codex-cost"
+            let provider = ProviderRegistry.provider(for: providerId) as? CodexCostProvider
             guard settings.backendMode == "local",
                   selectedProviderIds().contains(providerId),
                   !refreshingProviderIDs.contains(providerId),
-                  await CodexCostProvider.needsFullHistoryImport() else {
+                  let provider,
+                  await provider.needsFullHistoryImport() else {
                 return
             }
-            await CodexCostProvider.requestFullHistoryImport()
+            await provider.requestFullHistoryImport()
             await refreshProviderNow(providerId)
         }
     }

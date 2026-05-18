@@ -4,7 +4,11 @@ import SwiftUI
 
 private enum BucketDateParser {
     private static let lock = NSLock()
-    private static var cache: [String: Date] = [:]
+    private static let cache: NSCache<NSString, NSDate> = {
+        let cache = NSCache<NSString, NSDate>()
+        cache.countLimit = 2_048
+        return cache
+    }()
 
     private static let hourly: DateFormatter = {
         let f = DateFormatter()
@@ -21,15 +25,20 @@ private enum BucketDateParser {
     }()
 
     static func parse(_ bucket: String) -> Date {
+        let cacheKey = bucket as NSString
+        if let cached = cache.object(forKey: cacheKey) {
+            return cached as Date
+        }
+
         lock.lock()
         defer { lock.unlock() }
 
-        if let cached = cache[bucket] {
-            return cached
+        if let cached = cache.object(forKey: cacheKey) {
+            return cached as Date
         }
 
         let parsed = hourly.date(from: bucket) ?? daily.date(from: bucket) ?? .distantPast
-        cache[bucket] = parsed
+        cache.setObject(parsed as NSDate, forKey: cacheKey)
         return parsed
     }
 }
