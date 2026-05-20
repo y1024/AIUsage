@@ -6,8 +6,8 @@ import Foundation
 
 public struct ClaudeProvider: ProviderFetcher {
     public let id = "claude"
-    public let displayName = "Claude Code"
-    public let description = "Usage-derived Claude Code spend ledger from local logs"
+    public let displayName = "Claude Token Stats"
+    public let description = "Usage-derived Claude token and cost ledger from local logs"
 
     /// Matches ProxyConfiguration.ModelPricing.defaultCacheWriteMultiplier
     static let defaultCacheWriteMultiplier: Double = 1.25
@@ -114,7 +114,7 @@ public struct ClaudeProvider: ProviderFetcher {
         }
         extra["timeline.byModel"] = AnyCodable(modelTimelinesArr)
 
-        var usage = ProviderUsage(provider: "claude", label: "Claude Code", extra: extra)
+        var usage = ProviderUsage(provider: "claude", label: displayName, extra: extra)
         var source = SourceInfo(mode: "auto", type: "claude-project-logs")
         source.roots = existingRoots
         usage.source = source

@@ -78,7 +78,7 @@ struct MenuBarView: View {
                 refreshCoordinator.refreshAllProviders()
             } label: {
                 Group {
-                    if refreshCoordinator.isLoading || refreshCoordinator.isRefreshingAllProviders {
+                    if refreshCoordinator.isAnyRefreshInProgress {
                         SmallProgressView().frame(width: 14, height: 14)
                     } else {
                         Image(systemName: "arrow.clockwise")
@@ -90,7 +90,7 @@ struct MenuBarView: View {
                 .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .disabled(refreshCoordinator.isLoading || refreshCoordinator.isRefreshingAllProviders)
+            .disabled(refreshCoordinator.isAnyRefreshInProgress)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -239,14 +239,39 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Stats Summary Cell (Proxy / Claude Code switchable)
+    // MARK: - Stats Summary Cell (Proxy / local token stats switchable)
 
     private var statsConfigKey: String {
         settings.menuBarSummaryStatsSource == .proxy ? "proxy-stats" : "claude-code-stats"
     }
 
-    private var claudeCodeCostSummary: CostSummary? {
-        refreshCoordinator.providers.first { $0.category == "local-cost" }?.costSummary
+    private var localTokenCostSummary: CostSummary? {
+        let summaries = refreshCoordinator.providers
+            .filter { $0.category == "local-cost" }
+            .compactMap(\.costSummary)
+        guard !summaries.isEmpty else { return nil }
+
+        func period(_ keyPath: KeyPath<CostSummary, CostPeriod?>, label: String) -> CostPeriod {
+            let periods = summaries.compactMap { $0[keyPath: keyPath] }
+            return CostPeriod(
+                usd: periods.reduce(0) { $0 + $1.usd },
+                tokens: periods.reduce(0) { $0 + ($1.tokens ?? 0) },
+                rangeLabel: label
+            )
+        }
+
+        return CostSummary(
+            today: period(\.today, label: "Today"),
+            week: period(\.week, label: "This week"),
+            month: period(\.month, label: "This month"),
+            overall: period(\.overall, label: "Overall"),
+            timeline: nil,
+            modelBreakdown: nil,
+            modelBreakdownToday: nil,
+            modelBreakdownWeek: nil,
+            modelBreakdownOverall: nil,
+            modelTimelines: nil
+        )
     }
 
     private func statsSummaryCell() -> some View {
@@ -352,7 +377,7 @@ struct MenuBarView: View {
             return (value, tint, stats.requests)
 
         case .claudeCode:
-            guard let period = claudeCodePeriod(config.period) else {
+            guard let period = localTokenPeriod(config.period) else {
                 return ("--", .secondary, 0)
             }
             let value: String
@@ -369,8 +394,8 @@ struct MenuBarView: View {
         }
     }
 
-    private func claudeCodePeriod(_ period: MenuBarCostPeriod) -> CostPeriod? {
-        guard let summary = claudeCodeCostSummary else { return nil }
+    private func localTokenPeriod(_ period: MenuBarCostPeriod) -> CostPeriod? {
+        guard let summary = localTokenCostSummary else { return nil }
         switch period {
         case .today:   return summary.today
         case .week:    return summary.week
@@ -381,13 +406,13 @@ struct MenuBarView: View {
 
     private func statsIcon(source: MenuBarStatsSource, metric: MenuBarCostMetric) -> String {
         if metric == .cost { return "dollarsign.circle.fill" }
-        return source == .claudeCode ? "terminal.fill" : "bolt.fill"
+        return source == .claudeCode ? "chart.bar.xaxis" : "bolt.fill"
     }
 
     private func sourceLabel(_ source: MenuBarStatsSource) -> String {
         switch source {
         case .proxy:     return L("Proxy Stats", "代理统计")
-        case .claudeCode: return L("Claude Code Stats", "CC 统计")
+        case .claudeCode: return L("Token Stats", "Token 统计")
         }
     }
 
@@ -413,7 +438,7 @@ struct MenuBarView: View {
         case .proxy:
             sourcePrefix = metric == .cost ? L("Proxy Cost", "代理费用") : L("Proxy Tokens", "代理 Tokens")
         case .claudeCode:
-            sourcePrefix = metric == .cost ? L("CC Cost", "CC 费用") : L("CC Tokens", "CC Tokens")
+            sourcePrefix = metric == .cost ? L("Token Cost", "Token 费用") : L("Local Tokens", "本地 Tokens")
         }
         if period == .overall { return sourcePrefix }
         return "\(periodLabel(period)) · \(sourcePrefix)"

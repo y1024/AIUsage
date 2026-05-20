@@ -218,7 +218,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: L("Open Cost Tracking", "打开费用追踪"), action: #selector(openCostTracking), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L("Refresh All", "全部刷新"), action: #selector(refreshAll), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: L("Refresh Claude Code", "刷新 Claude Code"), action: #selector(refreshClaudeCode), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: L("Refresh Token Stats", "刷新 Token 统计"), action: #selector(refreshClaudeCode), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L("Settings...", "设置..."), action: #selector(openSettings), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
@@ -249,7 +249,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func refreshClaudeCode() {
-        ProviderRefreshCoordinator.shared.refreshClaudeCodeOnly()
+        ProviderRefreshCoordinator.shared.refreshLocalTokenStatsOnly()
     }
 
     @objc func openSettings() {

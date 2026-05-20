@@ -1,20 +1,6 @@
 import SwiftUI
-import Charts
 
 extension CostTrackingView {
-
-    var logDateRange: String? {
-        guard let timeline = costSummary?.timeline else { return nil }
-        let points = !timeline.daily.isEmpty ? timeline.daily : timeline.hourly
-        guard let first = points.first?.bucket, let last = points.last?.bucket else { return nil }
-        return "\(first) – \(last)"
-    }
-
-    var logDayCount: Int {
-        guard let timeline = costSummary?.timeline else { return 0 }
-        let points = !timeline.daily.isEmpty ? timeline.daily : timeline.hourly
-        return max(1, points.count)
-    }
 
     /// Cache hit rate across all tracked models: cache_read / (input + cache_read + cache_creation).
     /// Returns nil when no cache-eligible traffic has been observed yet (to display an em-dash instead of 0%).
@@ -32,6 +18,37 @@ extension CostTrackingView {
         let denom = input + read + write
         guard denom > 0 else { return nil }
         return Double(read) / Double(denom) * 100
+    }
+
+    var summaryModelCount: Int {
+        guard let summary = costSummary else { return 0 }
+
+        var names = Set<String>()
+        func insert(_ breakdowns: [ModelCostBreakdown]?) {
+            for item in breakdowns ?? [] {
+                guard hasUsage(item) else { continue }
+                let name = item.model.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty {
+                    names.insert(name)
+                }
+            }
+        }
+
+        insert(summary.modelBreakdownOverall)
+        insert(summary.modelBreakdown)
+        insert(summary.modelBreakdownWeek)
+        insert(summary.modelBreakdownToday)
+
+        for item in summary.modelTimelines ?? [] {
+            let timeline = item.hourly + item.daily
+            guard timeline.contains(where: hasUsage) else { continue }
+            let name = item.model.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                names.insert(name)
+            }
+        }
+
+        return names.count
     }
 
     var summaryStrip: some View {
@@ -76,24 +93,9 @@ extension CostTrackingView {
                 summaryCell(
                     icon: "cpu",
                     title: L("Models", "模型数"),
-                    value: "\(models.count)",
+                    value: "\(summaryModelCount)",
                     tint: .pink
                 )
-            }
-
-            if let range = logDateRange {
-                HStack(spacing: 6) {
-                    Image(systemName: "info.circle")
-                        .foregroundStyle(.secondary)
-                    Text(L("Based on local JSONL logs (\(range)). \"Overall\" reflects all available local log data.",
-                           "基于本地 JSONL 日志（\(range)）。「总计」反映所有可用的本地日志数据。"))
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
             }
         }
     }

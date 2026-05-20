@@ -1,5 +1,14 @@
 import SwiftUI
 
+struct ChartSeriesDescriptor: Identifiable, Sendable {
+    let model: String
+    let points: [CostTimelinePoint]
+    let totalUsd: Double
+    let totalTokens: Int
+
+    var id: String { model }
+}
+
 // MARK: - Mini Sparkline
 
 struct MiniSparkline: View {

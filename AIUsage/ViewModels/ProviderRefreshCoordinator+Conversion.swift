@@ -301,6 +301,7 @@ extension ProviderRefreshCoordinator {
             "This Week": "本周",
             "This Month": "本月",
             "Scanned Calls": "扫描调用数",
+            "Scanned Turns": "扫描轮次",
             "Requests": "请求数",
             "Assistant Credits": "助手额度",
             "Main Plan": "主计划",
@@ -320,15 +321,22 @@ extension ProviderRefreshCoordinator {
             "OpenAI account": "OpenAI 账号",
             "Gemini CLI account": "Gemini CLI 账号",
             "Kiro account": "Kiro 账号",
+            "Local Codex logs": "本地 Codex 日志",
             "Reset unavailable": "重置时间未知",
             "Reset date unknown": "重置日期未知",
             "Everything is within normal range": "目前都在正常范围内",
             "No urgent resets detected": "暂无即将重置的窗口",
             "A few windows are about to roll over": "有些窗口即将重置",
             "Warp can read from local app cache, which makes the panel feel instantaneous and keeps the design centered on what is actually left right now.": "Warp 可以直接读取本地应用缓存，所以面板刷新很快，重点也能放在当前还剩多少。",
-            "This tracker reads Claude Code JSONL logs and estimates spend from local usage, so it works best as a cost ledger rather than an official subscription meter.": "这个追踪源会读取 Claude Code 的 JSONL 日志，并根据本地用量估算费用，所以它更适合作为费用账本，而不是官方订阅额度计量器。",
-            "Usage-derived Claude Code spend ledger from local logs": "基于本地日志推导的 Claude Code 费用账本",
-            "Claude Code Spend": "Claude Code 费用",
+            "This tracker reads local Claude Code JSONL logs and derives token and cost totals from usage entries, so it works best as a local ledger rather than an official subscription meter.": "这个追踪源会读取本地 Claude Code JSONL 日志，并根据 usage 记录推导 Token 与费用总量，所以它更适合作为本地账本，而不是官方订阅额度计量器。",
+            "This tracker reads local Codex session JSONL logs and derives token deltas from token_count events, using turn_context model markers when available.": "这个追踪源会读取本地 Codex 会话 JSONL 日志，从 token_count 事件推导 token 增量，并优先使用 turn_context 中的模型标记。",
+            "Usage-derived Claude token and cost ledger from local logs": "基于本地日志推导的 Claude Token 与费用账本",
+            "Local token and cost ledger from Claude Code logs": "基于 Claude Code 本地日志的 Token 与费用账本",
+            "Claude Token Stats": "Claude Token 统计",
+            "Local token ledger from Codex session logs": "基于 Codex 本地会话日志的 Token 账本",
+            "Codex Token Stats": "Codex Token 统计",
+            "Local token ledger": "本地 Token 账本",
+            "Codex session logs this month": "本月 Codex 会话日志",
             "Local ledgers and usage-derived spend": "本地账本与用量推导费用",
             "Copilot can mix unlimited and metered lanes. The dashboard keeps unlimited channels visible, but only metered windows affect watch and critical states.": "Copilot 同时存在无限和限额通道。面板会保留无限通道的可见性，但只有有限额的窗口会影响偏低和告急状态。",
             "Codex has multiple overlapping guardrails, so the UI surfaces all windows together and uses the tightest one to drive alerting.": "Codex 有多层重叠的限制窗口，所以界面会把它们一起展示，并用最紧张的那个来驱动提醒。",
@@ -425,7 +433,7 @@ extension ProviderRefreshCoordinator {
 
     func sendClaudeCodeThresholdNotification(cost: Double, threshold: Double) {
         let content = UNMutableNotificationContent()
-        content.title = settings.t("Claude Code Daily Cost Alert", "Claude Code 每日消费提醒")
+        content.title = settings.t("Claude daily cost alert", "Claude 每日消费提醒")
         content.body = settings.t(
             "Today's cost $\(String(format: "%.2f", cost)) has exceeded the threshold of $\(String(format: "%.2f", threshold))",
             "今日消费 $\(String(format: "%.2f", cost)) 已超过阈值 $\(String(format: "%.2f", threshold))"

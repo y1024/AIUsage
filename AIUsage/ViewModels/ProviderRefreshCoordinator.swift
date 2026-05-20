@@ -25,6 +25,14 @@ final class ProviderRefreshCoordinator: ObservableObject {
     let engine = ProviderEngine()
     private var refreshTimer: Timer?
     private var claudeCodeRefreshTimer: Timer?
+    private var isCodexFullHistoryRefreshInProgress = false
+
+    var isAnyRefreshInProgress: Bool {
+        isLoading
+            || isRefreshingAllProviders
+            || !refreshingProviderIDs.isEmpty
+            || !refreshingAccountIDs.isEmpty
+    }
 
     let settings = AppSettings.shared
     let accountStore = AccountStore.shared
@@ -79,7 +87,7 @@ final class ProviderRefreshCoordinator: ObservableObject {
 
         if settings.claudeCodeRefreshInterval > 0 {
             claudeCodeRefreshTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(settings.claudeCodeRefreshInterval), repeats: true) { [weak self] _ in
-                self?.refreshClaudeCodeOnly()
+                self?.refreshLocalTokenStatsOnly()
             }
         }
     }
@@ -95,10 +103,32 @@ final class ProviderRefreshCoordinator: ObservableObject {
         }
     }
 
-    func refreshClaudeCodeOnly() {
+    func refreshLocalTokenStatsOnly() {
         Task { @MainActor in
-            await refreshProviderNow("claude")
+            for providerId in ["claude", "codex-cost"] where selectedProviderIds().contains(providerId) {
+                await refreshProviderNow(providerId)
+            }
             checkClaudeCodeDailyThreshold()
+        }
+    }
+
+    func refreshCodexCostFullHistoryIfNeeded() {
+        Task { @MainActor in
+            let providerId = "codex-cost"
+            let provider = ProviderRegistry.provider(for: providerId) as? CodexCostProvider
+            guard !isCodexFullHistoryRefreshInProgress else { return }
+            isCodexFullHistoryRefreshInProgress = true
+            defer { isCodexFullHistoryRefreshInProgress = false }
+
+            guard settings.backendMode == "local",
+                  selectedProviderIds().contains(providerId),
+                  !refreshingProviderIDs.contains(providerId),
+                  let provider,
+                  await provider.needsFullHistoryImport() else {
+                return
+            }
+            await provider.requestFullHistoryImport()
+            await refreshProviderNow(providerId)
         }
     }
 

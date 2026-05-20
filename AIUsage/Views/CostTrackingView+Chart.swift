@@ -1,12 +1,25 @@
 import SwiftUI
 import Charts
 
+private struct OptionalDateChartXScale: ViewModifier {
+    let domain: ClosedRange<Date>?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let domain {
+            content.chartXScale(domain: domain)
+        } else {
+            content
+        }
+    }
+}
+
 extension CostTrackingView {
 
     private var maxVisibleChartModels: Int { 8 }
 
     var chartSection: some View {
-        let allSorted = sortedChartSeries()
+        let allSorted = cachedSortedChartSeries
         let displayed = computeDisplayedSeries(from: allSorted, limit: maxVisibleChartModels)
         let colorMap = buildColorMap(from: allSorted)
         let hiddenCount = max(0, allSorted.count - displayed.count)
@@ -27,7 +40,10 @@ extension CostTrackingView {
                 .pickerStyle(.segmented)
                 .frame(width: 140)
 
-                Picker("", selection: $chartTimeRange) {
+                Picker("", selection: Binding(
+                    get: { chartTimeRange },
+                    set: { selectChartTimeRange($0) }
+                )) {
                     Text(L("Today", "今日")).tag(ChartTimeRange.today)
                     Text(L("Week", "本周")).tag(ChartTimeRange.thisWeek)
                     Text(L("Month", "本月")).tag(ChartTimeRange.thisMonth)
@@ -123,7 +139,7 @@ extension CostTrackingView {
     func spendChartView(series: [ChartSeriesDescriptor], colorMap: [String: Color]) -> some View {
         if selectedModels.isEmpty {
             let points = aggregateChartPoints()
-            if points.isEmpty {
+            if !points.contains(where: hasUsage) {
                 Text(L("No data", "暂无数据"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -135,7 +151,7 @@ extension CostTrackingView {
             }
         } else if selectedModels.count == 1, let onlyModel = selectedModels.first {
             let points = chartPointsForModel(onlyModel)
-            if points.isEmpty {
+            if !points.contains(where: hasUsage) {
                 Text(L("No data", "暂无数据"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -151,6 +167,12 @@ extension CostTrackingView {
     func multiModelChartFor(_ allSeries: [ChartSeriesDescriptor], colorMap: [String: Color]) -> some View {
         let isUsd = selectedMetric == .usd
         let hoverDate = chartHoverDate
+        let xDomain = chartCurrentXDomain()
+        let singlePointModels = Set(
+            allSeries
+                .filter { $0.points.filter(hasUsage).count == 1 }
+                .map(\.model)
+        )
         return Chart {
             ForEach(allSeries, id: \.model) { series in
                 let color = modelColor(for: series.model, from: colorMap)
@@ -164,6 +186,15 @@ extension CostTrackingView {
                     .foregroundStyle(color)
                     .interpolationMethod(.catmullRom)
                     .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round))
+
+                    if singlePointModels.contains(series.model), hasUsage(point) {
+                        PointMark(
+                            x: .value("Time", point.date),
+                            y: .value("Value", yVal)
+                        )
+                        .foregroundStyle(color)
+                        .symbolSize(44)
+                    }
                 }
             }
 
@@ -178,6 +209,7 @@ extension CostTrackingView {
             }
         }
         .chartLegend(.hidden)
+        .modifier(OptionalDateChartXScale(domain: xDomain))
         .chartXAxis { costChartXAxis }
         .chartYAxis { costChartYAxis }
         .chartOverlay { (proxy: ChartProxy) in
@@ -247,6 +279,8 @@ extension CostTrackingView {
             startPoint: .top, endPoint: .bottom
         )
         let hoverDate = chartHoverDate
+        let xDomain = chartCurrentXDomain()
+        let showSinglePoint = points.filter(hasUsage).count == 1
         return Chart {
             ForEach(points, id: \.bucket) { point in
                 let yVal: Double = isUsd ? point.usd : Double(point.tokens)
@@ -264,6 +298,15 @@ extension CostTrackingView {
                 .interpolationMethod(.catmullRom)
                 .foregroundStyle(tint)
                 .lineStyle(StrokeStyle(lineWidth: 2.4, lineCap: .round))
+
+                if showSinglePoint, hasUsage(point) {
+                    PointMark(
+                        x: .value("Time", point.date),
+                        y: .value("Value", yVal)
+                    )
+                    .foregroundStyle(tint)
+                    .symbolSize(48)
+                }
             }
 
             if let hoverDate {
@@ -276,6 +319,7 @@ extension CostTrackingView {
                     }
             }
         }
+        .modifier(OptionalDateChartXScale(domain: xDomain))
         .chartXAxis { costChartXAxis }
         .chartYAxis { costChartYAxis }
         .chartOverlay { (proxy: ChartProxy) in

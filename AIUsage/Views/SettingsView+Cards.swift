@@ -164,8 +164,8 @@ extension SettingsView {
             Divider()
 
             settingsBlock(
-                title: L("Claude Code auto-refresh", "Claude Code 自动刷新"),
-                subtitle: L("Refresh interval for local Claude Code stats (faster intervals available)", "本地 Claude Code 统计的刷新间隔（支持更短间隔）")
+                title: L("Local token stats auto-refresh", "本地 Token 统计自动刷新"),
+                subtitle: L("Refresh interval for local Claude and Codex token stats (faster intervals available)", "本地 Claude 与 Codex Token 统计的刷新间隔（支持更短间隔）")
             ) {
                 Picker("", selection: $settings.claudeCodeRefreshInterval) {
                     ForEach(AppSettings.supportedClaudeCodeRefreshIntervals, id: \.self) { interval in
@@ -319,7 +319,7 @@ extension SettingsView {
             Divider()
 
             settingsBlock(
-                title: L("Claude Code daily cost alert", "Claude Code 每日消费提醒"),
+                title: L("Claude daily cost alert", "Claude 每日消费提醒"),
                 subtitle: L("Get notified when daily spending exceeds threshold (0 = off)", "当每日消费超过阈值时通知（0 = 关闭）")
             ) {
                 HStack(spacing: 8) {

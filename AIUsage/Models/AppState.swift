@@ -24,12 +24,14 @@ class AppState: ObservableObject {
         ProviderCatalogItem(id: "gemini", titleEn: "Gemini CLI", titleZh: "Gemini CLI", summaryEn: "Gemini CLI project quotas and model-family windows", summaryZh: "Gemini CLI 项目配额与模型族窗口", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "amp", titleEn: "Amp", titleZh: "Amp", summaryEn: "Replenishing credit pool and refill cadence", summaryZh: "会回补的额度池与回补节奏", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "droid", titleEn: "Droid", titleZh: "Droid", summaryEn: "Token-heavy usage pools and remaining allowances", summaryZh: "以 token 为主的额度池与剩余额度", channel: "cli", kind: .official),
-        ProviderCatalogItem(id: "claude", titleEn: "Claude Code Spend", titleZh: "Claude Code 费用", summaryEn: "Local log-based spend ledger from Claude Code usage", summaryZh: "基于 Claude Code 本地日志的费用账本", channel: "local", kind: .costTracking)
+        ProviderCatalogItem(id: "claude", titleEn: "Claude Token Stats", titleZh: "Claude Token 统计", summaryEn: "Local token and cost ledger from Claude Code logs", summaryZh: "基于 Claude Code 本地日志的 Token 与费用账本", channel: "local", kind: .costTracking),
+        ProviderCatalogItem(id: "codex-cost", titleEn: "Codex Token Stats", titleZh: "Codex Token 统计", summaryEn: "Local token ledger from Codex session logs", summaryZh: "基于 Codex 本地会话日志的 Token 账本", channel: "local", kind: .costTracking)
     ]
 
     private static let initialState: InitialState = {
+        let defaults = UserDefaults.standard
         let accounts = SecureAccountVault.shared.loadAccounts()
-        let saved = Set(UserDefaults.standard.stringArray(forKey: DefaultsKey.selectedProviderIds) ?? [])
+        let saved = Set(defaults.stringArray(forKey: DefaultsKey.selectedProviderIds) ?? [])
         let storedProviderIDs = accounts.filter { !$0.isHidden }.map(\.providerId)
         let validIDs = Set(providerCatalogItems.map(\.id))
         let merged = Set(saved.union(storedProviderIDs).filter { validIDs.contains($0) })

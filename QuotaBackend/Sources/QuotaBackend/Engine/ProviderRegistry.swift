@@ -9,6 +9,7 @@ public enum ProviderRegistry {
         AmpProvider(),
         AntigravityProvider(),
         ClaudeProvider(),
+        CodexCostProvider(),
         CodexProvider(),
         CopilotProvider(),
         CursorProvider(),

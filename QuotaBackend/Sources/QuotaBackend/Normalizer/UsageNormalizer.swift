@@ -50,6 +50,7 @@ public enum UsageNormalizer {
         "amp":     ThemeInfo(accent: "teal",   glow: "#38cbd6"),
         "antigravity": ThemeInfo(accent: "sky", glow: "#5cc9ff"),
         "claude":  ThemeInfo(accent: "sunset", glow: "#ff9d6c"),
+        "codex-cost": ThemeInfo(accent: "indigo", glow: "#6875ff"),
         "codex":   ThemeInfo(accent: "violet", glow: "#8d7dff"),
         "copilot": ThemeInfo(accent: "blue",   glow: "#5aa2ff"),
         "cursor":  ThemeInfo(accent: "emerald",glow: "#4dd4aa"),
@@ -104,6 +105,7 @@ public enum UsageNormalizer {
         case "warp":    return normalizeWarp(base: &base, usage: usage)
         case "antigravity": return normalizeAntigravity(base: &base, usage: usage)
         case "claude":  return normalizeClaude(base: &base, usage: usage)
+        case "codex-cost": return normalizeCodexCost(base: &base, usage: usage)
         case "copilot": return normalizeCopilot(base: &base, usage: usage)
         case "codex":   return normalizeCodex(base: &base, usage: usage)
         case "gemini":  return normalizeGemini(base: &base, usage: usage)
@@ -459,6 +461,7 @@ public enum UsageNormalizer {
             "gh-cli": "GitHub CLI",
             "cli-auth-file": "Local CLI session",
             "claude-project-logs": "Local Claude logs",
+            "codex-session-logs": "Local Codex logs",
             "gemini-cli": "Gemini CLI OAuth",
             "kiro-ide-auth-file": "Kiro IDE session",
             "pasted-cookie": "Pasted cookie",
@@ -471,7 +474,7 @@ public enum UsageNormalizer {
         switch providerId {
         case "cursor", "copilot", "kiro", "antigravity", "warp":
             return "ide"
-        case "claude":
+        case "claude", "codex-cost":
             return "local"
         default:
             return "cli"
@@ -480,8 +483,10 @@ public enum UsageNormalizer {
 
     private static func compactProviderLabel(_ providerId: String, fallback: String) -> String {
         switch providerId {
+        case "codex-cost":
+            return "Codex Token Stats"
         case "claude":
-            return "Claude Code Spend"
+            return "Claude Token Stats"
         case "copilot":
             return "Copilot"
         case "gemini":
