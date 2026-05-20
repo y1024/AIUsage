@@ -30,10 +30,7 @@ struct CostTrackingView: View {
     var selectedGranularity: CostGranularity { chartTimeRange.isHourly ? .hourly : .daily }
 
     var costProviders: [ProviderData] {
-        refreshCoordinator.providers.filter { provider in
-            provider.category == "local-cost"
-                || appState.providerCatalogItem(for: provider.baseProviderId)?.kind == .costTracking
-        }
+        appState.localCostProviders(from: refreshCoordinator.providers)
     }
 
     var primaryProvider: ProviderData? {

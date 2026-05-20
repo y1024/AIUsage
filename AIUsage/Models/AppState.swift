@@ -172,6 +172,19 @@ class AppState: ObservableObject {
         providerCatalog.first { $0.id == id }
     }
 
+    /// Single source of truth for "is this provider a local token / cost tracking source?".
+    /// Treats normalized `category == "local-cost"` and catalog `kind == .costTracking` as
+    /// equivalent so DashboardView, CostTrackingView and MenuBarView can never drift apart.
+    func isLocalCostProvider(_ provider: ProviderData) -> Bool {
+        if provider.category == "local-cost" { return true }
+        return providerCatalogItem(for: provider.baseProviderId)?.kind == .costTracking
+    }
+
+    /// Convenience: filter a provider list down to local cost / token tracking sources.
+    func localCostProviders(from providers: [ProviderData]) -> [ProviderData] {
+        providers.filter(isLocalCostProvider)
+    }
+
     var unselectedProviderCatalog: [ProviderCatalogItem] {
         providerCatalog.filter { !selectedProviderIds.contains($0.id) }
     }

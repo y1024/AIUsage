@@ -72,9 +72,7 @@ struct DashboardView: View {
     }
 
     private var costTrackingProviders: [ProviderData] {
-        deduplicatedProviders(refreshCoordinator.providers.filter {
-            appState.providerCatalogItem(for: $0.baseProviderId)?.kind == .costTracking
-        })
+        deduplicatedProviders(appState.localCostProviders(from: refreshCoordinator.providers))
     }
 
     private var selectedOfficialProviderCount: Int {
