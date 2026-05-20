@@ -16,7 +16,7 @@ struct CostTrackingView: View {
     @State var expandedModels: Set<String> = []
     @State var contentWidth: CGFloat = 0
     @State var chartHoverDate: Date?
-    @State var selectedCostProviderId: String = ""
+    @AppStorage(DefaultsKey.ccStatsSelectedProviderId) var selectedCostProviderId: String = ""
     @State var aggregateCostSummary: CostSummary?
     @State var aggregateCostSignature: String = ""
     @State var derivedCostSignature: String = ""
@@ -74,13 +74,13 @@ struct CostTrackingView: View {
                 summary.week.signatureFragment,
                 summary.month.signatureFragment,
                 summary.overall.signatureFragment,
-                "\(summary.timeline?.hourly.count ?? 0)",
-                "\(summary.timeline?.daily.count ?? 0)",
-                "\(summary.modelBreakdownToday?.count ?? 0)",
-                "\(summary.modelBreakdownWeek?.count ?? 0)",
-                "\(summary.modelBreakdown?.count ?? 0)",
-                "\(summary.modelBreakdownOverall?.count ?? 0)",
-                "\(summary.modelTimelines?.count ?? 0)"
+                summary.timeline?.hourly.signatureFragment ?? "hourly:nil",
+                summary.timeline?.daily.signatureFragment ?? "daily:nil",
+                summary.modelBreakdownToday?.signatureFragment ?? "todayModels:nil",
+                summary.modelBreakdownWeek?.signatureFragment ?? "weekModels:nil",
+                summary.modelBreakdown?.signatureFragment ?? "monthModels:nil",
+                summary.modelBreakdownOverall?.signatureFragment ?? "overallModels:nil",
+                summary.modelTimelines?.signatureFragment ?? "timelines:nil"
             ].joined(separator: ":")
         }
         .joined(separator: "|")
@@ -246,7 +246,7 @@ struct CostTrackingView: View {
 
         aggregateCostSignature = signature
         aggregateCostSummary = costProviders.count > 1
-            ? aggregateCostSummaries(costProviders.compactMap(\.costSummary))
+            ? aggregateCostSummaries(costProviders)
             : nil
     }
 
@@ -278,7 +278,13 @@ struct CostTrackingView: View {
 
         cachedAggregateChartPoints = makeAggregateChartPoints(from: summary)
         cachedSortedChartSeries = makeSortedChartSeries(from: summary)
-        selectedModels.formIntersection(Set(cachedSortedChartSeries.map(\.model)))
+        let availableModels = Set(cachedSortedChartSeries.map(\.model))
+        let prunedSelection = selectedModels.intersection(availableModels)
+        if prunedSelection != selectedModels {
+            DispatchQueue.main.async {
+                selectedModels = prunedSelection
+            }
+        }
         cachedModelColorMap = makeModelColorMap(from: cachedSortedChartSeries)
         cachedDistributionModels = makeDistributionModels(from: summary)
         cachedRankedDistributionModels = makeRankedDistributionModels(from: cachedDistributionModels)
@@ -319,5 +325,68 @@ private extension Optional where Wrapped == CostPeriod {
     var signatureFragment: String {
         guard let period = self else { return "nil" }
         return "\(period.usd):\(period.tokens ?? -1):\(period.rangeLabel ?? "")"
+    }
+}
+
+private extension Array where Element == CostTimelinePoint {
+    var signatureFragment: String {
+        var hash = CostTrackingSignatureHash()
+        for point in self {
+            hash.combine(point.bucket)
+            hash.combine(point.usd)
+            hash.combine(point.tokens)
+        }
+        return "\(count):\(hash.hexDigest)"
+    }
+}
+
+private extension Array where Element == ModelCostBreakdown {
+    var signatureFragment: String {
+        var hash = CostTrackingSignatureHash()
+        for item in sorted(by: { $0.model < $1.model }) {
+            hash.combine(item.model)
+            hash.combine(item.totalTokens)
+            hash.combine(item.inputTokens)
+            hash.combine(item.outputTokens)
+            hash.combine(item.cacheReadTokens)
+            hash.combine(item.cacheCreateTokens)
+            hash.combine(item.estimatedCostUsd)
+        }
+        return "\(count):\(hash.hexDigest)"
+    }
+}
+
+private extension Array where Element == ModelTimelineSeries {
+    var signatureFragment: String {
+        var hash = CostTrackingSignatureHash()
+        for item in sorted(by: { $0.model < $1.model }) {
+            hash.combine(item.model)
+            hash.combine(item.hourly.signatureFragment)
+            hash.combine(item.daily.signatureFragment)
+        }
+        return "\(count):\(hash.hexDigest)"
+    }
+}
+
+private struct CostTrackingSignatureHash {
+    private var value: UInt64 = 0xcbf29ce484222325
+
+    mutating func combine(_ value: String) {
+        for byte in value.utf8 {
+            self.value ^= UInt64(byte)
+            self.value = self.value &* 0x100000001b3
+        }
+    }
+
+    mutating func combine(_ value: Int) {
+        combine(String(value))
+    }
+
+    mutating func combine(_ value: Double) {
+        combine(String(format: "%.6f", value))
+    }
+
+    var hexDigest: String {
+        String(format: "%016llx", value)
     }
 }

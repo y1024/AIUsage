@@ -25,6 +25,7 @@ final class ProviderRefreshCoordinator: ObservableObject {
     let engine = ProviderEngine()
     private var refreshTimer: Timer?
     private var claudeCodeRefreshTimer: Timer?
+    private var isCodexFullHistoryRefreshInProgress = false
 
     var isAnyRefreshInProgress: Bool {
         isLoading
@@ -115,6 +116,10 @@ final class ProviderRefreshCoordinator: ObservableObject {
         Task { @MainActor in
             let providerId = "codex-cost"
             let provider = ProviderRegistry.provider(for: providerId) as? CodexCostProvider
+            guard !isCodexFullHistoryRefreshInProgress else { return }
+            isCodexFullHistoryRefreshInProgress = true
+            defer { isCodexFullHistoryRefreshInProgress = false }
+
             guard settings.backendMode == "local",
                   selectedProviderIds().contains(providerId),
                   !refreshingProviderIDs.contains(providerId),

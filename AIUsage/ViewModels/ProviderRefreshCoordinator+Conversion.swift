@@ -433,7 +433,7 @@ extension ProviderRefreshCoordinator {
 
     func sendClaudeCodeThresholdNotification(cost: Double, threshold: Double) {
         let content = UNMutableNotificationContent()
-        content.title = settings.t("Claude Daily Cost Alert", "Claude 每日消费提醒")
+        content.title = settings.t("Claude daily cost alert", "Claude 每日消费提醒")
         content.body = settings.t(
             "Today's cost $\(String(format: "%.2f", cost)) has exceeded the threshold of $\(String(format: "%.2f", threshold))",
             "今日消费 $\(String(format: "%.2f", cost)) 已超过阈值 $\(String(format: "%.2f", threshold))"

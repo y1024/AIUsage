@@ -103,6 +103,7 @@ enum DefaultsKey {
     static let ccStatsDidDefaultToTodayForCodexArchive = "ccStatsDidDefaultToTodayForCodexArchive"
     static let ccStatsGranularity = "ccStatsGranularity"
     static let ccStatsMetric = "ccStatsMetric"
+    static let ccStatsSelectedProviderId = "ccStatsSelectedProviderId"
     static let claudeCodeDailyThreshold = "claudeCodeDailyThreshold"
     static let claudeCodeLastNotifiedDate = "claudeCodeLastNotifiedDate"
     static let claudeCodeRefreshInterval = "claudeCodeRefreshInterval"

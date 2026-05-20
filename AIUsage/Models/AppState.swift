@@ -14,8 +14,6 @@ class AppState: ObservableObject {
         let selectedProviderIds: Set<String>
     }
 
-    private static let codexCostSelectionMigrationKey = "selectedProviderIdsMigration.codexCost.v1"
-
     private static let providerCatalogItems: [ProviderCatalogItem] = [
         ProviderCatalogItem(id: "codex", titleEn: "Codex", titleZh: "Codex", summaryEn: "Official OpenAI subscription windows and quotas", summaryZh: "OpenAI 官方订阅窗口与配额", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "copilot", titleEn: "Copilot", titleZh: "Copilot", summaryEn: "GitHub Copilot account entitlements and premium lanes", summaryZh: "GitHub Copilot 账号权益与高级通道", channel: "ide", kind: .official),
@@ -33,19 +31,10 @@ class AppState: ObservableObject {
     private static let initialState: InitialState = {
         let defaults = UserDefaults.standard
         let accounts = SecureAccountVault.shared.loadAccounts()
-        let hasSavedProviderSelection = defaults.object(forKey: DefaultsKey.selectedProviderIds) != nil
         let saved = Set(defaults.stringArray(forKey: DefaultsKey.selectedProviderIds) ?? [])
         let storedProviderIDs = accounts.filter { !$0.isHidden }.map(\.providerId)
         let validIDs = Set(providerCatalogItems.map(\.id))
-        var merged = Set(saved.union(storedProviderIDs).filter { validIDs.contains($0) })
-        if !defaults.bool(forKey: codexCostSelectionMigrationKey) {
-            if hasSavedProviderSelection || !accounts.isEmpty {
-                merged.insert("codex-cost")
-                let orderedSelection = providerCatalogItems.map(\.id).filter { merged.contains($0) }
-                defaults.set(orderedSelection, forKey: DefaultsKey.selectedProviderIds)
-            }
-            defaults.set(true, forKey: codexCostSelectionMigrationKey)
-        }
+        let merged = Set(saved.union(storedProviderIDs).filter { validIDs.contains($0) })
         return InitialState(accounts: accounts, selectedProviderIds: merged)
     }()
 

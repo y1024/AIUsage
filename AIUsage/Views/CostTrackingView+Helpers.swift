@@ -211,15 +211,21 @@ extension CostTrackingView {
 
 extension CostTrackingView {
 
-    func aggregateCostSummaries(_ summaries: [CostSummary]) -> CostSummary? {
-        guard !summaries.isEmpty else { return nil }
+    func aggregateCostSummaries(_ providers: [ProviderData]) -> CostSummary? {
+        let items = providers.compactMap { provider -> (provider: ProviderData, summary: CostSummary)? in
+            guard let summary = provider.costSummary else { return nil }
+            return (provider, summary)
+        }
+        guard !items.isEmpty else { return nil }
+
+        let summaries = items.map(\.summary)
 
         let timeline = aggregateTimeline(summaries.compactMap(\.timeline))
-        let monthBreakdown = aggregateModelBreakdowns(summaries.flatMap { $0.modelBreakdown ?? [] })
-        let todayBreakdown = aggregateModelBreakdowns(summaries.flatMap { $0.modelBreakdownToday ?? [] })
-        let weekBreakdown = aggregateModelBreakdowns(summaries.flatMap { $0.modelBreakdownWeek ?? [] })
-        let overallBreakdown = aggregateModelBreakdowns(summaries.flatMap { $0.modelBreakdownOverall ?? [] })
-        let modelTimelines = aggregateModelTimelines(summaries.flatMap { $0.modelTimelines ?? [] })
+        let monthBreakdown = aggregateModelBreakdowns(items.flatMap { qualifiedBreakdowns($0.summary.modelBreakdown, provider: $0.provider) })
+        let todayBreakdown = aggregateModelBreakdowns(items.flatMap { qualifiedBreakdowns($0.summary.modelBreakdownToday, provider: $0.provider) })
+        let weekBreakdown = aggregateModelBreakdowns(items.flatMap { qualifiedBreakdowns($0.summary.modelBreakdownWeek, provider: $0.provider) })
+        let overallBreakdown = aggregateModelBreakdowns(items.flatMap { qualifiedBreakdowns($0.summary.modelBreakdownOverall, provider: $0.provider) })
+        let modelTimelines = aggregateModelTimelines(items.flatMap { qualifiedTimelines($0.summary.modelTimelines, provider: $0.provider) })
 
         return CostSummary(
             today: aggregatePeriod(summaries.map(\.today), label: L("Today", "今天")),
@@ -233,6 +239,35 @@ extension CostTrackingView {
             modelBreakdownOverall: overallBreakdown.isEmpty ? nil : overallBreakdown,
             modelTimelines: modelTimelines.isEmpty ? nil : modelTimelines
         )
+    }
+
+    private func qualifiedBreakdowns(_ breakdowns: [ModelCostBreakdown]?, provider: ProviderData) -> [ModelCostBreakdown] {
+        (breakdowns ?? []).map { item in
+            ModelCostBreakdown(
+                model: sourceQualifiedModel(item.model, provider: provider),
+                totalTokens: item.totalTokens,
+                inputTokens: item.inputTokens,
+                outputTokens: item.outputTokens,
+                cacheReadTokens: item.cacheReadTokens,
+                cacheCreateTokens: item.cacheCreateTokens,
+                estimatedCostUsd: item.estimatedCostUsd,
+                percentage: item.percentage
+            )
+        }
+    }
+
+    private func qualifiedTimelines(_ series: [ModelTimelineSeries]?, provider: ProviderData) -> [ModelTimelineSeries] {
+        (series ?? []).map { item in
+            ModelTimelineSeries(
+                model: sourceQualifiedModel(item.model, provider: provider),
+                hourly: item.hourly,
+                daily: item.daily
+            )
+        }
+    }
+
+    private func sourceQualifiedModel(_ model: String, provider: ProviderData) -> String {
+        "\(provider.label) / \(model)"
     }
 
     private func aggregatePeriod(_ periods: [CostPeriod?], label: String) -> CostPeriod? {

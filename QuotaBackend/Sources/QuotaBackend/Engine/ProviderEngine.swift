@@ -9,7 +9,7 @@ private let engineLog = Logger(subsystem: "com.aiusage.desktop", category: "Prov
 
 public actor ProviderEngine {
     static let timeoutSeconds: Double = 15
-    static let codexCostTimeoutSeconds: Double = 120
+    static let codexCostTimeoutSeconds: Double = 300
 
     public init() {}
 

@@ -205,6 +205,57 @@ final class CodexCostProviderTests: XCTestCase {
         XCTAssertEqual(models.map(\.model), ["gpt-5-mini"])
     }
 
+    func testParsesLastTokenUsageDeltas() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let now = Date()
+        let sessionDir = codexSessionDirectory(in: tempRoot, for: now)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+
+        let ts = SharedFormatters.iso8601String(from: now)
+        try writeJSONLines([
+            [
+                "type": "session_meta",
+                "timestamp": ts,
+                "payload": ["id": "session-last-token-usage"]
+            ],
+            [
+                "type": "turn_context",
+                "timestamp": ts,
+                "payload": ["model": "gpt-5.4"]
+            ],
+            [
+                "type": "event_msg",
+                "timestamp": ts,
+                "payload": [
+                    "type": "token_count",
+                    "info": [
+                        "last_token_usage": [
+                            "input_tokens": 12,
+                            "cached_input_tokens": 4,
+                            "output_tokens": 7
+                        ]
+                    ]
+                ]
+            ]
+        ], to: sessionDir.appendingPathComponent("session-last-token-usage.jsonl"))
+
+        let provider = CodexCostProvider(
+            homeDirectory: tempRoot.path,
+            timeZone: TimeZone(secondsFromGMT: 0)!,
+            environment: [:]
+        )
+        let usage = try await provider.fetchUsage()
+        let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
+
+        XCTAssertEqual(summary.costSummary?.overall?.tokens, 19)
+        let breakdown = try XCTUnwrap(summary.costSummary?.modelBreakdownOverall?.first)
+        XCTAssertEqual(breakdown.inputTokens, 8)
+        XCTAssertEqual(breakdown.cacheReadTokens, 4)
+        XCTAssertEqual(breakdown.outputTokens, 7)
+    }
+
     func testFullHistoryImportStateUsesCodexHomeScope() async throws {
         let tempRoot = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
@@ -267,6 +318,7 @@ final class CodexCostProviderTests: XCTestCase {
         let usage = try await provider.fetchUsage()
 
         XCTAssertEqual(usage.extra["overall.totalTokens"]?.value as? Int, 50)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: CodexUsageArchiveStore.archiveFileURL(scope: codexHome.path).path))
         let stillNeedsImport = await provider.needsFullHistoryImport()
         XCTAssertFalse(stillNeedsImport)
     }
