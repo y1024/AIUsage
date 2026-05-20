@@ -14,6 +14,16 @@ class AppState: ObservableObject {
         let selectedProviderIds: Set<String>
     }
 
+    /// One-shot migration that auto-enrolls existing installs into newly-added
+    /// `kind == .costTracking` catalog items. Without this, upgrading users keep their
+    /// previously-saved `selectedProviderIds` set forever and never see new local-source
+    /// providers (Codex Token Stats etc.) until they manually opt in via Settings.
+    ///
+    /// Bumped to `v2` because the original `v1` flag was rolled back in an earlier
+    /// review-fix commit; users who already toggled it manually still control their
+    /// selection because we only insert, never remove.
+    private static let costTrackingSelectionMigrationKey = "selectedProviderIdsMigration.costTracking.v2"
+
     private static let providerCatalogItems: [ProviderCatalogItem] = [
         ProviderCatalogItem(id: "codex", titleEn: "Codex", titleZh: "Codex", summaryEn: "Official OpenAI subscription windows and quotas", summaryZh: "OpenAI 官方订阅窗口与配额", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "copilot", titleEn: "Copilot", titleZh: "Copilot", summaryEn: "GitHub Copilot account entitlements and premium lanes", summaryZh: "GitHub Copilot 账号权益与高级通道", channel: "ide", kind: .official),
@@ -31,10 +41,34 @@ class AppState: ObservableObject {
     private static let initialState: InitialState = {
         let defaults = UserDefaults.standard
         let accounts = SecureAccountVault.shared.loadAccounts()
+        let hasSavedProviderSelection = defaults.object(forKey: DefaultsKey.selectedProviderIds) != nil
         let saved = Set(defaults.stringArray(forKey: DefaultsKey.selectedProviderIds) ?? [])
         let storedProviderIDs = accounts.filter { !$0.isHidden }.map(\.providerId)
         let validIDs = Set(providerCatalogItems.map(\.id))
-        let merged = Set(saved.union(storedProviderIDs).filter { validIDs.contains($0) })
+        var merged = Set(saved.union(storedProviderIDs).filter { validIDs.contains($0) })
+
+        // Auto-enroll existing installs into any newly-added cost-tracking catalog item
+        // exactly once. Skip first-launch installs (no saved selection AND no accounts) so
+        // the onboarding picker still gets to drive the initial selection. Persist the
+        // expanded selection back so future launches see it via the normal saved path.
+        if !defaults.bool(forKey: costTrackingSelectionMigrationKey) {
+            if hasSavedProviderSelection || !accounts.isEmpty {
+                let costTrackingIds = providerCatalogItems
+                    .filter { $0.kind == .costTracking }
+                    .map(\.id)
+                var didInsert = false
+                for id in costTrackingIds where !merged.contains(id) {
+                    merged.insert(id)
+                    didInsert = true
+                }
+                if didInsert {
+                    let orderedSelection = providerCatalogItems.map(\.id).filter { merged.contains($0) }
+                    defaults.set(orderedSelection, forKey: DefaultsKey.selectedProviderIds)
+                }
+            }
+            defaults.set(true, forKey: costTrackingSelectionMigrationKey)
+        }
+
         return InitialState(accounts: accounts, selectedProviderIds: merged)
     }()
 
