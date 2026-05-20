@@ -55,7 +55,7 @@
 | --- | --- |
 | **10+ AI 服务商** | Codex、Copilot、Cursor、Antigravity、Kiro、Warp、Gemini CLI、Amp、Droid、Claude Code — 一个看板搞定 |
 | **多账号管理** | 同一服务商多个账号独立刷新，一键切换 CLI 活跃账号 |
-| **Claude Code 统计** | 按模型拆分费用与 Token，趋势曲线，多时段分析 |
+| **Token 统计** | 同时统计 Claude Code 与 Codex 本地会话日志：按模型拆分费用与 Token，趋势曲线、多时段分析，可按单一来源或「综合」聚合查看 |
 | **Claude Code 代理** | 用 Claude Code 跑 DeepSeek、GPT、Ollama 等任意 OpenAI 兼容模型；Anthropic 透传模式记录用量 |
 | **代理统计** | 按模型的费用/Token 趋势、分布图，可配置日志保留天数 |
 | **菜单栏快览** | 多账号状态栏图标 + 配额/费用指标，快览弹窗含摘要统计、彩色进度条、费用追踪 |
@@ -73,11 +73,11 @@
     <td align="center"><strong>服务商与多账号监控</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/claude-code-stats.png" alt="Claude Code 统计"></td>
+    <td width="50%"><img src="docs/images/claude-code-stats.png" alt="Token 统计"></td>
     <td width="50%"><img src="docs/images/codex-account-detail.png" alt="账号详情"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Claude Code 统计</strong></td>
+    <td align="center"><strong>Token 统计（Claude 与 Codex）</strong></td>
     <td align="center"><strong>账号详情</strong></td>
   </tr>
   <tr>

@@ -55,7 +55,7 @@
 | --- | --- |
 | **10+ AI Providers** | Codex, Copilot, Cursor, Antigravity, Kiro, Warp, Gemini CLI, Amp, Droid, Claude Code — one dashboard |
 | **Multi-account** | Multiple accounts per provider, independent refresh, one-click CLI switching |
-| **Claude Code Stats** | Per-model cost & token breakdown, trend charts, time-period analysis |
+| **Token Stats** | Local cost & token breakdown for Claude Code and Codex sessions — per-model trends, time-period analysis, source-aware "All Sources" aggregation |
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
 | **Proxy Stats** | Per-model cost/token trends, distribution charts, configurable log retention |
 | **Menu Bar** | Multi-account status bar icons, quota/cost metrics, quick-glance popover, colored progress bars |
@@ -73,11 +73,11 @@
     <td align="center"><strong>Provider & Multi-account Monitoring</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/claude-code-stats_en.png" alt="Claude Code stats"></td>
+    <td width="50%"><img src="docs/images/claude-code-stats_en.png" alt="Token stats"></td>
     <td width="50%"><img src="docs/images/codex-account-detail_en.png" alt="Account detail"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Claude Code Stats</strong></td>
+    <td align="center"><strong>Token Stats (Claude &amp; Codex)</strong></td>
     <td align="center"><strong>Account Detail</strong></td>
   </tr>
   <tr>

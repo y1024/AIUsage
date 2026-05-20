@@ -38,7 +38,7 @@ AIUsage/
     ├── ContentView.swift           # NavigationSplitView shell
     ├── DashboardView.swift         # Main dashboard
     ├── ProviderCard.swift          # Rich quota card UI
-    ├── CostTrackingView.swift      # Claude Code cost charts
+    ├── CostTrackingView.swift      # Token stats for Claude Code + Codex (per-source / All Sources)
     ├── ProxyManagementView.swift   # Proxy node list
     ├── ProxyStatsView.swift        # Proxy usage statistics
     ├── SettingsView.swift          # Preferences UI (sidebar navigation, 7 categories)
@@ -58,6 +58,7 @@ QuotaBackend/Sources/
 │   ├── Providers/
 │   │   ├── ClaudeProvider.swift         # Local JSONL log scanner
 │   │   ├── CodexProvider.swift          # OpenAI Codex API (multi-workspace)
+│   │   ├── CodexCostProvider.swift      # Local Codex session JSONL scanner (+FileScanCache, +ArchiveStore)
 │   │   ├── CopilotProvider.swift        # GitHub Copilot
 │   │   ├── CursorProvider.swift         # Cursor IDE
 │   │   ├── GeminiProvider.swift         # Google Gemini CLI
@@ -171,6 +172,9 @@ sequenceDiagram
 | `~/.config/aiusage/proxy-logs.json` | Proxy request logs (with day-based retention) |
 | `~/.config/aiusage/proxy-pricing.json` | Model pricing overrides |
 | `~/.config/claude/projects/**/*.jsonl` | Claude Code usage logs (read-only by ClaudeProvider) |
+| `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/**/*.jsonl` | Codex session logs (read-only by CodexCostProvider; overridable via `$CODEX_HOME`) |
+| `~/Library/Caches/AIUsage/codex-cost-file-cache-v*.json` | CodexCostFileScanCache — per-file scan results, keyed on size + mtime so reopened sessions skip re-parsing |
+| `~/Library/Caches/AIUsage/codex-cost-usage-archive-v*.json` | CodexUsageArchiveStore — rolled-up per-day token totals so the `.all` view can stretch beyond the 30-day live scan window |
 
 ## Supported Providers
 
@@ -185,7 +189,8 @@ sequenceDiagram
 | gemini | Gemini CLI | CLI | Google OAuth |
 | amp | Amp | CLI | Browser session |
 | droid | Droid | CLI | Browser session / API |
-| claude | Claude Code Spend | Local | JSONL log scan |
+| claude | Claude Token Stats | Local | JSONL log scan (`~/.config/claude/projects`) |
+| codex-cost | Codex Token Stats | Local | JSONL log scan (`~/.codex/sessions` + archived sessions, full-history import on demand) |
 
 ## CI/CD
 
