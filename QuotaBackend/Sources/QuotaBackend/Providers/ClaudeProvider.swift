@@ -6,7 +6,7 @@ import Foundation
 
 public struct ClaudeProvider: ProviderFetcher {
     public let id = "claude"
-    public let displayName = "Claude Token Stats"
+    public let displayName = "Claude Code"
     public let description = "Usage-derived Claude token and cost ledger from local logs"
 
     /// Matches ProxyConfiguration.ModelPricing.defaultCacheWriteMultiplier

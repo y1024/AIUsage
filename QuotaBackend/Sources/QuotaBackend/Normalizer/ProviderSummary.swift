@@ -3,6 +3,14 @@ import Foundation
 // MARK: - Normalized Provider Summary
 // This matches the JSON shape the SwiftUI frontend already expects (ProviderData in ProviderModels.swift)
 
+/// Canonical values the normalizer writes into `ProviderSummary.category`.
+/// Kept as raw strings so the on-disk JSON shape is unchanged, but referenced
+/// via this enum to stop magic strings from leaking into UI filter logic.
+public enum ProviderCategory {
+    public static let localCost = "local-cost"
+    public static let quota = "quota"
+}
+
 public struct ProviderSummary: Codable, Sendable {
     public var id: String
     public var providerId: String

@@ -41,7 +41,7 @@ extension UsageNormalizer {
         let modelTimelines: [ModelTimelineSeries] = extraModelTimelines(usage, "timeline.byModel")
 
         base.accountLabel = preferredAccountEmail(usage)
-        base.category = "local-cost"
+        base.category = ProviderCategory.localCost
         base.status = "healthy"
         base.statusLabel = "Healthy"
         base.headline = HeadlineInfo(

@@ -3,12 +3,17 @@ import SwiftUI
 // MARK: - Bucket → Date Parsing
 
 private enum BucketDateParser {
+    /// Wrapper class so the cache can store either a parsed `Date` or an
+    /// explicit "unresolvable" marker without using a magic sentinel value.
+    /// Replaces the prior `Date(timeIntervalSince1970: -1)` sentinel.
+    private final class CachedDate {
+        let date: Date?
+        init(_ date: Date?) { self.date = date }
+    }
+
     private static let lock = NSLock()
-    /// Sentinel stored in the cache to memoize "failed to parse" decisions without losing
-    /// the ability to distinguish them from a successful parse to `Date.distantPast`.
-    private static let unresolvedSentinel = Date(timeIntervalSince1970: -1)
-    private static let cache: NSCache<NSString, NSDate> = {
-        let cache = NSCache<NSString, NSDate>()
+    private static let cache: NSCache<NSString, CachedDate> = {
+        let cache = NSCache<NSString, CachedDate>()
         cache.countLimit = 2_048
         return cache
     }()
@@ -32,20 +37,18 @@ private enum BucketDateParser {
     static func parseOptional(_ bucket: String) -> Date? {
         let cacheKey = bucket as NSString
         if let cached = cache.object(forKey: cacheKey) {
-            let date = cached as Date
-            return date == unresolvedSentinel ? nil : date
+            return cached.date
         }
 
         lock.lock()
         defer { lock.unlock() }
 
         if let cached = cache.object(forKey: cacheKey) {
-            let date = cached as Date
-            return date == unresolvedSentinel ? nil : date
+            return cached.date
         }
 
         let parsed = hourly.date(from: bucket) ?? daily.date(from: bucket)
-        cache.setObject((parsed ?? unresolvedSentinel) as NSDate, forKey: cacheKey)
+        cache.setObject(CachedDate(parsed), forKey: cacheKey)
         return parsed
     }
 
@@ -163,15 +166,6 @@ extension CostTrackingView {
 
     var chartSelectableModels: [String] {
         cachedSortedChartSeries.map(\.model)
-    }
-
-    func buildColorMap(from sorted: [ChartSeriesDescriptor]) -> [String: Color] {
-        let palette = Self.modelPalette
-        var map: [String: Color] = [:]
-        for (idx, series) in sorted.enumerated() {
-            map[series.model] = palette[idx % palette.count]
-        }
-        return map
     }
 
     func timelineFromSeries(_ series: ModelTimelineSeries?) -> [CostTimelinePoint] {
@@ -294,8 +288,14 @@ extension CostTrackingView {
         }
     }
 
+    /// Separator chosen for visual clarity in chart legends and breakdown
+    /// rows. Centralized here so future formatting changes (icon prefix, em
+    /// dash, etc.) only need to touch one site and don't get duplicated into
+    /// breakdown / timeline aggregation paths.
+    static let sourceQualifierSeparator: String = " / "
+
     private func sourceQualifiedModel(_ model: String, provider: ProviderData) -> String {
-        "\(provider.label) / \(model)"
+        "\(provider.label)\(Self.sourceQualifierSeparator)\(model)"
     }
 
     private func aggregatePeriod(_ periods: [CostPeriod?], label: String) -> CostPeriod? {

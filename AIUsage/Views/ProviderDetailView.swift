@@ -387,7 +387,7 @@ struct ProviderDetailView: View {
     private func spotlightSection(_ spotlight: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(
-                provider.category == "local-cost"
+                provider.category == ProviderCategory.localCost
                     ? L("About This Tracker", "关于此追踪源")
                     : L("About This Provider", "关于此服务商"),
                 systemImage: "lightbulb.fill"

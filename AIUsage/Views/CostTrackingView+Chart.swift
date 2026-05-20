@@ -21,7 +21,7 @@ extension CostTrackingView {
     var chartSection: some View {
         let allSorted = cachedSortedChartSeries
         let displayed = computeDisplayedSeries(from: allSorted, limit: maxVisibleChartModels)
-        let colorMap = buildColorMap(from: allSorted)
+        let colorMap = cachedModelColorMap
         let hiddenCount = max(0, allSorted.count - displayed.count)
 
         return VStack(alignment: .leading, spacing: 12) {

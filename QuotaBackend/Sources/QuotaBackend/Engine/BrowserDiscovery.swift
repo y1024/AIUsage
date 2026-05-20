@@ -169,7 +169,7 @@ public enum BrowserDiscovery {
         ),
         ProviderAuthCapability(
             providerId: "claude",
-            displayName: "Claude Token Stats",
+            displayName: "Claude Code",
             supportedMethods: [.auto],
             cookieDomains: nil,
             cookieNames: nil,

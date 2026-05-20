@@ -15,32 +15,26 @@ struct LocalTokenUsageHeatmap: View {
 
     // MARK: - Data
 
-    private var dailyTokens: [Date: Int] {
+    /// Single-pass aggregation over every provider's daily timeline. Returned
+    /// as a tuple so `snapshot` doesn't have to traverse the (potentially
+    /// large) timeline twice. The previous design called `dailyTokens` and
+    /// `dailyUsd` as separate computed properties, each O(n).
+    private var dailyTotals: (tokens: [Date: Int], usd: [Date: Double]) {
         let calendar = Calendar.current
-        var map: [Date: Int] = [:]
-        for provider in providers {
-            guard let daily = provider.costSummary?.timeline?.daily else { continue }
-            for point in daily where point.tokens > 0 {
-                guard let pointDate = point.resolvedDate else { continue }
-                let day = calendar.startOfDay(for: pointDate)
-                map[day, default: 0] += point.tokens
-            }
-        }
-        return map
-    }
-
-    private var dailyUsd: [Date: Double] {
-        let calendar = Calendar.current
-        var map: [Date: Double] = [:]
+        var tokenMap: [Date: Int] = [:]
+        var usdMap: [Date: Double] = [:]
         for provider in providers {
             guard let daily = provider.costSummary?.timeline?.daily else { continue }
             for point in daily {
                 guard let pointDate = point.resolvedDate else { continue }
                 let day = calendar.startOfDay(for: pointDate)
-                map[day, default: 0] += point.usd
+                if point.tokens > 0 {
+                    tokenMap[day, default: 0] += point.tokens
+                }
+                usdMap[day, default: 0] += point.usd
             }
         }
-        return map
+        return (tokenMap, usdMap)
     }
 
     private func modelBreakdown(for targetDate: Date) -> [(model: String, tokens: Int, usd: Double)] {
@@ -110,8 +104,9 @@ struct LocalTokenUsageHeatmap: View {
     }
 
     private var snapshot: HeatmapSnapshot {
-        let tokens = dailyTokens
-        let usd = dailyUsd
+        let totals = dailyTotals
+        let tokens = totals.tokens
+        let usd = totals.usd
         let values = tokens.values.filter { $0 > 0 }.sorted()
         let computedThresholds: [Int]
         if values.count < 2 {

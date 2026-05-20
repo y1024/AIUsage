@@ -32,6 +32,7 @@
 		A2B3C4E62F96001000A15674 /* CostTrackingView+Distribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4E52F96001000A15674 /* CostTrackingView+Distribution.swift */; };
 		A2B3C4E82F96001000A15674 /* CostTrackingView+ModelTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4E72F96001000A15674 /* CostTrackingView+ModelTable.swift */; };
 		A2B3C4EA2F96001000A15674 /* CostTrackingView+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4E92F96001000A15674 /* CostTrackingView+Helpers.swift */; };
+		A2B3C4F82F96001000A15674 /* CostTrackingView+SourceSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4F72F96001000A15674 /* CostTrackingView+SourceSelector.swift */; };
 		A2B3C4EC2F96001000A15674 /* CostTrackingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4EB2F96001000A15674 /* CostTrackingCard.swift */; };
 		A2B3C4EE2F96001000A15674 /* SettingsView+Cards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4ED2F96001000A15674 /* SettingsView+Cards.swift */; };
 		A2B3C4F02F96001000A15674 /* SettingsView+Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4EF2F96001000A15674 /* SettingsView+Chrome.swift */; };
@@ -59,6 +60,7 @@
 		5EF0C0D62F95000100A15674 /* ProviderCard+ResetCountdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF0C0D52F95000100A15674 /* ProviderCard+ResetCountdown.swift */; };
 		5EFAD7762F87AFE700A15674 /* ProvidersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD74A2F87AC7100A15674 /* ProvidersView.swift */; };
 		5EFAD7772F87AFE700A15674 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD73D2F87AC7100A15674 /* AppState.swift */; };
+		A1APPST022F92000000A15674 /* AppState+ProviderGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1APPST012F92000000A15674 /* AppState+ProviderGrouping.swift */; };
 		A1ACCS022F92000000A15674 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1ACCS012F92000000A15674 /* AccountStore.swift */; };
 		A1ACCS122F92000000A15674 /* AccountStore+Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1ACCS112F92000000A15674 /* AccountStore+Persistence.swift */; };
 		A1ACCS142F92000000A15674 /* AccountStore+Matching.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1ACCS132F92000000A15674 /* AccountStore+Matching.swift */; };
@@ -118,6 +120,7 @@
 		A2B3C4E52F96001000A15674 /* CostTrackingView+Distribution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CostTrackingView+Distribution.swift"; sourceTree = "<group>"; };
 		A2B3C4E72F96001000A15674 /* CostTrackingView+ModelTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CostTrackingView+ModelTable.swift"; sourceTree = "<group>"; };
 		A2B3C4E92F96001000A15674 /* CostTrackingView+Helpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CostTrackingView+Helpers.swift"; sourceTree = "<group>"; };
+		A2B3C4F72F96001000A15674 /* CostTrackingView+SourceSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CostTrackingView+SourceSelector.swift"; sourceTree = "<group>"; };
 		A2B3C4EB2F96001000A15674 /* CostTrackingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostTrackingCard.swift; sourceTree = "<group>"; };
 		A2B3C4ED2F96001000A15674 /* SettingsView+Cards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Cards.swift"; sourceTree = "<group>"; };
 		A2B3C4EF2F96001000A15674 /* SettingsView+Chrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Chrome.swift"; sourceTree = "<group>"; };
@@ -135,6 +138,7 @@
 		F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyStatsView.swift; sourceTree = "<group>"; };
 		5EFAD72F2F87AC3300A15674 /* AIUsage.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIUsage.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5EFAD73D2F87AC7100A15674 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		A1APPST012F92000000A15674 /* AppState+ProviderGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+ProviderGrouping.swift"; sourceTree = "<group>"; };
 		A1ACCS012F92000000A15674 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		A1ACCS112F92000000A15674 /* AccountStore+Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AccountStore+Persistence.swift"; sourceTree = "<group>"; };
 		A1ACCS132F92000000A15674 /* AccountStore+Matching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AccountStore+Matching.swift"; sourceTree = "<group>"; };
@@ -250,6 +254,7 @@
 				C1NP00002F9C000100A15674 /* NodeProfile.swift */,
 				7EFAD0012F87AC7100A15674 /* AppSettings.swift */,
 				5EFAD73D2F87AC7100A15674 /* AppState.swift */,
+				A1APPST012F92000000A15674 /* AppState+ProviderGrouping.swift */,
 				A1ACCS012F92000000A15674 /* AccountStore.swift */,
 				A1ACCS112F92000000A15674 /* AccountStore+Persistence.swift */,
 				A1ACCS132F92000000A15674 /* AccountStore+Matching.swift */,
@@ -332,6 +337,7 @@
 				A2B3C4E52F96001000A15674 /* CostTrackingView+Distribution.swift */,
 				A2B3C4E72F96001000A15674 /* CostTrackingView+ModelTable.swift */,
 				A2B3C4E92F96001000A15674 /* CostTrackingView+Helpers.swift */,
+				A2B3C4F72F96001000A15674 /* CostTrackingView+SourceSelector.swift */,
 				A2B3C4EB2F96001000A15674 /* CostTrackingCard.swift */,
 				5EFAD7562F87AC7200A15674 /* ProviderPickerView.swift */,
 				5EFAD74A2F87AC7100A15674 /* ProvidersView.swift */,
@@ -505,6 +511,7 @@
 				5EFAD7762F87AFE700A15674 /* ProvidersView.swift in Sources */,
 				7EFAD0022F87AC7100A15674 /* AppSettings.swift in Sources */,
 				5EFAD7772F87AFE700A15674 /* AppState.swift in Sources */,
+				A1APPST022F92000000A15674 /* AppState+ProviderGrouping.swift in Sources */,
 				A1ACCS022F92000000A15674 /* AccountStore.swift in Sources */,
 				A1ACCS122F92000000A15674 /* AccountStore+Persistence.swift in Sources */,
 				A1ACCS142F92000000A15674 /* AccountStore+Matching.swift in Sources */,
@@ -567,6 +574,7 @@
 				A2B3C4E62F96001000A15674 /* CostTrackingView+Distribution.swift in Sources */,
 				A2B3C4E82F96001000A15674 /* CostTrackingView+ModelTable.swift in Sources */,
 				A2B3C4EA2F96001000A15674 /* CostTrackingView+Helpers.swift in Sources */,
+				A2B3C4F82F96001000A15674 /* CostTrackingView+SourceSelector.swift in Sources */,
 				A2B3C4EC2F96001000A15674 /* CostTrackingCard.swift in Sources */,
 				A2B3C4EE2F96001000A15674 /* SettingsView+Cards.swift in Sources */,
 				A2B3C4F02F96001000A15674 /* SettingsView+Chrome.swift in Sources */,

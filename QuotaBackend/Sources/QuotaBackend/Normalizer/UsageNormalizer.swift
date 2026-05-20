@@ -160,7 +160,7 @@ public enum UsageNormalizer {
         let active     = summaries.filter { $0.status != "error" }
         let attention  = summaries.filter { $0.status == "watch" || $0.status == "critical" }
         let critical   = summaries.filter { $0.status == "critical" }
-        let localCost  = summaries.filter { $0.category == "local-cost" }
+        let localCost  = summaries.filter { $0.category == ProviderCategory.localCost }
         let resetSoon  = summaries.filter { s in s.nextResetAt.map { isWithinHours($0, hours: 24) } ?? false }
 
         let localCostMonthUsd = localCost.reduce(0.0) { $0 + ($1.costSummary?.month?.usd ?? 0) }
@@ -484,9 +484,9 @@ public enum UsageNormalizer {
     private static func compactProviderLabel(_ providerId: String, fallback: String) -> String {
         switch providerId {
         case "codex-cost":
-            return "Codex Token Stats"
+            return "Codex Logs"
         case "claude":
-            return "Claude Token Stats"
+            return "Claude Code"
         case "copilot":
             return "Copilot"
         case "gemini":

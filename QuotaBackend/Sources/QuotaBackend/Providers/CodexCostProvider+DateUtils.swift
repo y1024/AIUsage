@@ -136,9 +136,12 @@ extension CodexCostProvider {
     }
 
     func firstNonEmpty(_ values: String?...) -> String? {
-        values.first { value in
-            value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        }?.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        for value in values {
+            guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !trimmed.isEmpty else { continue }
+            return trimmed
+        }
+        return nil
     }
 
     func roundUsd(_ value: Double) -> Double {

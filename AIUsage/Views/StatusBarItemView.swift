@@ -1,4 +1,5 @@
 import SwiftUI
+import QuotaBackend
 
 // MARK: - Status Bar Item View
 // Displays provider icons + quota/cost metrics in the macOS menu bar.
@@ -57,7 +58,7 @@ struct StatusBarItemView: View {
 
         for group in groups {
             for entry in group.accounts where entry.isConnected {
-                guard entry.liveProvider?.category == "local-cost" else { continue }
+                guard entry.liveProvider?.category == ProviderCategory.localCost else { continue }
                 guard pinnedCostIds.contains(entry.id) else { continue }
                 guard let summary = entry.liveProvider?.costSummary else { continue }
 

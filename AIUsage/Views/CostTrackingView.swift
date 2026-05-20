@@ -7,6 +7,7 @@ struct CostTrackingView: View {
 
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
+    @Environment(\.colorScheme) var colorScheme
     @AppStorage(DefaultsKey.ccStatsMetric) var selectedMetric: CostMetric = .usd
     @AppStorage(DefaultsKey.ccStatsChartRange) var chartTimeRange: ChartTimeRange = .today
     @State var selectedModels: Set<String> = []
@@ -31,6 +32,13 @@ struct CostTrackingView: View {
 
     var costProviders: [ProviderData] {
         appState.localCostProviders(from: refreshCoordinator.providers)
+    }
+
+    /// Stable identity key for `costProviders`, used by `.onChange` to detect
+    /// list membership changes without allocating a fresh `[String]` per
+    /// `body` evaluation. The pipe separator never appears in provider IDs.
+    var costProvidersIdentityKey: String {
+        costProviders.map(\.id).joined(separator: "|")
     }
 
     var primaryProvider: ProviderData? {
@@ -125,7 +133,7 @@ struct CostTrackingView: View {
             refreshDerivedCostCachesIfNeeded(force: true)
             requestCodexFullHistoryImportIfNeeded()
         }
-        .onChange(of: costProviders.map(\.id)) { _, _ in
+        .onChange(of: costProvidersIdentityKey) { _, _ in
             ensureSelectedCostProvider()
             refreshAggregateCostSummaryIfNeeded(force: true)
             refreshDerivedCostCachesIfNeeded(force: true)
@@ -139,13 +147,16 @@ struct CostTrackingView: View {
             refreshDerivedCostCachesIfNeeded(force: true)
         }
         .onChange(of: chartTimeRange) { _, _ in
+            chartHoverDate = nil
             refreshDerivedCostCachesIfNeeded(force: true)
+            requestCodexFullHistoryImportIfNeeded()
         }
         .onChange(of: distributionMetric) { _, _ in
             refreshDerivedCostCachesIfNeeded(force: true)
         }
         .onChange(of: distributionPeriod) { _, _ in
             refreshDerivedCostCachesIfNeeded(force: true)
+            requestCodexFullHistoryImportIfNeeded()
         }
         .onPreferenceChange(CostTrackingContentWidthPreferenceKey.self) { newWidth in
             // Threshold avoids rebuilding the whole body on sub-pixel width jitter
@@ -155,44 +166,6 @@ struct CostTrackingView: View {
                 contentWidth = newWidth
             }
         }
-    }
-
-    @ViewBuilder
-    var sourceSelector: some View {
-        if costProviders.count > 1 {
-            HStack(spacing: 10) {
-                Text(L("Local Source", "本地来源"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Picker("", selection: Binding(
-                    get: { selectedCostProviderId.isEmpty ? defaultCostProviderSelection : selectedCostProviderId },
-                    set: { newValue in
-                        selectedCostProviderId = newValue
-                        selectedModels.removeAll()
-                        expandedModels.removeAll()
-                        chartHoverDate = nil
-                        if newValue == Self.allSourcesId {
-                            refreshAggregateCostSummaryIfNeeded()
-                        }
-                        refreshDerivedCostCachesIfNeeded(force: true)
-                        requestCodexFullHistoryImportIfNeeded()
-                    }
-                )) {
-                    Text(L("All Sources", "综合")).tag(Self.allSourcesId)
-                    ForEach(costProviders) { provider in
-                        Text(provider.label).tag(provider.id)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Spacer()
-            }
-        }
-    }
-
-    var defaultCostProviderSelection: String {
-        costProviders.count > 1 ? Self.allSourcesId : (costProviders.first?.id ?? "")
     }
 
     func ensureSelectedCostProvider() {
@@ -211,17 +184,16 @@ struct CostTrackingView: View {
         }
     }
 
+    /// State mutation only. Side effects (cache refresh, hover reset, codex
+    /// full-history trigger) live in `.onChange(of: chartTimeRange)` so they
+    /// fire exactly once per change regardless of who set the value.
     func selectChartTimeRange(_ newValue: ChartTimeRange) {
         chartTimeRange = newValue
-        chartHoverDate = nil
-        refreshDerivedCostCachesIfNeeded(force: true)
-        requestCodexFullHistoryImportIfNeeded()
     }
 
+    /// State mutation only — see `selectChartTimeRange` for the rationale.
     func selectDistributionPeriod(_ newValue: DistributionPeriod) {
         distributionPeriod = newValue
-        refreshDerivedCostCachesIfNeeded(force: true)
-        requestCodexFullHistoryImportIfNeeded()
     }
 
     func requestCodexFullHistoryImportIfNeeded() {
@@ -258,7 +230,7 @@ struct CostTrackingView: View {
 
     var derivedCostCacheSignature: String {
         [
-            selectedCostProviderId.isEmpty ? defaultCostProviderSelection : selectedCostProviderId,
+            effectiveCostProviderId,
             costProviderSummarySignature,
             selectedMetric.rawValue,
             chartTimeRange.rawValue,
@@ -287,9 +259,10 @@ struct CostTrackingView: View {
         let availableModels = Set(cachedSortedChartSeries.map(\.model))
         let prunedSelection = selectedModels.intersection(availableModels)
         if prunedSelection != selectedModels {
-            DispatchQueue.main.async {
-                selectedModels = prunedSelection
-            }
+            // Synchronous write so back-to-back source switches can't race: the previous
+            // dispatch-to-main delayed this write past the next selection's `removeAll`,
+            // which could repopulate `selectedModels` with stale entries from the prior source.
+            selectedModels = prunedSelection
         }
         cachedModelColorMap = makeModelColorMap(from: cachedSortedChartSeries)
         cachedDistributionModels = makeDistributionModels(from: summary)

@@ -1,4 +1,5 @@
 import SwiftUI
+import QuotaBackend
 
 // MARK: - Section Views
 
@@ -389,7 +390,7 @@ extension SettingsView {
     private func pruneStaleMenuBarPins() {
         let allEntries = appState.providerAccountGroups.flatMap(\.accounts)
         let quotaIds = Set(allEntries.filter { $0.liveProvider?.category != "local-cost" }.map(\.id))
-        let costIds = Set(allEntries.filter { $0.liveProvider?.category == "local-cost" }.map(\.id))
+        let costIds = Set(allEntries.filter { $0.liveProvider?.category == ProviderCategory.localCost }.map(\.id))
         settings.pruneMenuBarPinnedIds(validQuotaIds: quotaIds, validCostIds: costIds)
     }
 
@@ -426,7 +427,7 @@ extension SettingsView {
             let groups = appState.providerAccountGroups
             let costEntries = groups.flatMap { group in
                 group.accounts
-                    .filter { $0.liveProvider?.category == "local-cost" }
+                    .filter { $0.liveProvider?.category == ProviderCategory.localCost }
                     .map { (group: group, entry: $0) }
             }
 
@@ -577,7 +578,7 @@ extension SettingsView {
     private var validPinnedCostIds: Set<String> {
         let allEntryIds = Set(
             appState.providerAccountGroups.flatMap { $0.accounts }
-                .filter { $0.liveProvider?.category == "local-cost" }
+                .filter { $0.liveProvider?.category == ProviderCategory.localCost }
                 .map(\.id)
         )
         return settings.menuBarPinnedCostSourceIds.intersection(allEntryIds)

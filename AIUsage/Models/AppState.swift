@@ -17,7 +17,7 @@ class AppState: ObservableObject {
     /// One-shot migration that auto-enrolls existing installs into newly-added
     /// `kind == .costTracking` catalog items. Without this, upgrading users keep their
     /// previously-saved `selectedProviderIds` set forever and never see new local-source
-    /// providers (Codex Token Stats etc.) until they manually opt in via Settings.
+    /// providers (Codex Logs etc.) until they manually opt in via Settings.
     ///
     /// Bumped to `v2` because the original `v1` flag was rolled back in an earlier
     /// review-fix commit; users who already toggled it manually still control their
@@ -34,8 +34,8 @@ class AppState: ObservableObject {
         ProviderCatalogItem(id: "gemini", titleEn: "Gemini CLI", titleZh: "Gemini CLI", summaryEn: "Gemini CLI project quotas and model-family windows", summaryZh: "Gemini CLI 项目配额与模型族窗口", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "amp", titleEn: "Amp", titleZh: "Amp", summaryEn: "Replenishing credit pool and refill cadence", summaryZh: "会回补的额度池与回补节奏", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "droid", titleEn: "Droid", titleZh: "Droid", summaryEn: "Token-heavy usage pools and remaining allowances", summaryZh: "以 token 为主的额度池与剩余额度", channel: "cli", kind: .official),
-        ProviderCatalogItem(id: "claude", titleEn: "Claude Token Stats", titleZh: "Claude Token 统计", summaryEn: "Local token and cost ledger from Claude Code logs", summaryZh: "基于 Claude Code 本地日志的 Token 与费用账本", channel: "local", kind: .costTracking),
-        ProviderCatalogItem(id: "codex-cost", titleEn: "Codex Token Stats", titleZh: "Codex Token 统计", summaryEn: "Local token ledger from Codex session logs", summaryZh: "基于 Codex 本地会话日志的 Token 账本", channel: "local", kind: .costTracking)
+        ProviderCatalogItem(id: "claude", titleEn: "Claude Code", titleZh: "Claude Code", summaryEn: "Local token and cost ledger from Claude Code logs", summaryZh: "基于 Claude Code 本地日志的 Token 与费用账本", channel: "local", kind: .costTracking),
+        ProviderCatalogItem(id: "codex-cost", titleEn: "Codex Logs", titleZh: "Codex 日志", summaryEn: "Local token ledger from Codex session logs", summaryZh: "基于 Codex 本地会话日志的 Token 账本", channel: "local", kind: .costTracking)
     ]
 
     private static let initialState: InitialState = {
@@ -207,10 +207,11 @@ class AppState: ObservableObject {
     }
 
     /// Single source of truth for "is this provider a local token / cost tracking source?".
-    /// Treats normalized `category == "local-cost"` and catalog `kind == .costTracking` as
-    /// equivalent so DashboardView, CostTrackingView and MenuBarView can never drift apart.
+    /// Treats normalized `category == ProviderCategory.localCost` and catalog
+    /// `kind == .costTracking` as equivalent so DashboardView, CostTrackingView and
+    /// MenuBarView can never drift apart.
     func isLocalCostProvider(_ provider: ProviderData) -> Bool {
-        if provider.category == "local-cost" { return true }
+        if provider.category == ProviderCategory.localCost { return true }
         return providerCatalogItem(for: provider.baseProviderId)?.kind == .costTracking
     }
 
@@ -362,51 +363,8 @@ class AppState: ObservableObject {
         accountStore.accountNote(for: provider)
     }
 
-    var providerAccountGroups: [ProviderAccountGroup] {
-        let liveProvidersById = Dictionary(grouping: providers, by: \.baseProviderId)
-
-        return providerCatalog
-            .filter { item in
-                selectedProviderIds.contains(item.id)
-                    || accountStore.accountRegistry.contains(where: { $0.providerId == item.id && !$0.isHidden })
-                    || !(liveProvidersById[item.id] ?? []).isEmpty
-            }
-            .compactMap { item in
-                let liveProviders = liveProvidersById[item.id] ?? []
-                let storedAccounts = accountStore.accountRegistry.filter { $0.providerId == item.id && !$0.isHidden }
-                let entries = refreshCoordinator.buildProviderEntries(
-                    providerId: item.id,
-                    providerTitle: item.title(for: language),
-                    providerSubtitle: item.summary(for: language),
-                    liveProviders: liveProviders,
-                    storedAccounts: storedAccounts
-                )
-
-                let sortedEntries = entries.sorted { lhs, rhs in
-                    if lhs.isConnected != rhs.isConnected { return lhs.isConnected && !rhs.isConnected }
-                    let emailCmp = (lhs.accountEmail ?? "").localizedCaseInsensitiveCompare(rhs.accountEmail ?? "")
-                    if emailCmp != .orderedSame { return emailCmp == .orderedAscending }
-                    let lhsWs = lhs.workspaceLabel ?? ""
-                    let rhsWs = rhs.workspaceLabel ?? ""
-                    if lhsWs != rhsWs { return lhsWs < rhsWs }
-                    return (lhs.storedAccount?.accountId ?? lhs.id) < (rhs.storedAccount?.accountId ?? rhs.id)
-                }
-
-                return ProviderAccountGroup(
-                    id: item.id,
-                    providerId: item.id,
-                    title: item.title(for: language),
-                    subtitle: item.summary(for: language),
-                    channel: item.channel,
-                    isScanningEnabled: selectedProviderIds.contains(item.id),
-                    accounts: sortedEntries
-                )
-            }
-    }
-
-    var hiddenAccounts: [StoredProviderAccount] {
-        accountStore.hiddenAccounts()
-    }
+    // `providerAccountGroups` and `hiddenAccounts` live in
+    // `AppState+ProviderGrouping.swift`.
 
     func setupAutoRefresh() {
         refreshCoordinator.setupAutoRefresh()

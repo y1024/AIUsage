@@ -27,11 +27,15 @@ final class ProviderRefreshCoordinator: ObservableObject {
     private var claudeCodeRefreshTimer: Timer?
     private var isCodexFullHistoryRefreshInProgress = false
 
+    /// Used by toolbar / menu bar "Refresh All" buttons to decide between the
+    /// spinner and the affordance. Intentionally narrow: single-provider or
+    /// single-account refreshes can run for several minutes (Codex archive
+    /// import has a 300s timeout), so they must NOT lock out the global
+    /// "Refresh All" affordance. Callers that need a stricter "any refresh in
+    /// progress" check should compose `refreshingProviderIDs` and
+    /// `refreshingAccountIDs` explicitly at the call site.
     var isAnyRefreshInProgress: Bool {
-        isLoading
-            || isRefreshingAllProviders
-            || !refreshingProviderIDs.isEmpty
-            || !refreshingAccountIDs.isEmpty
+        isLoading || isRefreshingAllProviders
     }
 
     let settings = AppSettings.shared
@@ -105,8 +109,17 @@ final class ProviderRefreshCoordinator: ObservableObject {
 
     func refreshLocalTokenStatsOnly() {
         Task { @MainActor in
-            for providerId in ["claude", "codex-cost"] where selectedProviderIds().contains(providerId) {
-                await refreshProviderNow(providerId)
+            // Fan-out so a slow `codex-cost` (300s archive timeout) cannot
+            // hold up Claude's refresh. Each call goes through
+            // `refreshingProviderIDs` so concurrent refreshes of the same
+            // provider still deduplicate inside `refreshProviderNow`.
+            let active = ["claude", "codex-cost"].filter(selectedProviderIds().contains)
+            await withTaskGroup(of: Void.self) { group in
+                for providerId in active {
+                    group.addTask { @MainActor [weak self] in
+                        await self?.refreshProviderNow(providerId)
+                    }
+                }
             }
             checkClaudeCodeDailyThreshold()
         }
@@ -115,18 +128,22 @@ final class ProviderRefreshCoordinator: ObservableObject {
     func refreshCodexCostFullHistoryIfNeeded() {
         Task { @MainActor in
             let providerId = "codex-cost"
-            let provider = ProviderRegistry.provider(for: providerId) as? CodexCostProvider
-            guard !isCodexFullHistoryRefreshInProgress else { return }
-            isCodexFullHistoryRefreshInProgress = true
-            defer { isCodexFullHistoryRefreshInProgress = false }
 
+            // Front-load the cheap guards so we don't flip the in-progress
+            // flag for refreshes that would have bailed anyway. The flag now
+            // only covers the actual async work that competes with itself.
             guard settings.backendMode == "local",
                   selectedProviderIds().contains(providerId),
                   !refreshingProviderIDs.contains(providerId),
-                  let provider,
-                  await provider.needsFullHistoryImport() else {
+                  let provider = ProviderRegistry.provider(for: providerId) as? CodexCostProvider,
+                  !isCodexFullHistoryRefreshInProgress else {
                 return
             }
+
+            isCodexFullHistoryRefreshInProgress = true
+            defer { isCodexFullHistoryRefreshInProgress = false }
+
+            guard await provider.needsFullHistoryImport() else { return }
             await provider.requestFullHistoryImport()
             await refreshProviderNow(providerId)
         }

@@ -1,4 +1,5 @@
 import SwiftUI
+import QuotaBackend
 
 // MARK: - Menu Bar View (Main Container)
 // Redesigned popover inspired by Quotio: status header, summary stats, multi-window quota bars, cost card, action footer.
@@ -10,6 +11,8 @@ struct MenuBarView: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var activationMessage: String?
     @State private var activationSuccess = true
+    @State private var cachedLocalTokenCostSummary: CostSummary?
+    @State private var cachedLocalTokenCostSignature: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -241,25 +244,69 @@ struct MenuBarView: View {
 
     // MARK: - Stats Summary Cell (Proxy / local token stats switchable)
 
+    /// Persistent settings bucket. The "claude-code-stats" key is preserved
+    /// from when this surface only tracked Claude Code; it now covers all
+    /// local token sources (Claude + Codex). Renaming would force a settings
+    /// migration with no functional payoff, so we keep the legacy spelling
+    /// and document it here so future grep-finds the rationale.
     private var statsConfigKey: String {
         settings.menuBarSummaryStatsSource == .proxy ? "proxy-stats" : "claude-code-stats"
     }
 
-    private var localTokenCostSummary: CostSummary? {
-        let summaries = appState.localCostProviders(from: refreshCoordinator.providers)
-            .compactMap(\.costSummary)
-        guard !summaries.isEmpty else { return nil }
+    /// Signature derived from each local-cost provider's identity + fetch
+    /// timestamp + period usd/tokens. Lets the menu bar avoid rebuilding the
+    /// whole `CostSummary` aggregate on every unrelated `@Published` change.
+    private var localTokenCostSignature: String {
+        appState.localCostProviders(from: refreshCoordinator.providers)
+            .map { provider -> String in
+                guard let summary = provider.costSummary else {
+                    return "\(provider.id):empty:\(provider.fetchedAt ?? "")"
+                }
+                func fragment(_ period: CostPeriod?) -> String {
+                    guard let period else { return "nil" }
+                    return "\(period.usd)/\(period.tokens.map(String.init) ?? "nil")"
+                }
+                return [
+                    provider.id,
+                    provider.fetchedAt ?? "",
+                    fragment(summary.today),
+                    fragment(summary.week),
+                    fragment(summary.month),
+                    fragment(summary.overall)
+                ].joined(separator: ":")
+            }
+            .joined(separator: "|")
+    }
 
-        func period(_ keyPath: KeyPath<CostSummary, CostPeriod?>, label: String) -> CostPeriod {
-            let periods = summaries.compactMap { $0[keyPath: keyPath] }
-            return CostPeriod(
-                usd: periods.reduce(0) { $0 + $1.usd },
-                tokens: periods.reduce(0) { $0 + ($1.tokens ?? 0) },
-                rangeLabel: label
-            )
+    private var localTokenCostSummary: CostSummary? {
+        let signature = localTokenCostSignature
+        if signature == cachedLocalTokenCostSignature {
+            return cachedLocalTokenCostSummary
         }
 
-        return CostSummary(
+        let summaries = appState.localCostProviders(from: refreshCoordinator.providers)
+            .compactMap(\.costSummary)
+        guard !summaries.isEmpty else {
+            DispatchQueue.main.async {
+                cachedLocalTokenCostSignature = signature
+                cachedLocalTokenCostSummary = nil
+            }
+            return nil
+        }
+
+        // Preserve the nil semantics of `tokens` so callers can distinguish
+        // "no provider reported tokens" from "providers reported zero tokens".
+        // We only fold a sum when at least one source contributed a non-nil
+        // tokens count.
+        func period(_ keyPath: KeyPath<CostSummary, CostPeriod?>, label: String) -> CostPeriod {
+            let periods = summaries.compactMap { $0[keyPath: keyPath] }
+            let usd = periods.reduce(0) { $0 + $1.usd }
+            let hasTokens = periods.contains { $0.tokens != nil }
+            let tokens = hasTokens ? periods.reduce(0) { $0 + ($1.tokens ?? 0) } : nil
+            return CostPeriod(usd: usd, tokens: tokens, rangeLabel: label)
+        }
+
+        let aggregate = CostSummary(
             today: period(\.today, label: "Today"),
             week: period(\.week, label: "This week"),
             month: period(\.month, label: "This month"),
@@ -271,6 +318,13 @@ struct MenuBarView: View {
             modelBreakdownOverall: nil,
             modelTimelines: nil
         )
+
+        DispatchQueue.main.async {
+            cachedLocalTokenCostSignature = signature
+            cachedLocalTokenCostSummary = aggregate
+        }
+
+        return aggregate
     }
 
     private func statsSummaryCell() -> some View {
@@ -803,7 +857,7 @@ struct MenuBarAccountRow: View {
     private var isActive: Bool { activationManager.isActiveAccount(entry) }
     private var canActivate: Bool { activationManager.canActivateProvider(providerId) && !isActive }
     private var remainingPercent: Double? { entry.liveProvider?.remainingPercent }
-    private var isCostProvider: Bool { entry.liveProvider?.category == "local-cost" }
+    private var isCostProvider: Bool { entry.liveProvider?.category == ProviderCategory.localCost }
     private var costMonthUsd: Double? { entry.liveProvider?.costSummary?.month?.usd }
     private var windows: [QuotaWindow] { entry.liveProvider?.windows ?? [] }
     @State private var isWindowsExpanded = false
