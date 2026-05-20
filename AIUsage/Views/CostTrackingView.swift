@@ -60,17 +60,18 @@ struct CostTrackingView: View {
     }
 
     var costProviderSummarySignature: String {
-        costProviders.map { provider in
+        let fragments: [String] = costProviders.map { provider -> String in
             guard let summary = provider.costSummary else {
-                return [
+                let parts: [String] = [
                     provider.id,
                     provider.status.rawValue,
                     provider.fetchedAt ?? "",
                     "empty"
-                ].joined(separator: ":")
+                ]
+                return parts.joined(separator: ":")
             }
 
-            return [
+            let parts: [String] = [
                 provider.id,
                 provider.status.rawValue,
                 provider.fetchedAt ?? "",
@@ -85,9 +86,10 @@ struct CostTrackingView: View {
                 summary.modelBreakdown?.signatureFragment ?? "monthModels:nil",
                 summary.modelBreakdownOverall?.signatureFragment ?? "overallModels:nil",
                 summary.modelTimelines?.signatureFragment ?? "timelines:nil"
-            ].joined(separator: ":")
+            ]
+            return parts.joined(separator: ":")
         }
-        .joined(separator: "|")
+        return fragments.joined(separator: "|")
     }
 
     var body: some View {
