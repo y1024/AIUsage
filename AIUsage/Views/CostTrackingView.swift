@@ -30,26 +30,30 @@ struct CostTrackingView: View {
     var selectedGranularity: CostGranularity { chartTimeRange.isHourly ? .hourly : .daily }
 
     var costProviders: [ProviderData] {
-        refreshCoordinator.providers.filter { provider in
-            provider.category == "local-cost"
-                || appState.providerCatalogItem(for: provider.baseProviderId)?.kind == .costTracking
-        }
+        appState.localCostProviders(from: refreshCoordinator.providers)
     }
 
     var primaryProvider: ProviderData? {
-        if selectedCostProviderId == Self.allSourcesId { return nil }
+        if selectedCostProviderId == Self.allSourcesId {
+            // Transparent fallback: when "All Sources" is selected but only one provider remains
+            // (e.g. account disconnected between renders, before `ensureSelectedCostProvider`
+            // normalizes the selection), surface that single provider so the summary, chart and
+            // distribution panels keep rendering instead of flashing the empty state for a frame.
+            return costProviders.count == 1 ? costProviders.first : nil
+        }
         return costProviders.first { $0.id == selectedCostProviderId } ?? costProviders.first
     }
 
     var costSummary: CostSummary? {
-        if selectedCostProviderId == Self.allSourcesId, costProviders.count > 1 {
-            return aggregateCostSummary
+        if selectedCostProviderId == Self.allSourcesId {
+            if costProviders.count > 1 { return aggregateCostSummary }
+            return costProviders.first?.costSummary
         }
         return primaryProvider?.costSummary
     }
 
     var selectedCostIncludesCodex: Bool {
-        if selectedCostProviderId == Self.allSourcesId, costProviders.count > 1 {
+        if selectedCostProviderId == Self.allSourcesId {
             return costProviders.contains { $0.baseProviderId == "codex-cost" }
         }
         return primaryProvider?.baseProviderId == "codex-cost"

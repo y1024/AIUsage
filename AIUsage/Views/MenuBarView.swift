@@ -246,8 +246,7 @@ struct MenuBarView: View {
     }
 
     private var localTokenCostSummary: CostSummary? {
-        let summaries = refreshCoordinator.providers
-            .filter { $0.category == "local-cost" }
+        let summaries = appState.localCostProviders(from: refreshCoordinator.providers)
             .compactMap(\.costSummary)
         guard !summaries.isEmpty else { return nil }
 
@@ -550,7 +549,7 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var costTrackingSection: some View {
-        let costProviders = refreshCoordinator.providers.filter { $0.category == "local-cost" }
+        let costProviders = appState.localCostProviders(from: refreshCoordinator.providers)
         let proxyStats = proxyVM.overallStats(nodeFilter: nil, modelFilter: nil)
         let hasProxyData = proxyStats.requests > 0
         let hasCostData = !costProviders.isEmpty || hasProxyData

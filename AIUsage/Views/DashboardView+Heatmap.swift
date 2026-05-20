@@ -21,7 +21,8 @@ struct LocalTokenUsageHeatmap: View {
         for provider in providers {
             guard let daily = provider.costSummary?.timeline?.daily else { continue }
             for point in daily where point.tokens > 0 {
-                let day = calendar.startOfDay(for: point.date)
+                guard let pointDate = point.resolvedDate else { continue }
+                let day = calendar.startOfDay(for: pointDate)
                 map[day, default: 0] += point.tokens
             }
         }
@@ -34,7 +35,8 @@ struct LocalTokenUsageHeatmap: View {
         for provider in providers {
             guard let daily = provider.costSummary?.timeline?.daily else { continue }
             for point in daily {
-                let day = calendar.startOfDay(for: point.date)
+                guard let pointDate = point.resolvedDate else { continue }
+                let day = calendar.startOfDay(for: pointDate)
                 map[day, default: 0] += point.usd
             }
         }
@@ -49,7 +51,8 @@ struct LocalTokenUsageHeatmap: View {
             guard let timelines = provider.costSummary?.modelTimelines else { continue }
             for series in timelines {
                 for point in series.daily {
-                    if calendar.startOfDay(for: point.date) == targetDay, point.tokens > 0 {
+                    guard let pointDate = point.resolvedDate, point.tokens > 0 else { continue }
+                    if calendar.startOfDay(for: pointDate) == targetDay {
                         result.append((series.model, point.tokens, point.usd))
                     }
                 }

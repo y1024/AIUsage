@@ -4,6 +4,9 @@ import SwiftUI
 
 private enum BucketDateParser {
     private static let lock = NSLock()
+    /// Sentinel stored in the cache to memoize "failed to parse" decisions without losing
+    /// the ability to distinguish them from a successful parse to `Date.distantPast`.
+    private static let unresolvedSentinel = Date(timeIntervalSince1970: -1)
     private static let cache: NSCache<NSString, NSDate> = {
         let cache = NSCache<NSString, NSDate>()
         cache.countLimit = 2_048
@@ -24,27 +27,52 @@ private enum BucketDateParser {
         return f
     }()
 
-    static func parse(_ bucket: String) -> Date {
+    /// Returns the parsed date for a bucket label, or `nil` when the input matches neither
+    /// the hourly nor daily format. Cached and thread-safe.
+    static func parseOptional(_ bucket: String) -> Date? {
         let cacheKey = bucket as NSString
         if let cached = cache.object(forKey: cacheKey) {
-            return cached as Date
+            let date = cached as Date
+            return date == unresolvedSentinel ? nil : date
         }
 
         lock.lock()
         defer { lock.unlock() }
 
         if let cached = cache.object(forKey: cacheKey) {
-            return cached as Date
+            let date = cached as Date
+            return date == unresolvedSentinel ? nil : date
         }
 
-        let parsed = hourly.date(from: bucket) ?? daily.date(from: bucket) ?? .distantPast
-        cache.setObject(parsed as NSDate, forKey: cacheKey)
+        let parsed = hourly.date(from: bucket) ?? daily.date(from: bucket)
+        cache.setObject((parsed ?? unresolvedSentinel) as NSDate, forKey: cacheKey)
         return parsed
+    }
+
+    /// Convenience for callers that need a non-optional `Date`. Falls back to
+    /// `.distantPast` so chart rendering does not crash, but callers that surface points
+    /// to time-domain charts should prefer `parseOptional` and filter unparseable points
+    /// upstream — otherwise `.all` views will be pinned to year 1 by garbage buckets.
+    static func parse(_ bucket: String) -> Date {
+        parseOptional(bucket) ?? .distantPast
     }
 }
 
 extension CostTimelinePoint {
     var date: Date { BucketDateParser.parse(bucket) }
+
+    /// Nil when the bucket label cannot be parsed by either the hourly or daily formatter.
+    /// Used by upstream filters to drop garbage points before they reach the chart domain.
+    var resolvedDate: Date? { BucketDateParser.parseOptional(bucket) }
+}
+
+private extension Array where Element == CostTimelinePoint {
+    /// Drop points whose `bucket` cannot be parsed. Without this filter a single bad
+    /// bucket would surface as `.distantPast` and stretch the chart X-axis to year 1
+    /// in the `.all` time range (which intentionally does not apply a domain clamp).
+    func droppingUnresolvedDates() -> [CostTimelinePoint] {
+        filter { $0.resolvedDate != nil }
+    }
 }
 
 extension CostTrackingView {
@@ -58,7 +86,7 @@ extension CostTrackingView {
         let raw = selectedGranularity == .hourly
             ? (!timeline.hourly.isEmpty ? timeline.hourly : timeline.daily)
             : (!timeline.daily.isEmpty ? timeline.daily : timeline.hourly)
-        return filterByTimeRange(raw)
+        return filterByTimeRange(raw.droppingUnresolvedDates())
     }
 
     func hasUsage(_ point: CostTimelinePoint) -> Bool {
@@ -151,7 +179,7 @@ extension CostTrackingView {
         let raw = selectedGranularity == .hourly
             ? (!series.hourly.isEmpty ? series.hourly : series.daily)
             : (!series.daily.isEmpty ? series.daily : series.hourly)
-        return filterByTimeRange(raw)
+        return filterByTimeRange(raw.droppingUnresolvedDates())
     }
 
     func modelSparklineValues(_ model: String) -> [Double] {
@@ -292,6 +320,10 @@ extension CostTrackingView {
     private func aggregateTimelinePoints(_ pointGroups: [[CostTimelinePoint]]) -> [CostTimelinePoint] {
         var buckets: [String: (label: String, usd: Double, tokens: Int)] = [:]
         for point in pointGroups.flatMap({ $0 }) {
+            // Drop unparseable buckets at the aggregation boundary so they never reach
+            // the chart timeline. Without this, garbage buckets would survive aggregation
+            // and pin the chart X-axis to year 1 in `.all` view.
+            guard point.resolvedDate != nil else { continue }
             var current = buckets[point.bucket] ?? (point.label, 0, 0)
             current.usd += point.usd
             current.tokens += point.tokens
