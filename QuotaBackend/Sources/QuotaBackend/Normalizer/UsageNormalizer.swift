@@ -484,7 +484,7 @@ public enum UsageNormalizer {
     private static func compactProviderLabel(_ providerId: String, fallback: String) -> String {
         switch providerId {
         case "codex-cost":
-            return "Codex Logs"
+            return "Codex"
         case "claude":
             return "Claude Code"
         case "copilot":

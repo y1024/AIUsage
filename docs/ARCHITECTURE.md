@@ -190,7 +190,7 @@ sequenceDiagram
 | amp | Amp | CLI | Browser session |
 | droid | Droid | CLI | Browser session / API |
 | claude | Claude Code | Local | JSONL log scan (`~/.config/claude/projects`) |
-| codex-cost | Codex Logs | Local | JSONL log scan (`~/.codex/sessions` + archived sessions, full-history import on demand) |
+| codex-cost | Codex | Local | JSONL log scan (`~/.codex/sessions` + archived sessions, full-history import on demand) |
 
 ## CI/CD
 

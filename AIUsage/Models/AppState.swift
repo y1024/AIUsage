@@ -17,7 +17,7 @@ class AppState: ObservableObject {
     /// One-shot migration that auto-enrolls existing installs into newly-added
     /// `kind == .costTracking` catalog items. Without this, upgrading users keep their
     /// previously-saved `selectedProviderIds` set forever and never see new local-source
-    /// providers (Codex Logs etc.) until they manually opt in via Settings.
+    /// providers (Codex etc.) until they manually opt in via Settings.
     ///
     /// Bumped to `v2` because the original `v1` flag was rolled back in an earlier
     /// review-fix commit; users who already toggled it manually still control their
@@ -35,7 +35,7 @@ class AppState: ObservableObject {
         ProviderCatalogItem(id: "amp", titleEn: "Amp", titleZh: "Amp", summaryEn: "Replenishing credit pool and refill cadence", summaryZh: "会回补的额度池与回补节奏", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "droid", titleEn: "Droid", titleZh: "Droid", summaryEn: "Token-heavy usage pools and remaining allowances", summaryZh: "以 token 为主的额度池与剩余额度", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "claude", titleEn: "Claude Code", titleZh: "Claude Code", summaryEn: "Local token and cost ledger from Claude Code logs", summaryZh: "基于 Claude Code 本地日志的 Token 与费用账本", channel: "local", kind: .costTracking),
-        ProviderCatalogItem(id: "codex-cost", titleEn: "Codex Logs", titleZh: "Codex 日志", summaryEn: "Local token ledger from Codex session logs", summaryZh: "基于 Codex 本地会话日志的 Token 账本", channel: "local", kind: .costTracking)
+        ProviderCatalogItem(id: "codex-cost", titleEn: "Codex", titleZh: "Codex", summaryEn: "Local token ledger from Codex session logs", summaryZh: "基于 Codex 本地会话日志的 Token 账本", channel: "local", kind: .costTracking)
     ]
 
     private static let initialState: InitialState = {

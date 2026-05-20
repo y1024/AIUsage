@@ -9,7 +9,7 @@ import Darwin
 
 public struct CodexCostProvider: ProviderFetcher {
     public let id = "codex-cost"
-    public let displayName = "Codex Logs"
+    public let displayName = "Codex"
     public let description = "Local token ledger from Codex session logs"
 
     let homeDirectory: String

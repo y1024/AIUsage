@@ -333,7 +333,7 @@ extension ProviderRefreshCoordinator {
             "Usage-derived Claude token and cost ledger from local logs": "基于本地日志推导的 Claude Token 与费用账本",
             "Local token and cost ledger from Claude Code logs": "基于 Claude Code 本地日志的 Token 与费用账本",
             "Local token ledger from Codex session logs": "基于 Codex 本地会话日志的 Token 账本",
-            "Codex Logs": "Codex 日志",
+            "Codex": "Codex",
             "Local token ledger": "本地 Token 账本",
             "Codex session logs this month": "本月 Codex 会话日志",
             "Local ledgers and usage-derived spend": "本地账本与用量推导费用",
