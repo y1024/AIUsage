@@ -14,6 +14,9 @@ public struct OpenAIChatCompletionRequest: Codable, Sendable {
     public let tools: [OpenAITool]?
     public let toolChoice: OpenAIToolChoice?
     public let parallelToolCalls: Bool?
+    /// OpenAI routing hint for prefix caching — requests with the same key
+    /// are more likely to land on the same inference engine, improving cache hits.
+    public let promptCacheKey: String?
 
     public struct StreamOptions: Codable, Sendable {
         public let includeUsage: Bool
@@ -28,6 +31,7 @@ public struct OpenAIChatCompletionRequest: Codable, Sendable {
         case streamOptions = "stream_options"
         case toolChoice = "tool_choice"
         case parallelToolCalls = "parallel_tool_calls"
+        case promptCacheKey = "prompt_cache_key"
     }
 
     public init(
@@ -41,7 +45,8 @@ public struct OpenAIChatCompletionRequest: Codable, Sendable {
         streamOptions: StreamOptions? = nil,
         tools: [OpenAITool]? = nil,
         toolChoice: OpenAIToolChoice? = nil,
-        parallelToolCalls: Bool? = nil
+        parallelToolCalls: Bool? = nil,
+        promptCacheKey: String? = nil
     ) {
         self.model = model
         self.messages = messages
@@ -54,6 +59,7 @@ public struct OpenAIChatCompletionRequest: Codable, Sendable {
         self.tools = tools
         self.toolChoice = toolChoice
         self.parallelToolCalls = parallelToolCalls
+        self.promptCacheKey = promptCacheKey
     }
 }
 

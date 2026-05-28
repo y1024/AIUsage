@@ -244,14 +244,17 @@ public enum ClaudeContentBlock: Codable, Sendable {
 public struct ClaudeTextBlock: Codable, Sendable {
     public let type: String
     public let text: String
+    public let cacheControl: [String: AnyCodable]?
 
     enum CodingKeys: String, CodingKey {
         case type, text
+        case cacheControl = "cache_control"
     }
 
-    public init(text: String) {
+    public init(text: String, cacheControl: [String: AnyCodable]? = nil) {
         self.type = "text"
         self.text = text
+        self.cacheControl = cacheControl
     }
 }
 

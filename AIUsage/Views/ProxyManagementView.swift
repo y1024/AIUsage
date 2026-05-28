@@ -558,14 +558,29 @@ struct ProxyManagementView: View {
                 .font(.system(size: 14))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(log.method) \(log.path)")
-                    .font(.caption.weight(.semibold))
                 HStack(spacing: 4) {
                     Text(log.upstreamModel)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.caption.weight(.semibold))
+                    if log.tokensCacheRead > 0 {
+                        cacheIndicator(L("Read", "读"), color: .green)
+                    }
+                    if log.tokensCacheCreation > 0 {
+                        cacheIndicator(L("Write", "写"), color: .purple)
+                    }
                     if !log.success, let errorType = log.errorType {
                         errorTypeBadge(errorType)
+                    }
+                }
+                if log.success {
+                    HStack(spacing: 6) {
+                        tokenLabel("In", value: log.tokensInput, color: .blue)
+                        tokenLabel("Out", value: log.tokensOutput, color: .cyan)
+                        if log.tokensCacheRead > 0 {
+                            tokenLabel("CR", value: log.tokensCacheRead, color: .green)
+                        }
+                        if log.tokensCacheCreation > 0 {
+                            tokenLabel("CW", value: log.tokensCacheCreation, color: .purple)
+                        }
                     }
                 }
                 if !log.success, let errorMsg = log.errorMessage, !errorMsg.isEmpty {
@@ -584,10 +599,6 @@ struct ProxyManagementView: View {
                     .foregroundStyle(.secondary)
 
                 if log.success {
-                    Text(formatCompactNumber(Double(log.tokensInput + log.tokensOutput)))
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.blue)
-
                     Text(formatProxyCurrency(log.estimatedCostUSD))
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.orange)
@@ -607,6 +618,21 @@ struct ProxyManagementView: View {
         .padding(.vertical, 8)
         .background(log.success ? Color.clear : Color.red.opacity(0.04))
         .help(log.success ? "" : (log.errorMessage ?? ""))
+    }
+
+    private func cacheIndicator(_ label: String, color: Color) -> some View {
+        Text(label)
+            .font(.system(size: 7, weight: .bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(color.opacity(0.12)))
+    }
+
+    private func tokenLabel(_ tag: String, value: Int, color: Color) -> some View {
+        Text("\(tag) \(formatCompactNumber(Double(value)))")
+            .font(.system(size: 9, weight: .medium, design: .monospaced))
+            .foregroundStyle(color.opacity(0.85))
     }
 
     // MARK: - Error Type Display

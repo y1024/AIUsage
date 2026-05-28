@@ -213,11 +213,13 @@ public struct CanonicalResponseMapper {
             model: response.model,
             items: items,
             stop: CanonicalStop(reason: canonicalStopReason(fromResponses: response)),
-            usage: response.usage.map {
-                CanonicalUsage(
-                    inputTokens: $0.inputTokens,
-                    outputTokens: $0.outputTokens,
-                    totalTokens: $0.totalTokens
+            usage: response.usage.map { u in
+                let cached = u.inputTokensDetails?.cachedTokens
+                return CanonicalUsage(
+                    inputTokens: cached.map { max(u.inputTokens - $0, 0) } ?? u.inputTokens,
+                    outputTokens: u.outputTokens,
+                    totalTokens: u.totalTokens,
+                    cacheReadInputTokens: cached
                 )
             }
         )
@@ -269,7 +271,15 @@ private func mapClaudeBlocks(
     for block in blocks {
         switch block {
         case .text(let text):
-            pendingParts.append(.text(CanonicalTextPart(text: text.text)))
+            var extensions: [CanonicalVendorExtension] = []
+            if let cc = text.cacheControl {
+                extensions.append(CanonicalVendorExtension(
+                    vendor: "claude",
+                    key: "cache_control",
+                    value: AnyCodable(cc.mapValues(\.value))
+                ))
+            }
+            pendingParts.append(.text(CanonicalTextPart(text: text.text, rawExtensions: extensions)))
         case .image(let image):
             if image.source.type == "url", let url = image.source.url {
                 pendingParts.append(.image(CanonicalImagePart(

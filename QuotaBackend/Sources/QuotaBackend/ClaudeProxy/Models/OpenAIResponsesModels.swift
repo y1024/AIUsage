@@ -1829,11 +1829,20 @@ public struct OpenAIResponsesUsage: Codable, Sendable {
     public let inputTokens: Int
     public let outputTokens: Int
     public let totalTokens: Int
+    public var inputTokensDetails: InputTokensDetails?
+
+    public struct InputTokensDetails: Codable, Sendable {
+        public let cachedTokens: Int?
+        enum CodingKeys: String, CodingKey {
+            case cachedTokens = "cached_tokens"
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case totalTokens = "total_tokens"
+        case inputTokensDetails = "input_tokens_details"
     }
 
     public init(inputTokens: Int, outputTokens: Int, totalTokens: Int) {

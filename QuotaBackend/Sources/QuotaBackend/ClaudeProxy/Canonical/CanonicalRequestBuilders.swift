@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public struct CanonicalOpenAIRequestBuilder {
@@ -161,6 +162,8 @@ public struct CanonicalOpenAIRequestBuilder {
             pendingReasoningText = nil
         }
 
+        let cacheKey = Self.buildPrefixCacheKey(system: request.system, tools: request.tools)
+
         let payload = OpenAIChatCompletionRequest(
             model: modelOverride ?? request.modelHint,
             messages: messages,
@@ -171,7 +174,8 @@ public struct CanonicalOpenAIRequestBuilder {
             stream: request.generationConfig.stream,
             tools: buildChatTools(from: request.tools, lossyNotes: &lossyNotes),
             toolChoice: buildChatToolChoice(from: request.toolConfig?.choice, lossyNotes: &lossyNotes),
-            parallelToolCalls: request.toolConfig?.parallelCallsAllowed
+            parallelToolCalls: request.toolConfig?.parallelCallsAllowed,
+            promptCacheKey: cacheKey
         )
         return CanonicalBuildResult(payload: payload, lossyNotes: lossyNotes)
     }
@@ -296,6 +300,32 @@ public struct CanonicalOpenAIRequestBuilder {
             parallelToolCalls: request.toolConfig?.parallelCallsAllowed
         )
         return CanonicalBuildResult(payload: payload, lossyNotes: lossyNotes)
+    }
+
+    // MARK: - Prefix Cache Key
+
+    /// Produces a deterministic hash from the system prompt and tool definitions.
+    /// OpenAI uses `prompt_cache_key` as a routing hint to co-locate requests
+    /// with the same stable prefix on the same inference engine.
+    static func buildPrefixCacheKey(
+        system: [CanonicalContentPart],
+        tools: [CanonicalToolDefinition]
+    ) -> String? {
+        var material = ""
+        for part in system {
+            switch part {
+            case .text(let t): material += t.text
+            case .document(let d): material += d.title ?? ""
+            default: break
+            }
+        }
+        for tool in tools {
+            if let name = tool.name { material += name }
+        }
+        guard !material.isEmpty else { return nil }
+
+        let digest = SHA256.hash(data: Data(material.utf8))
+        return digest.prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 }
 

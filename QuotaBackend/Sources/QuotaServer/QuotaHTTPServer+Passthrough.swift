@@ -50,7 +50,8 @@ extension QuotaHTTPServer {
             )
         }
 
-        // Parse request metadata and apply model alias mapping before building the upstream request
+        // Parse request metadata, apply model alias mapping, and inject
+        // missing thinking blocks before building the upstream request.
         var isStreaming = false
         var requestModel = "unknown"
         var upstreamModel = "unknown"
@@ -58,16 +59,29 @@ extension QuotaHTTPServer {
             isStreaming = json["stream"] as? Bool ?? false
             requestModel = json["model"] as? String ?? "unknown"
             upstreamModel = requestModel
+            var bodyModified = false
 
             if config.enableModelAliasMapping, requestModel != "unknown" {
                 let mapped = config.mapToUpstreamModel(requestModel)
                 if mapped != requestModel {
                     upstreamModel = mapped
                     json["model"] = mapped
-                    if let rewritten = try? JSONSerialization.data(withJSONObject: json) {
-                        mutableBody = rewritten
-                    }
+                    bodyModified = true
                 }
+            }
+
+            if thinkingIsActive(in: json),
+               let messages = json["messages"] as? [[String: Any]] {
+                let result = injectMissingThinkingBlocks(messages)
+                if result.injected > 0 {
+                    json["messages"] = result.messages
+                    bodyModified = true
+                    httpLog.debug("Injected empty thinking blocks into \(result.injected) assistant message(s)")
+                }
+            }
+
+            if bodyModified, let rewritten = try? JSONSerialization.data(withJSONObject: json) {
+                mutableBody = rewritten
             }
         }
 
@@ -75,9 +89,14 @@ extension QuotaHTTPServer {
         upstreamReq.httpMethod = request.method
         upstreamReq.httpBody = mutableBody
 
+        let suppressedRequestHeaders: Set<String> = [
+            "host", "content-length",
+            "accept-encoding",
+        ]
+
         for (key, value) in mutableHeaders {
             let lk = key.lowercased()
-            if lk == "host" || lk == "content-length" { continue }
+            if suppressedRequestHeaders.contains(lk) { continue }
             if lk == "authorization" && !config.upstreamAPIKey.isEmpty { continue }
             upstreamReq.setValue(value, forHTTPHeaderField: key)
         }
@@ -95,6 +114,10 @@ extension QuotaHTTPServer {
         }
     }
 
+    private static let suppressedResponseHeaders: Set<String> = [
+        "content-length", "transfer-encoding", "content-encoding",
+    ]
+
     func handlePassthroughNonStreaming(_ connection: NWConnection, upstreamRequest: URLRequest, requestModel: String, upstreamModel: String, startTime: Date) async {
         do {
             let (data, response) = try await URLSession.shared.data(for: upstreamRequest)
@@ -105,11 +128,12 @@ extension QuotaHTTPServer {
             httpResp?.allHeaderFields.forEach { key, value in
                 if let k = key as? String, let v = value as? String {
                     let lk = k.lowercased()
-                    if lk != "content-length" && lk != "transfer-encoding" {
+                    if !Self.suppressedResponseHeaders.contains(lk) {
                         respHeaders[k] = v
                     }
                 }
             }
+            respHeaders["Content-Length"] = "\(data.count)"
 
             let elapsed = Date().timeIntervalSince(startTime) * 1000
             let isSuccess = statusCode < 400
@@ -164,6 +188,10 @@ extension QuotaHTTPServer {
         }
     }
 
+    private static let suppressedStreamingResponseHeaders: Set<String> = [
+        "content-length", "transfer-encoding", "connection", "content-encoding",
+    ]
+
     func handlePassthroughStreaming(_ connection: NWConnection, upstreamRequest: URLRequest, requestModel: String, upstreamModel: String, startTime: Date) async {
         let streamer = StreamingResponse(connection: connection)
 
@@ -174,12 +202,12 @@ extension QuotaHTTPServer {
 
             var respHeaders: [String: String] = [
                 "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
+                "Connection": "close",
             ]
             httpResp?.allHeaderFields.forEach { key, value in
                 guard let k = key as? String, let v = value as? String else { return }
                 let lk = k.lowercased()
-                if lk != "content-length" && lk != "transfer-encoding" && lk != "connection" {
+                if !Self.suppressedStreamingResponseHeaders.contains(lk) {
                     respHeaders[k] = v
                 }
             }
@@ -199,10 +227,20 @@ extension QuotaHTTPServer {
                     return
                 }
                 let jsonStr = String(line[jsonStart...])
-                guard let eventData = try? JSONSerialization.jsonObject(with: Data(jsonStr.utf8)) as? [String: Any],
-                      let usage = eventData["usage"] as? [String: Any] else {
+                guard let eventData = try? JSONSerialization.jsonObject(with: Data(jsonStr.utf8)) as? [String: Any] else {
                     return
                 }
+
+                let usage: [String: Any]
+                if let u = eventData["usage"] as? [String: Any] {
+                    usage = u
+                } else if let message = eventData["message"] as? [String: Any],
+                          let u = message["usage"] as? [String: Any] {
+                    usage = u
+                } else {
+                    return
+                }
+
                 if let v = usage["input_tokens"] as? Int { totalInputTokens = v }
                 if let v = usage["output_tokens"] as? Int { totalOutputTokens = v }
                 if let v = usage["cache_creation_input_tokens"] as? Int { cacheCreationTokens = v }
@@ -213,15 +251,13 @@ extension QuotaHTTPServer {
                 lineBuffer.append(byte)
 
                 if byte == 0x0A {
-                    // Forward each line immediately for real-time SSE delivery
-                    await streamer.sendDataChunk(lineBuffer)
-
                     var trimmed = lineBuffer
                     if trimmed.last == 0x0A { trimmed.removeLast() }
                     if trimmed.last == 0x0D { trimmed.removeLast() }
                     let line = String(decoding: trimmed, as: UTF8.self)
                     processUsageLine(line)
 
+                    await streamer.sendDataChunk(lineBuffer)
                     lineBuffer.removeAll(keepingCapacity: true)
                 }
             }
@@ -362,5 +398,55 @@ extension QuotaHTTPServer {
         case 400..<500: return "invalid_request_error"
         default: return "api_error"
         }
+    }
+
+    // MARK: - DeepSeek Thinking Block Injection
+
+    /// Returns true when the request's `thinking` parameter is active
+    /// (enabled / adaptive / budget-based). Disabled and absent both
+    /// return false — we only inject blocks when the caller already
+    /// opted into thinking mode.
+    private func thinkingIsActive(in json: [String: Any]) -> Bool {
+        guard let thinking = json["thinking"] as? [String: Any],
+              let type = thinking["type"] as? String else {
+            return false
+        }
+        return type != "disabled"
+    }
+
+    /// DeepSeek (and compatible gateways like SuCloud) require every
+    /// assistant message that contains `tool_use` to also carry a
+    /// `thinking` content block — otherwise the API returns 400.
+    /// Claude Code strips thinking blocks from conversation history,
+    /// so we re-inject an empty placeholder where needed.
+    private func injectMissingThinkingBlocks(
+        _ messages: [[String: Any]]
+    ) -> (messages: [[String: Any]], injected: Int) {
+        var result: [[String: Any]] = []
+        var injected = 0
+
+        for var message in messages {
+            guard (message["role"] as? String) == "assistant",
+                  var content = message["content"] as? [[String: Any]] else {
+                result.append(message)
+                continue
+            }
+
+            let hasToolUse = content.contains { ($0["type"] as? String) == "tool_use" }
+            let hasThinking = content.contains {
+                let t = $0["type"] as? String
+                return t == "thinking" || t == "redacted_thinking"
+            }
+
+            if hasToolUse && !hasThinking {
+                content.insert(["type": "thinking", "thinking": ""], at: 0)
+                message["content"] = content
+                injected += 1
+            }
+
+            result.append(message)
+        }
+
+        return (result, injected)
     }
 }

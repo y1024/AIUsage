@@ -550,7 +550,10 @@ final class CanonicalMiddleLayerTests: XCTestCase {
         let direct = try directConverter.convert(request: request, upstreamModel: "gpt-4o-mini")
 
         XCTAssertTrue(built.lossyNotes.isEmpty)
-        XCTAssertEqual(try normalizedJSONString(from: built.payload), try normalizedJSONString(from: direct))
+        XCTAssertEqual(
+            try normalizedJSONString(from: built.payload, droppingKeys: ["prompt_cache_key"]),
+            try normalizedJSONString(from: direct)
+        )
     }
 
     func testCanonicalResponsesBuilderMatchesCurrentResponsesWireShape() async throws {
@@ -790,13 +793,17 @@ final class CanonicalMiddleLayerTests: XCTestCase {
     }
 }
 
-private func normalizedJSONString<T: Encodable>(from value: T) throws -> String {
+private func normalizedJSONString<T: Encodable>(from value: T, droppingKeys: Set<String> = []) throws -> String {
     let encoded = try JSONEncoder().encode(value)
-    return try normalizedJSONString(from: encoded)
+    return try normalizedJSONString(from: encoded, droppingKeys: droppingKeys)
 }
 
-private func normalizedJSONString(from data: Data) throws -> String {
-    let object = try JSONSerialization.jsonObject(with: data)
+private func normalizedJSONString(from data: Data, droppingKeys: Set<String> = []) throws -> String {
+    var object = try JSONSerialization.jsonObject(with: data)
+    if !droppingKeys.isEmpty, var dict = object as? [String: Any] {
+        for key in droppingKeys { dict.removeValue(forKey: key) }
+        object = dict
+    }
     let normalized = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     return String(data: normalized, encoding: .utf8) ?? ""
 }
