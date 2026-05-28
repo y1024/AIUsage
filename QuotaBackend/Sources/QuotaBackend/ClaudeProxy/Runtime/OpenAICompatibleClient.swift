@@ -833,7 +833,10 @@ public actor OpenAICompatibleClient {
         return OpenAIUsage(
             promptTokens: usage.inputTokens,
             completionTokens: usage.outputTokens,
-            totalTokens: usage.totalTokens
+            totalTokens: usage.totalTokens,
+            promptTokensDetails: usage.inputTokensDetails?.cachedTokens.map {
+                OpenAIUsage.PromptTokensDetails(cachedTokens: $0)
+            }
         )
     }
 
