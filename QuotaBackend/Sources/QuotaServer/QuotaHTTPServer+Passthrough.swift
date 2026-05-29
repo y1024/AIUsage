@@ -70,6 +70,12 @@ extension QuotaHTTPServer {
                 }
             }
 
+            let hoisted = hoistSystemMessages(in: &json)
+            if hoisted > 0 {
+                bodyModified = true
+                httpLog.debug("Hoisted \(hoisted) system message(s) from messages[] to top-level system")
+            }
+
             if thinkingIsActive(in: json),
                let messages = json["messages"] as? [[String: Any]] {
                 let result = injectMissingThinkingBlocks(messages)
@@ -398,6 +404,74 @@ extension QuotaHTTPServer {
         case 400..<500: return "invalid_request_error"
         default: return "api_error"
         }
+    }
+
+    // MARK: - Lean System Prompt Normalization
+
+    /// Claude Code 2.1.154+ ("Lean System Prompt Now Default") emits
+    /// `role: "system"` entries inside the `messages[]` array. The Anthropic
+    /// spec only allows `system` as a top-level field — strict upstreams
+    /// (DeepSeek `/anthropic`, SuCloud, etc.) reject anything other than
+    /// `user`/`assistant` in messages with a 400. This hoists those entries
+    /// into the top-level `system` field (as text blocks, preserving
+    /// `cache_control`) and removes them from `messages`. Returns the number
+    /// of system messages hoisted.
+    func hoistSystemMessages(in json: inout [String: Any]) -> Int {
+        guard let messages = json["messages"] as? [[String: Any]] else { return 0 }
+
+        var hoistedBlocks: [[String: Any]] = []
+        var remaining: [[String: Any]] = []
+        var systemCount = 0
+        for message in messages {
+            if (message["role"] as? String) == "system" {
+                systemCount += 1
+                hoistedBlocks.append(contentsOf: systemTextBlocks(from: message["content"]))
+            } else {
+                remaining.append(message)
+            }
+        }
+
+        // Always strip system entries from messages — leaving even an empty or
+        // non-text one behind still trips the strict upstream's 400.
+        guard systemCount > 0 else { return 0 }
+
+        // Only rewrite the top-level system when there is actual text to carry
+        // over; normalize the existing value to text blocks and append the
+        // hoisted blocks after it to preserve ordering.
+        if !hoistedBlocks.isEmpty {
+            var merged: [[String: Any]] = []
+            if let existing = json["system"] as? String, !existing.isEmpty {
+                merged.append(["type": "text", "text": existing])
+            } else if let existing = json["system"] as? [[String: Any]] {
+                merged.append(contentsOf: existing)
+            }
+            merged.append(contentsOf: hoistedBlocks)
+            json["system"] = merged
+        }
+
+        json["messages"] = remaining
+        return systemCount
+    }
+
+    /// Extracts Anthropic-compatible text blocks from a system message's
+    /// content, which may be a plain string or an array of content blocks.
+    /// Only text blocks are kept (system supports text only); `cache_control`
+    /// is preserved so prompt-cache breakpoints survive the hoist.
+    private func systemTextBlocks(from content: Any?) -> [[String: Any]] {
+        if let text = content as? String {
+            return text.isEmpty ? [] : [["type": "text", "text": text]]
+        }
+        if let blocks = content as? [[String: Any]] {
+            return blocks.compactMap { block in
+                guard (block["type"] as? String) == "text" else { return nil }
+                var out: [String: Any] = ["type": "text", "text": block["text"] as? String ?? ""]
+                if let cacheControl = block["cache_control"] {
+                    out["cache_control"] = cacheControl
+                }
+                return out
+            }
+        }
+        return []
     }
 
     // MARK: - DeepSeek Thinking Block Injection

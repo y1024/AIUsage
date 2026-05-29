@@ -27,7 +27,18 @@ public struct CanonicalRequestMapper {
 
         var items: [CanonicalConversationItem] = []
         for message in request.messages {
-            items.append(contentsOf: try mapClaudeMessage(message))
+            for item in try mapClaudeMessage(message) {
+                // Claude Code 2.1.154+ ("Lean System Prompt") emits role:"system"
+                // entries inside messages[]. Anthropic only allows system as a
+                // top-level field, and strict upstreams reject it in messages,
+                // so hoist those parts into systemParts (after any top-level
+                // system) instead of leaving them mid-conversation.
+                if case .message(let mapped) = item, case .system = mapped.role {
+                    systemParts.append(contentsOf: mapped.parts)
+                } else {
+                    items.append(item)
+                }
+            }
         }
 
         var metadata: CanonicalJSONMap = [:]
