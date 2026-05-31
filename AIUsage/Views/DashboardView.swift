@@ -15,6 +15,9 @@ struct DashboardView: View {
                     overviewSection(overview)
                     if !costTrackingProviders.isEmpty {
                         LocalTokenUsageHeatmap(providers: costTrackingProviders)
+                            // 让热力图悬浮提示卡片绘制在下方统计卡片之上（同级 VStack 中
+                            // 后声明的视图默认覆盖先声明的，故抬高热力图层级）。
+                            .zIndex(1)
                     }
                     unifiedStatsSection
                     if !serviceProviders.isEmpty {
@@ -224,12 +227,14 @@ struct DashboardView: View {
             ) {
                 if showCC {
                     LocalTokenAggregateCard(providers: costTrackingProviders) {
+                        UserDefaults.standard.set(StatsDomain.local.rawValue, forKey: DefaultsKey.statsDomain)
                         appState.selectedSection = .costTracking
                     }
                 }
                 if showProxy {
                     ProxyStatsAggregateCard(proxyVM: proxyVM) {
-                        appState.selectedSection = .proxyStats
+                        UserDefaults.standard.set(StatsDomain.proxy.rawValue, forKey: DefaultsKey.statsDomain)
+                        appState.selectedSection = .costTracking
                     }
                 }
             }

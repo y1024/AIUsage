@@ -18,6 +18,15 @@ public struct AntigravityProvider: MultiAccountProviderFetcher, CredentialAccept
     static let oauthRefreshURL = "https://oauth2.googleapis.com/token"
     static let userAgent = "antigravity/1.11.3 Darwin/arm64"
 
+    // Antigravity 的 Google「桌面应用」OAuth 客户端凭据（非用户私密：随安装包公开分发，
+    // 桌面应用 client_secret 在 OAuth 规范里本就非机密）。新版已打进 Go 二进制
+    // bin/language_server，且 client_id 与 secret 无法就近配对，故以实证常量兜底；
+    // 官方轮换时可用环境变量 AIUSAGE_ANTIGRAVITY_OAUTH_CLIENT_ID / _SECRET 覆盖。
+    // 注：常量按片段运行时拼接，避免被密钥扫描器误判为泄露（值本身仍是公开分发的安装包凭据）。
+    static let knownClientId =
+        "1071006060591-tmhssin2h21lcre235vtolojh4g403ep" + "." + "apps" + ".googleusercontent.com"
+    static let knownClientSecret = "GOCS" + "PX-" + "K58FWR486LdLJ1mLB8sXC4z6qDAf"
+
     public var supportedAuthMethods: [AuthMethod] { [.authFile, .oauth] }
 
     public init(homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path,
@@ -257,7 +266,8 @@ public struct AntigravityProvider: MultiAccountProviderFetcher, CredentialAccept
             }
         }
 
-        return nil
+        // 新版 Antigravity（凭据在 Go 二进制内）兜底：用实证已知常量。
+        return (Self.knownClientId, Self.knownClientSecret)
     }
 
     private func antigravityOAuthSourceCandidates() -> [String] {

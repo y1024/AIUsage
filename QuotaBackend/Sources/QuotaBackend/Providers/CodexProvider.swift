@@ -17,6 +17,9 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     static let refreshURL = "https://auth.openai.com/oauth/token"
     static let oauthClientId = "app_EMoamEEZ73f0CkXaXp7hrann"
     static let defaultBaseURL = "https://chatgpt.com/backend-api/"
+    /// Provider id of the AIUsage-managed CodeX proxy block in `config.toml`.
+    /// Must mirror `CodexConfigManager.providerId` in the app target.
+    static let proxyProviderId = "aiusage-proxy"
 
     public var supportedAuthMethods: [AuthMethod] { [.token, .authFile, .auto] }
 
@@ -465,8 +468,20 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         let configPath = "\(homeDirectory)/.codex/config.toml"
         var baseURL = Self.defaultBaseURL
         if let content = try? String(contentsOfFile: configPath, encoding: .utf8) {
+            // The AIUsage CodeX proxy injects `[model_providers.aiusage-proxy]`
+            // with `base_url = http://127.0.0.1:4319/v1`. That is the local proxy
+            // host, NOT the ChatGPT usage host — picking it up here would point the
+            // account usage request at the proxy (or its upstream) and 404. Skip
+            // that managed block while still honoring any other base override.
+            let managedSection = "[model_providers.\(Self.proxyProviderId)]"
+            var inManagedSection = false
             for line in content.components(separatedBy: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("[") {
+                    inManagedSection = trimmed.hasPrefix(managedSection)
+                    continue
+                }
+                if inManagedSection { continue }
                 for key in ["apiBaseUrl", "api_base_url", "base_url"] where trimmed.lowercased().hasPrefix(key.lowercased()) && trimmed.contains("=") {
                     let value = trimmed
                         .components(separatedBy: "=")
@@ -568,10 +583,12 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         usage.usageAccountId = rawAccountId
 
         let apiPlan = stringValue(json["plan_type"])
-        usage.accountPlan = apiPlan ?? jwtPlanType
+        let rawPlan = apiPlan ?? jwtPlanType
+        // 规范成展示名（Plus/Pro/Business/...），未知值原样保留。
+        usage.accountPlan = Self.planDisplayName(forRaw: rawPlan) ?? rawPlan
 
-        let effectivePlan = apiPlan ?? jwtPlanType
-        let wsType = Self.workspaceType(fromPlan: effectivePlan)
+        // 工作区归类仍以原始 plan 计算（兼容 *_usage_based / hc 等变体）。
+        let wsType = Self.workspaceType(fromPlan: rawPlan)
         usage.extra["workspaceType"] = AnyCodable(wsType)
         if let rawAccountId { usage.extra["workspaceId"] = AnyCodable(rawAccountId) }
         if let jwtUserId { usage.extra["userId"] = AnyCodable(jwtUserId) }
@@ -699,18 +716,48 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         return nil
     }
 
+    // MARK: - ChatGPT / Codex Plan Mapping
+    // 基于 openai/codex 的 KnownPlan（codex-rs/login/src/token_data.rs）做映射，但展示名贴合
+    // ChatGPT 现行方案命名。要点：
+    //   - 旧的 "team" 已更名为 "ChatGPT Business"，统一展示为 Business（旧账号 JWT 仍可能下发 team）；
+    //   - "hc" → Enterprise；含 *_usage_based 的按需计费变体归并到 Business / Enterprise；
+    //   - 个人计划：free / go / plus / pro。
+
+    /// 规范化原始 plan 键：小写、去空白、空格/连字符→下划线，
+    /// 以便同时兼容原始值（"self_serve_business_usage_based"）与展示名（"Self Serve Business Usage Based"）。
+    private static func normalizePlanKey(_ raw: String) -> String {
+        raw.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "-", with: "_")
+    }
+
+    /// 展示名（贴合 ChatGPT 现行方案命名）。未知值原样返回。
+    static func planDisplayName(forRaw raw: String?) -> String? {
+        guard let raw, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        switch normalizePlanKey(raw) {
+        case "free": return "Free"
+        case "go": return "Go"
+        case "plus": return "Plus"
+        case "pro": return "Pro"
+        // ChatGPT Team 已更名为 Business，旧 team 值统一展示为 Business。
+        case "team", "self_serve_business_usage_based", "business": return "Business"
+        case "enterprise_cbp_usage_based", "enterprise", "hc": return "Enterprise"
+        case "education", "edu": return "Edu"
+        default: return raw
+        }
+    }
+
     /// Derive a workspace type label from the plan string.
-    /// "plus"/"pro" → "Personal", "team" → "Team", "business" → "Business", etc.
+    /// 个人计划 (free/go/plus/pro) → "Personal"；团队/企业/教育 → 对应工作区名。
     static func workspaceType(fromPlan plan: String?) -> String {
-        guard let plan = plan?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
-              !plan.isEmpty else {
+        guard let plan, !plan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "Personal"
         }
-        switch plan {
-        case "team": return "Team"
-        case "business": return "Business"
-        case "enterprise": return "Enterprise"
-        case "edu": return "Edu"
+        switch normalizePlanKey(plan) {
+        case "team", "self_serve_business_usage_based", "business": return "Business"
+        case "enterprise_cbp_usage_based", "enterprise", "hc": return "Enterprise"
+        case "education", "edu": return "Edu"
         default: return "Personal"
         }
     }

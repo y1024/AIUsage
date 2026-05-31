@@ -3,15 +3,32 @@ import QuotaBackend
 
 extension ProxyViewModel {
 
+    // MARK: - Family Scoping
+    // 代理实测统计支持按家族（Claude 代理 / CodeX 代理）聚合；nil 表示全部家族。
+
+    /// 属于 CodeX 家族的节点 id 集合，用于按家族过滤日志。configurations 数量很小，
+    /// 每次聚合调用现算一次即可，避免维护额外的可变缓存。
+    private var codexConfigIdSet: Set<String> {
+        Set(configurations.filter { $0.nodeType.isCodex }.map(\.id))
+    }
+
+    private func configIdMatchesFamily(_ configId: String, family: ProxyNodeFamily?, codexIds: Set<String>) -> Bool {
+        guard let family else { return true }
+        let isCodex = codexIds.contains(configId)
+        return family.isCodex == isCodex
+    }
+
     // MARK: - Aggregation for ProxyStatsView
 
-    func allLogs(nodeFilter: String?, modelFilter: String?) -> [ProxyRequestLog] {
-        let key = LogCacheKey(nodeFilter: nodeFilter, modelFilter: modelFilter)
+    func allLogs(nodeFilter: String?, modelFilter: String?, family: ProxyNodeFamily? = nil) -> [ProxyRequestLog] {
+        let key = LogCacheKey(nodeFilter: nodeFilter, modelFilter: modelFilter, family: family)
         if let cached = _logCache[key] { return cached }
 
+        let codexIds = codexConfigIdSet
         var result: [ProxyRequestLog] = []
         for (configId, logs) in recentLogs {
             if let node = nodeFilter, node != configId { continue }
+            if !configIdMatchesFamily(configId, family: family, codexIds: codexIds) { continue }
             for log in logs {
                 if let model = modelFilter, log.upstreamModel != model { continue }
                 result.append(log)
@@ -30,13 +47,13 @@ extension ProxyViewModel {
         var tokens: Int
     }
 
-    func modelTimeSeries(nodeFilter: String?, granularity: String) -> [ModelTimePoint] {
-        let cacheKey = TimeSeriesKey(nodeFilter: nodeFilter, granularity: granularity)
+    func modelTimeSeries(nodeFilter: String?, granularity: String, family: ProxyNodeFamily? = nil) -> [ModelTimePoint] {
+        let cacheKey = TimeSeriesKey(nodeFilter: nodeFilter, granularity: granularity, family: family)
         if let cached = _timeSeriesCache[cacheKey] as? [ModelTimePoint] {
             return cached
         }
 
-        let logs = allLogs(nodeFilter: nodeFilter, modelFilter: nil)
+        let logs = allLogs(nodeFilter: nodeFilter, modelFilter: nil, family: family)
         guard !logs.isEmpty else {
             _timeSeriesCache[cacheKey] = [ModelTimePoint]()
             return []
@@ -119,13 +136,13 @@ extension ProxyViewModel {
         }
     }
 
-    func modelAggregates(nodeFilter: String?, modelFilter: String?, since: Date? = nil) -> [ModelAggregate] {
-        let cacheKey = AggregateKey(nodeFilter: nodeFilter, modelFilter: modelFilter, since: since)
+    func modelAggregates(nodeFilter: String?, modelFilter: String?, since: Date? = nil, family: ProxyNodeFamily? = nil) -> [ModelAggregate] {
+        let cacheKey = AggregateKey(nodeFilter: nodeFilter, modelFilter: modelFilter, since: since, family: family)
         if let cached = _modelAggCache[cacheKey] as? [ModelAggregate] {
             return cached
         }
 
-        var logs = allLogs(nodeFilter: nodeFilter, modelFilter: modelFilter)
+        var logs = allLogs(nodeFilter: nodeFilter, modelFilter: modelFilter, family: family)
         if let since { logs = logs.filter { $0.timestamp >= since } }
         var map: [String: ModelAggregate] = [:]
 
@@ -151,14 +168,16 @@ extension ProxyViewModel {
         return result
     }
 
-    func allUpstreamModels(nodeFilter: String?) -> [String] {
-        let cacheKey = nodeFilter ?? ""
+    func allUpstreamModels(nodeFilter: String?, family: ProxyNodeFamily? = nil) -> [String] {
+        let cacheKey = UpstreamModelsKey(nodeFilter: nodeFilter, family: family)
         if let cached = _upstreamModelsCache[cacheKey] {
             return cached
         }
+        let codexIds = codexConfigIdSet
         var models = Set<String>()
         for (configId, logs) in recentLogs {
             if let node = nodeFilter, node != configId { continue }
+            if !configIdMatchesFamily(configId, family: family, codexIds: codexIds) { continue }
             for log in logs { models.insert(log.upstreamModel) }
         }
         let result = models.sorted()
@@ -186,17 +205,17 @@ extension ProxyViewModel {
         }
     }
 
-    func overallStats(nodeFilter: String?, modelFilter: String?) -> OverallStats {
-        overallStats(nodeFilter: nodeFilter, modelFilter: modelFilter, since: nil)
+    func overallStats(nodeFilter: String?, modelFilter: String?, family: ProxyNodeFamily? = nil) -> OverallStats {
+        overallStats(nodeFilter: nodeFilter, modelFilter: modelFilter, since: nil, family: family)
     }
 
-    func overallStats(nodeFilter: String?, modelFilter: String?, since: Date?) -> OverallStats {
-        let cacheKey = AggregateKey(nodeFilter: nodeFilter, modelFilter: modelFilter, since: since)
+    func overallStats(nodeFilter: String?, modelFilter: String?, since: Date?, family: ProxyNodeFamily? = nil) -> OverallStats {
+        let cacheKey = AggregateKey(nodeFilter: nodeFilter, modelFilter: modelFilter, since: since, family: family)
         if let cached = _overallStatsCache[cacheKey] as? OverallStats {
             return cached
         }
 
-        var logs = allLogs(nodeFilter: nodeFilter, modelFilter: modelFilter)
+        var logs = allLogs(nodeFilter: nodeFilter, modelFilter: modelFilter, family: family)
         if let since { logs = logs.filter { $0.timestamp >= since } }
 
         var cost = 0.0, tokens = 0, input = 0, output = 0
@@ -226,12 +245,12 @@ extension ProxyViewModel {
         return result
     }
 
-    func dataDateRange(nodeFilter: String?, modelFilter: String?) -> (earliest: Date?, latest: Date?, days: Int) {
-        let cacheKey = LogCacheKey(nodeFilter: nodeFilter, modelFilter: modelFilter)
+    func dataDateRange(nodeFilter: String?, modelFilter: String?, family: ProxyNodeFamily? = nil) -> (earliest: Date?, latest: Date?, days: Int) {
+        let cacheKey = LogCacheKey(nodeFilter: nodeFilter, modelFilter: modelFilter, family: family)
         if let cached = _dateRangeCache[cacheKey] {
             return cached
         }
-        let logs = allLogs(nodeFilter: nodeFilter, modelFilter: modelFilter)
+        let logs = allLogs(nodeFilter: nodeFilter, modelFilter: modelFilter, family: family)
         guard let earliest = logs.first?.timestamp, let latest = logs.last?.timestamp else {
             let empty: (earliest: Date?, latest: Date?, days: Int) = (nil, nil, 0)
             _dateRangeCache[cacheKey] = empty

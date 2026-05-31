@@ -9,7 +9,7 @@ enum AppSection: String, Hashable {
     case providers
     case costTracking
     case proxyManagement
-    case proxyStats
+    case codexProxyManagement
     case inbox
     case settings
 }
@@ -117,6 +117,7 @@ enum DefaultsKey {
     static let menuBarCostSourceConfigs = "menuBarCostSourceConfigs"
     static let menuBarSummaryStatsSource = "menuBarSummaryStatsSource"
     static let proxyActivatedConfigId = "proxyActivatedConfigId"
+    static let proxyActivatedCodexConfigId = "proxyActivatedCodexConfigId"
     static let proxyAutoRestoreOnLaunch = "proxyAutoRestoreOnLaunch"
     static let proxyOnlyRunningIds = "proxyOnlyRunningIds"
     static let proxyConfigurations = "proxyConfigurations"
@@ -129,6 +130,9 @@ enum DefaultsKey {
     static let proxyStatsMetric = "proxyStatsMetric"
     static let proxyStatsModel = "proxyStatsModel"
     static let proxyStatsNodeId = "proxyStatsNodeId"
+    static let proxyStatsFamily = "proxyStatsFamily"
+    /// Token 统计页一级数据域：本地日志(local) / 代理实测(proxy)。
+    static let statsDomain = "statsDomain"
     static let quotaIndicatorMetric = "quotaIndicatorMetric"
     static let quotaIndicatorStyle = "quotaIndicatorStyle"
     static let readAlertIds = "readAlertIds"

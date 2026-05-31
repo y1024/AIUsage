@@ -1,0 +1,504 @@
+import SwiftUI
+import QuotaBackend
+
+// MARK: - CodeX Proxy Editor
+// CodeX 节点编辑器（单模型）。把 OpenAI 兼容上游接入 CodeX：激活时写 ~/.codex/config.toml
+// 的 model / model_provider=aiusage-proxy + [model_providers.aiusage-proxy]，本地起 QuotaServer。
+// 单模型 + 价格存进 modelMapping.bigModel（复用现成定价/统计机制），middle/small 留空。
+
+struct CodexProxyEditorView: View {
+    @EnvironmentObject var viewModel: ProxyViewModel
+    @EnvironmentObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var profile: NodeProfile
+    @State private var isNew: Bool
+    @State private var availableModels: [String] = []
+    @State private var isFetchingModels = false
+    @State private var fetchModelsError: String?
+    @State private var pricingCurrency: ProxyConfiguration.PricingCurrency
+    @State private var extraTOMLCheck: TOMLCheckResult = .ok
+
+    init(profile: NodeProfile? = nil) {
+        if let profile {
+            var p = profile
+            // CodeX 固定使用 Responses（其 wire_api），纠正历史误存的 chat_completions。
+            p.metadata.proxy.openAIUpstreamAPI = .responses
+            _profile = State(initialValue: p)
+            _isNew = State(initialValue: false)
+            _pricingCurrency = State(initialValue: p.metadata.proxy.modelMapping.bigModel.pricing.currency)
+            _extraTOMLCheck = State(initialValue: TOMLLinter.validate(p.metadata.proxy.extraTOML ?? ""))
+        } else {
+            let newProfile = NodeProfile.defaultProfile(nodeType: .codexProxy)
+            _profile = State(initialValue: newProfile)
+            _isNew = State(initialValue: true)
+            _pricingCurrency = State(initialValue: .usd)
+        }
+    }
+
+    /// 兼容未迁移到 profile 的调用方。
+    init(config: ProxyConfiguration) {
+        var p = NodeProfile.fromLegacyConfiguration(config)
+        p.metadata.proxy.openAIUpstreamAPI = .responses
+        _profile = State(initialValue: p)
+        _isNew = State(initialValue: false)
+        _pricingCurrency = State(initialValue: config.modelMapping.bigModel.pricing.currency)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            headerBar
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    introBanner
+                    basicSection
+                    networkSection
+                    upstreamSection
+                    modelSection
+                    securitySection
+                    advancedTOMLSection
+                }
+                .padding(20)
+            }
+            .frame(maxHeight: .infinity)
+            Divider()
+            footerBar
+        }
+        .frame(width: 750, height: 800)
+    }
+
+    // MARK: - Header / Footer
+
+    private var headerBar: some View {
+        HStack {
+            Label {
+                Text(isNew ? L("New CodeX Node", "新建 CodeX 节点") : L("Edit CodeX Node", "编辑 CodeX 节点"))
+                    .font(.title2.weight(.bold))
+            } icon: {
+                Image(systemName: "terminal.fill")
+                    .foregroundStyle(Self.codexBrand)
+            }
+            Spacer()
+            Button(L("Cancel", "取消")) { dismiss() }
+        }
+        .padding(20)
+    }
+
+    private var footerBar: some View {
+        HStack {
+            if !isNew {
+                Button(L("Delete", "删除"), role: .destructive) {
+                    Task {
+                        await viewModel.deleteConfiguration(profile.id)
+                        dismiss()
+                    }
+                }
+            }
+            Spacer()
+            Button(L("Cancel", "取消")) { dismiss() }
+            Button(isNew ? L("Create", "创建") : L("Save", "保存")) {
+                saveProfile()
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!isValid)
+        }
+        .padding(20)
+    }
+
+    private var introBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle.fill").foregroundStyle(Self.codexBrand)
+            Text(L(
+                "When activated, AIUsage injects model_provider=aiusage-proxy into ~/.codex/config.toml and starts a local proxy. CodeX then reaches your OpenAI-compatible upstream through it (Responses inbound).",
+                "激活时会向 ~/.codex/config.toml 注入 model_provider=aiusage-proxy 并启动本地代理，CodeX 经由它访问你的 OpenAI 兼容上游（Responses 入站）。"
+            ))
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Self.codexBrand.opacity(0.08)))
+    }
+
+    // MARK: - Basic
+
+    private var basicSection: some View {
+        sectionCard(title: L("Basic Information", "基本信息")) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("Name", "名称")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                TextField(L("e.g., CodeX Proxy", "例如：CodeX 代理"), text: $profile.metadata.name)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    // MARK: - Local Proxy
+
+    private var networkSection: some View {
+        sectionCard(title: L("Local Proxy", "本地代理")) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L("Host", "主机")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    TextField("127.0.0.1", text: $profile.metadata.proxy.host).textFieldStyle(.roundedBorder)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L("Port", "端口")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    TextField("4319", value: $profile.metadata.proxy.port, format: .number.grouping(.never))
+                        .textFieldStyle(.roundedBorder).frame(width: 100)
+                }
+            }
+
+            Toggle(L("Allow LAN Access (0.0.0.0)", "允许局域网访问 (0.0.0.0)"), isOn: $profile.metadata.proxy.allowLAN)
+                .font(.caption.weight(.medium))
+
+            if profile.metadata.proxy.allowLAN {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(L("Warning: This will expose the proxy to your local network",
+                           "警告：这将把代理暴露到你的局域网"))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "link").foregroundStyle(.secondary)
+                Text(verbatim: "config.toml base_url = http://\(profile.metadata.proxy.host):\(profile.metadata.proxy.port)/v1")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    // MARK: - Upstream
+
+    private var upstreamSection: some View {
+        sectionCard(title: L("Upstream Provider", "上游服务")) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("Base URL", "基础 URL")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                TextField("https://api.openai.com", text: $profile.metadata.proxy.upstreamBaseURL)
+                    .textFieldStyle(.roundedBorder)
+                Text(L(
+                    "Enter only the provider root URL. AIUsage appends /v1 and the selected endpoint automatically.",
+                    "这里只填写服务根地址，AIUsage 会自动补上 /v1 与具体端点。"
+                ))
+                .font(.caption2).foregroundStyle(.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("Upstream API", "上游接口")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    Text("Responses (wire_api)").font(.callout.weight(.semibold))
+                }
+                Text(L(
+                    "CodeX always uses the Responses API. AIUsage forwards CodeX requests faithfully (only model + auth are adjusted).",
+                    "CodeX 固定使用 Responses 接口。AIUsage 忠实转发 CodeX 请求（仅调整模型与鉴权），与直连一致。"
+                ))
+                .font(.caption2).foregroundStyle(.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("API Key").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                SecureField("sk-...", text: $profile.metadata.proxy.upstreamAPIKey)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            HStack(spacing: 8) {
+                Button { fetchModels() } label: {
+                    HStack(spacing: 4) {
+                        if isFetchingModels {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.down.circle")
+                        }
+                        Text(L("Fetch Models", "获取模型"))
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+                .disabled(profile.metadata.proxy.normalizedUpstreamBaseURL.isEmpty
+                          || profile.metadata.proxy.upstreamAPIKey.isEmpty
+                          || isFetchingModels)
+
+                if !availableModels.isEmpty {
+                    Text(L("\(availableModels.count) models available", "已获取 \(availableModels.count) 个模型"))
+                        .font(.caption2).foregroundStyle(.green)
+                } else if let error = fetchModelsError {
+                    Text(error).font(.caption2).foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    // MARK: - Single Model + Pricing
+
+    private var modelSection: some View {
+        sectionCard(title: L("Model & Pricing", "模型与定价")) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L("Model", "模型")).font(.subheadline.weight(.semibold))
+                modelTextField(text: $profile.metadata.proxy.modelMapping.bigModel.name, placeholder: "gpt-5.5")
+                Text(L(
+                    "Written as `model` in config.toml, used as the upstream model name and the pricing key for stats.",
+                    "将写入 config.toml 的 `model`，同时作为上游模型名与统计定价键。"
+                ))
+                .font(.caption2).foregroundStyle(.tertiary)
+            }
+
+            Divider()
+
+            HStack {
+                Text(L("Pricing", "定价")).font(.subheadline.weight(.semibold))
+                Spacer()
+                Button { applyCacheAutoFill() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "wand.and.stars")
+                        Text(L("Auto-fill Cache (1.25× / 0.1×)", "自动填充缓存（1.25×/0.1×）"))
+                    }
+                    .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.borderless)
+                Picker("", selection: $pricingCurrency) {
+                    Text("USD ($)").tag(ProxyConfiguration.PricingCurrency.usd)
+                    Text("CNY (¥)").tag(ProxyConfiguration.PricingCurrency.cny)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
+                .onChange(of: pricingCurrency) { _, newCurrency in
+                    profile.metadata.proxy.modelMapping.bigModel.pricing.currency = newCurrency
+                }
+            }
+
+            HStack(spacing: 0) {
+                Text(L("Input", "输入")).frame(maxWidth: .infinity, alignment: .leading)
+                Text(L("Output", "输出")).frame(maxWidth: .infinity, alignment: .leading)
+                Text(L("Cache Write", "缓存写入")).frame(maxWidth: .infinity, alignment: .leading)
+                Text(L("Cache Read", "缓存读取")).frame(maxWidth: .infinity, alignment: .leading)
+                Text(L("/ M tokens", "/ 百万")).frame(width: 64, alignment: .trailing)
+            }
+            .font(.system(size: 10, weight: .medium)).foregroundStyle(.tertiary)
+
+            pricingRow(pricing: $profile.metadata.proxy.modelMapping.bigModel.pricing)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L("Max Output Tokens", "最大输出 Token")).font(.subheadline.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField("0", value: $profile.metadata.proxy.maxOutputTokens, format: .number)
+                        .textFieldStyle(.roundedBorder).frame(width: 120)
+                    Text(L("0 = unlimited", "0 = 不限制")).font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Security
+
+    private var securitySection: some View {
+        sectionCard(title: L("Security", "安全设置")) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("Client API Key (Optional)", "客户端 API Key（可选）"))
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                SecureField(L("Leave empty to use a default key", "留空则使用默认 Key"), text: $profile.metadata.proxy.expectedClientKey)
+                    .textFieldStyle(.roundedBorder)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "lock.shield.fill").foregroundStyle(.green)
+                Text(L("Sent to the local proxy via config.toml experimental_bearer_token. Leave empty to use \"proxy-key\".",
+                       "通过 config.toml 的 experimental_bearer_token 下发给本地代理。留空则使用 \"proxy-key\"。"))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Advanced (raw TOML)
+
+    /// 该节点的额外顶层 TOML 键。激活时与全局通用配置按顶层键合并（本节点键覆盖全局），
+    /// 注入受管理 BASE 块。提供语法高亮 + 轻量检查；写 nil/"" 表示不附加。
+    private var extraTOMLBinding: Binding<String> {
+        Binding(
+            get: { profile.metadata.proxy.extraTOML ?? "" },
+            set: { profile.metadata.proxy.extraTOML = $0.nilIfBlank }
+        )
+    }
+
+    private var advancedTOMLSection: some View {
+        sectionCard(title: L("Advanced · Extra TOML", "高级 · 额外 TOML")) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.text.fill").foregroundStyle(.indigo)
+                    Text(L(
+                        "Extra top-level TOML keys for this node (e.g., model_reasoning_effort = \"high\"). Merged on activation; node keys override Global Config.",
+                        "本节点的额外顶层 TOML 键（如 model_reasoning_effort = \"high\"）。激活时合并，节点键覆盖通用配置。"
+                    ))
+                    .font(.caption2).foregroundStyle(.secondary)
+                }
+                TOMLSyntaxTextView(text: extraTOMLBinding) {
+                    extraTOMLCheck = TOMLLinter.validate(extraTOMLBinding.wrappedValue)
+                }
+                .frame(minHeight: 140)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.1)))
+
+                HStack(spacing: 6) {
+                    switch extraTOMLCheck {
+                    case .ok:
+                        Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                        Text(L("TOML syntax OK", "TOML 语法检查通过")).foregroundStyle(.secondary)
+                    case let .issue(line, message):
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text(L("Line \(line): \(message)", "第 \(line) 行：\(message)")).foregroundStyle(.orange)
+                    }
+                    Spacer()
+                }
+                .font(.caption2.weight(.medium))
+            }
+        }
+    }
+
+    // MARK: - Reusable bits
+
+    private func sectionCard<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.headline.weight(.bold))
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    private func modelTextField(text: Binding<String>, placeholder: String) -> some View {
+        let suggestions = filteredModels(for: text.wrappedValue)
+        let showSuggestions = !availableModels.isEmpty && !text.wrappedValue.isEmpty && !suggestions.isEmpty
+            && !suggestions.contains(where: { $0 == text.wrappedValue })
+
+        return VStack(alignment: .leading, spacing: 0) {
+            TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+
+            if showSuggestions {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(suggestions.prefix(8), id: \.self) { model in
+                            Button { text.wrappedValue = model } label: {
+                                Text(model)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .background(Color.primary.opacity(0.04))
+                        }
+                    }
+                }
+                .frame(maxHeight: 160)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.1)))
+            }
+        }
+    }
+
+    private func pricingRow(pricing: Binding<ProxyConfiguration.ModelPricing>) -> some View {
+        HStack(spacing: 6) {
+            TextField("0", value: pricing.inputPerMillion, format: .number.precision(.fractionLength(0...4)))
+                .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced)).frame(maxWidth: .infinity)
+            TextField("0", value: pricing.outputPerMillion, format: .number.precision(.fractionLength(0...4)))
+                .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced)).frame(maxWidth: .infinity)
+            TextField("0", value: pricing.cacheCreatePerMillion, format: .number.precision(.fractionLength(0...4)))
+                .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced)).frame(maxWidth: .infinity)
+            TextField("0", value: pricing.cacheReadPerMillion, format: .number.precision(.fractionLength(0...4)))
+                .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced)).frame(maxWidth: .infinity)
+            Spacer().frame(width: 64)
+        }
+    }
+
+    private func applyCacheAutoFill() {
+        var p = profile.metadata.proxy.modelMapping.bigModel.pricing
+        guard p.inputPerMillion > 0 else { return }
+        p.cacheCreatePerMillion = p.inputPerMillion * ProxyConfiguration.ModelPricing.defaultCacheWriteMultiplier
+        p.cacheReadPerMillion = p.inputPerMillion * ProxyConfiguration.ModelPricing.defaultCacheReadMultiplier
+        profile.metadata.proxy.modelMapping.bigModel.pricing = p
+    }
+
+    // MARK: - Validation / Save
+
+    private var isValid: Bool {
+        let proxy = profile.metadata.proxy
+        return !profile.metadata.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !proxy.host.isEmpty
+            && proxy.port > 0 && proxy.port < 65536
+            && !proxy.normalizedUpstreamBaseURL.isEmpty
+            && !proxy.upstreamAPIKey.isEmpty
+            && !proxy.modelMapping.bigModel.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func saveProfile() {
+        // 单模型：defaultModel 与 bigModel 对齐；middle/small 留空不参与定价/统计。
+        let model = profile.metadata.proxy.modelMapping.bigModel.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.metadata.proxy.modelMapping.bigModel.name = model
+        profile.metadata.proxy.modelMapping.middleModel.name = ""
+        profile.metadata.proxy.modelMapping.smallModel.name = ""
+        profile.metadata.proxy.defaultModel = model
+        profile.syncEnvFromProxy()
+
+        Task {
+            if isNew {
+                viewModel.addProfile(profile)
+            } else {
+                await viewModel.updateProfile(profile)
+            }
+            dismiss()
+        }
+    }
+
+    // MARK: - Model Fetching
+
+    private func fetchModels() {
+        let baseURL = profile.metadata.proxy.normalizedUpstreamBaseURL
+        let apiKey = profile.metadata.proxy.upstreamAPIKey
+        guard !baseURL.isEmpty, !apiKey.isEmpty else { return }
+
+        let urlString = baseURL.hasSuffix("/") ? baseURL + "v1/models" : baseURL + "/v1/models"
+        guard let url = URL(string: urlString) else { return }
+
+        isFetchingModels = true
+        fetchModelsError = nil
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: request) { data, _, error in
+            defer { DispatchQueue.main.async { isFetchingModels = false } }
+            if let error = error {
+                DispatchQueue.main.async { fetchModelsError = error.localizedDescription }
+                return
+            }
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let dataArr = json["data"] as? [[String: Any]] else {
+                DispatchQueue.main.async { fetchModelsError = "Invalid response" }
+                return
+            }
+            let models = dataArr.compactMap { $0["id"] as? String }.sorted()
+            DispatchQueue.main.async {
+                availableModels = models
+                fetchModelsError = models.isEmpty ? "No models found" : nil
+            }
+        }.resume()
+    }
+
+    private func filteredModels(for text: String) -> [String] {
+        guard !text.isEmpty else { return availableModels }
+        return availableModels.filter { $0.localizedCaseInsensitiveContains(text) }
+    }
+
+    private static let codexBrand = Color(red: 0.40, green: 0.52, blue: 0.92)
+}
+
+#Preview {
+    CodexProxyEditorView()
+        .environmentObject(ProxyViewModel())
+        .environmentObject(AppState.shared)
+}

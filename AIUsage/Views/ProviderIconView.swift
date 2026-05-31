@@ -12,15 +12,41 @@ struct ProviderIconView: View {
     // Map provider id → asset name (openai covers codex)
     private var assetName: String {
         switch providerId {
-        case "codex", "codex-cost": return "openai"
+        case "codex", "codex-cost": return "codex"
         default: return providerId
         }
     }
 
     @Environment(\.colorScheme) private var colorScheme
 
+    /// 已按目标点尺寸归一化的 NSImage 缓存（线程安全）。同一 asset+size 的归一化结果跨渲染复用，
+    /// 避免每次 body 重算 copy/resize（拖拽等高频重绘场景尤甚）。
+    private static let resizedCache = NSCache<NSString, NSImage>()
+
     private var brandImage: NSImage? {
-        NSImage(named: assetName)
+        let cacheKey = "\(assetName)@\(Int(size.rounded()))" as NSString
+        if let cached = Self.resizedCache.object(forKey: cacheKey) { return cached }
+
+        guard let base = NSImage(named: assetName) else { return nil }
+        // Normalize the logical size to the requested point size. Some
+        // AppKit-backed contexts (notably a `.menuStyle(.borderlessButton)`
+        // Menu label) lay out the image using the NSImage's intrinsic size and
+        // ignore SwiftUI's `.frame`, which makes raster assets (e.g. 256px PNGs)
+        // render enormous. Returning a copy sized to the target keeps every
+        // render path constrained to `size` regardless of the asset's pixels.
+        guard let normalized = base.copy() as? NSImage else { return base }
+        let intrinsic = base.size
+        if intrinsic.width > 0, intrinsic.height > 0 {
+            let aspect = intrinsic.width / intrinsic.height
+            normalized.size = aspect >= 1
+                ? NSSize(width: size, height: size / aspect)
+                : NSSize(width: size * aspect, height: size)
+        } else {
+            normalized.size = NSSize(width: size, height: size)
+        }
+        normalized.isTemplate = base.isTemplate
+        Self.resizedCache.setObject(normalized, forKey: cacheKey)
+        return normalized
     }
 
     var body: some View {
@@ -28,7 +54,7 @@ struct ProviderIconView: View {
             if let img = brandImage {
                 Image(nsImage: img)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .aspectRatio(contentMode: .fit)
             } else {
                 Image(systemName: fallbackSymbol)
                     .resizable()

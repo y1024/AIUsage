@@ -153,7 +153,7 @@ struct LocalTokenUsageHeatmap: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(L("Local Token Usage Heatmap", "本地 Token 使用热力图"))
                 .font(.headline.weight(.bold))
-            Text(L("Daily token volume", "每日 Token 总量"))
+            Text(L("Daily tokens from local logs · excludes proxy stats", "每日本地日志 Token 总量 · 不含代理实测"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

@@ -256,13 +256,13 @@ extension SettingsView {
     var proxySection: some View {
         settingsCard(
             title: L("Proxy", "代理"),
-            subtitle: L("Claude Code proxy behavior and logging.", "Claude Code 代理行为和日志管理。")
+            subtitle: L("Claude Code / CodeX proxy behavior and logging.", "Claude Code / CodeX 代理行为和日志管理。")
         ) {
             settingsToggleRow(
                 title: L("Auto-restore proxies on launch", "启动时自动恢复代理"),
                 subtitle: L(
-                    "If enabled, AIUsage restores the last activated node and all proxy-only nodes when the app launches.",
-                    "开启后，启动 AIUsage 时会自动恢复上次接入 Claude 的节点以及所有仅代理运行的节点。"
+                    "If enabled, AIUsage restores the last activated Claude Code / CodeX node and all proxy-only nodes when the app launches.",
+                    "开启后，启动 AIUsage 时会自动恢复上次接入的 Claude Code / CodeX 节点，以及所有仅代理运行的节点。"
                 ),
                 isOn: $settings.proxyAutoRestoreOnLaunch
             )

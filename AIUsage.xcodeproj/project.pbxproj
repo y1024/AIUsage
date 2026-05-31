@@ -15,6 +15,15 @@
 		C1NP00052F9C000300A15674 /* JSONRawEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00042F9C000300A15674 /* JSONRawEditorView.swift */; };
 		C1NP00072F9C000400A15674 /* SettingsVisualEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00062F9C000400A15674 /* SettingsVisualEditorView.swift */; };
 		C1NP00092F9C000500A15674 /* ProfileExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00082F9C000500A15674 /* ProfileExportView.swift */; };
+		C1CX00012FB0000100B26789 /* CodexConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00002FB0000100B26789 /* CodexConfigManager.swift */; };
+		C1CX00032FB0000200B26789 /* CodexProxyManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */; };
+		C1CX00052FB0000300B26789 /* CodexProxyEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */; };
+		C1CX00092FB0000900B26789 /* CodexConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */; };
+		C1CG10012FB0001000B26789 /* CodexGlobalConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CG10002FB0001000B26789 /* CodexGlobalConfig.swift */; };
+		C1CX00072FB0000400B26789 /* StatsHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00062FB0000400B26789 /* StatsHubView.swift */; };
+		C1SP00012FB0000500B26789 /* SystemProxyDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1SP00002FB0000500B26789 /* SystemProxyDetector.swift */; };
+		C1SP00032FB0000600B26789 /* CodexNoProxyFixer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1SP00022FB0000600B26789 /* CodexNoProxyFixer.swift */; };
+		C1SP00052FB0000700B26789 /* SystemProxyWarningBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1SP00042FB0000700B26789 /* SystemProxyWarningBanner.swift */; };
 			5EF87F012F8D0E9E002FE291 /* ProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */; };
 			5EF87F042F8D0ED3002FE291 /* ProxyViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */; };
 			A3F510012F97000100A15674 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A3F510042F97000100A15674 /* Localizable.strings */; };
@@ -136,6 +145,15 @@
 		5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyConfigEditorView.swift; sourceTree = "<group>"; };
 		5EF87F062F8D0EED002FE291 /* ProxyManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyManagementView.swift; sourceTree = "<group>"; };
 		F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyStatsView.swift; sourceTree = "<group>"; };
+		C1CX00002FB0000100B26789 /* CodexConfigManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigManager.swift; sourceTree = "<group>"; };
+		C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProxyManagementView.swift; sourceTree = "<group>"; };
+		C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProxyEditorView.swift; sourceTree = "<group>"; };
+		C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigEditorView.swift; sourceTree = "<group>"; };
+		C1CG10002FB0001000B26789 /* CodexGlobalConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGlobalConfig.swift; sourceTree = "<group>"; };
+		C1CX00062FB0000400B26789 /* StatsHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsHubView.swift; sourceTree = "<group>"; };
+		C1SP00002FB0000500B26789 /* SystemProxyDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemProxyDetector.swift; sourceTree = "<group>"; };
+		C1SP00022FB0000600B26789 /* CodexNoProxyFixer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexNoProxyFixer.swift; sourceTree = "<group>"; };
+		C1SP00042FB0000700B26789 /* SystemProxyWarningBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemProxyWarningBanner.swift; sourceTree = "<group>"; };
 		5EFAD72F2F87AC3300A15674 /* AIUsage.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIUsage.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5EFAD73D2F87AC7100A15674 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		A1APPST012F92000000A15674 /* AppState+ProviderGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+ProviderGrouping.swift"; sourceTree = "<group>"; };
@@ -215,6 +233,7 @@
 			isa = PBXGroup;
 			children = (
 				A2B3C4D12F96001000A15674 /* ClaudeSettingsManager.swift */,
+				C1CX00002FB0000100B26789 /* CodexConfigManager.swift */,
 				C1NP00022F9C000200A15674 /* NodeProfileStore.swift */,
 				5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */,
 				A2B3C4D32F96001000A15674 /* ProxyViewModel+LogManagement.swift */,
@@ -251,6 +270,7 @@
 			children = (
 				5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */,
 				C1GC00002FA0000100B26789 /* GlobalConfig.swift */,
+				C1CG10002FB0001000B26789 /* CodexGlobalConfig.swift */,
 				C1NP00002F9C000100A15674 /* NodeProfile.swift */,
 				7EFAD0012F87AC7100A15674 /* AppSettings.swift */,
 				5EFAD73D2F87AC7100A15674 /* AppState.swift */,
@@ -304,6 +324,8 @@
 				5EFAD7442F87AC7100A15674 /* APIService.swift */,
 				B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */,
 				B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */,
+				C1SP00002FB0000500B26789 /* SystemProxyDetector.swift */,
+				C1SP00022FB0000600B26789 /* CodexNoProxyFixer.swift */,
 				5EFPA0002F91000000A15674 /* ProviderAuth */,
 				5EFAD7592F87B10100A15674 /* ProviderAuthManager.swift */,
 				5EFAD7572F87AC7200A15674 /* SecureAccountVault.swift */,
@@ -317,6 +339,11 @@
 				5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */,
 				5EF87F062F8D0EED002FE291 /* ProxyManagementView.swift */,
 				F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */,
+				C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */,
+				C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */,
+				C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */,
+				C1CX00062FB0000400B26789 /* StatsHubView.swift */,
+				C1SP00042FB0000700B26789 /* SystemProxyWarningBanner.swift */,
 				5EFAD7462F87AC7100A15674 /* ContentView.swift */,
 				5EFAD7472F87AC7100A15674 /* DashboardView.swift */,
 				5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */,
@@ -540,6 +567,15 @@
 				5EF87F072F8D0EED002FE291 /* ProxyConfigEditorView.swift in Sources */,
 				5EF87F082F8D0EED002FE291 /* ProxyManagementView.swift in Sources */,
 				B3943D26F03B43809C53419E /* ProxyStatsView.swift in Sources */,
+				C1CX00012FB0000100B26789 /* CodexConfigManager.swift in Sources */,
+				C1CX00032FB0000200B26789 /* CodexProxyManagementView.swift in Sources */,
+				C1CX00052FB0000300B26789 /* CodexProxyEditorView.swift in Sources */,
+				C1CX00092FB0000900B26789 /* CodexConfigEditorView.swift in Sources */,
+				C1CG10012FB0001000B26789 /* CodexGlobalConfig.swift in Sources */,
+				C1CX00072FB0000400B26789 /* StatsHubView.swift in Sources */,
+				C1SP00012FB0000500B26789 /* SystemProxyDetector.swift in Sources */,
+				C1SP00032FB0000600B26789 /* CodexNoProxyFixer.swift in Sources */,
+				C1SP00052FB0000700B26789 /* SystemProxyWarningBanner.swift in Sources */,
 				5EFAD7842F87B00100A15674 /* WebLoginView.swift in Sources */,
 				5EFPA0122F91000100A15674 /* ProviderAuthTypes.swift in Sources */,
 				5EFPA0222F91000200A15674 /* ProviderManagedImportStore.swift in Sources */,
@@ -729,7 +765,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.6.10;
+				MARKETING_VERSION = 0.7.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -761,7 +797,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.6.10;
+				MARKETING_VERSION = 0.7.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

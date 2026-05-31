@@ -11,9 +11,23 @@ struct ContentView: View {
         )
     }
 
+    // 给系统导航图标加品牌化强调色，让侧边栏整体更协调（macOS 系统设置风格）。
+    private func navLabel(_ title: String, systemImage: String, tint: Color) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(tint)
+        }
+    }
+
     private var inboxLabel: some View {
         HStack {
-            Label(L("Inbox", "消息", key: "nav.inbox"), systemImage: appState.unreadAlertCount > 0 ? "bell.badge.fill" : "bell.fill")
+            navLabel(
+                L("Inbox", "消息", key: "nav.inbox"),
+                systemImage: appState.unreadAlertCount > 0 ? "bell.badge.fill" : "bell.fill",
+                tint: .orange
+            )
             Spacer()
             if appState.unreadAlertCount > 0 {
                 Text("\(appState.unreadAlertCount)")
@@ -31,27 +45,35 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: sectionBinding) {
-                Label(L("Dashboard", "仪表盘", key: "nav.dashboard"), systemImage: "chart.bar.doc.horizontal")
+                navLabel(L("Dashboard", "仪表盘", key: "nav.dashboard"), systemImage: "chart.bar.doc.horizontal", tint: .blue)
                     .tag(AppSection.dashboard)
 
-                Label(L("Providers", "服务商", key: "nav.providers"), systemImage: "square.grid.2x2")
+                navLabel(L("Providers", "服务商", key: "nav.providers"), systemImage: "square.grid.2x2", tint: .indigo)
                     .tag(AppSection.providers)
 
-                Label(L("Token Stats", "Token 统计", key: "nav.cost_tracking"), systemImage: "chart.bar.xaxis")
+                Label {
+                    Text(L("Claude Code Proxy", "Claude Code 代理", key: "nav.proxy_management"))
+                } icon: {
+                    ProviderIconView("claude", size: 18)
+                }
+                .tag(AppSection.proxyManagement)
+
+                Label {
+                    Text(L("CodeX Proxy", "CodeX 代理", key: "nav.codex_proxy_management"))
+                } icon: {
+                    ProviderIconView("codex", size: 18)
+                }
+                .tag(AppSection.codexProxyManagement)
+
+                navLabel(L("Usage Stats", "用量统计", key: "nav.cost_tracking"), systemImage: "chart.bar.xaxis", tint: .green)
                     .tag(AppSection.costTracking)
 
-                Label(L("Claude Code Proxy", "Claude Code 代理", key: "nav.proxy_management"), systemImage: "server.rack")
-                    .tag(AppSection.proxyManagement)
-
-                Label(L("Proxy Stats", "代理统计", key: "nav.proxy_stats"), systemImage: "chart.line.uptrend.xyaxis")
-                    .tag(AppSection.proxyStats)
+                Divider()
 
                 inboxLabel
                     .tag(AppSection.inbox)
 
-                Divider()
-
-                Label(L("Settings", "设置", key: "nav.settings"), systemImage: "gearshape")
+                navLabel(L("Settings", "设置", key: "nav.settings"), systemImage: "gearshape", tint: .gray)
                     .tag(AppSection.settings)
             }
             .listStyle(.sidebar)
@@ -66,11 +88,11 @@ struct ContentView: View {
                 case .providers:
                     ProvidersView()
                 case .costTracking:
-                    CostTrackingView()
+                    StatsHubView()
                 case .proxyManagement:
                     ProxyManagementView()
-                case .proxyStats:
-                    ProxyStatsView()
+                case .codexProxyManagement:
+                    CodexProxyManagementView()
                 case .inbox:
                     InboxView()
                 case .settings:

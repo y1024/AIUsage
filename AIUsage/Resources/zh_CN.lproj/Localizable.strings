@@ -791,7 +791,7 @@
 "AIUsage/Views/ProxyManagementView.swift::No requests yet" = "暂无请求";
 
 /* Views/ProxyManagementView.swift */
-"AIUsage/Views/ProxyManagementView.swift::Node Configurations" = "节点配置";
+"AIUsage/Views/ProxyManagementView.swift::Node List" = "节点列表";
 
 /* Views/ProxyManagementView.swift */
 "AIUsage/Views/ProxyManagementView.swift::Node Operation Failed" = "节点操作失败";
@@ -1244,7 +1244,7 @@
 "dashboard.providers" = "服务商";
 
 /* Views/DashboardView.swift */
-"dashboard.summary.cost_tracking" = "Token 统计";
+"dashboard.summary.cost_tracking" = "用量统计";
 
 /* Views/DashboardView.swift */
 "dashboard.summary.live_accounts" = "在线账号";
@@ -1262,7 +1262,7 @@
 "help.refresh_all" = "刷新所有应用和所有账号";
 
 /* Views/ContentView.swift */
-"nav.cost_tracking" = "Token 统计";
+"nav.cost_tracking" = "用量统计";
 
 /* Views/ContentView.swift */
 "nav.dashboard" = "仪表盘";

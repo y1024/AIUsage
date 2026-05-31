@@ -213,7 +213,7 @@ struct StatusBarProviderIcon: View {
 
     private var assetName: String {
         switch providerId {
-        case "codex": return "openai"
+        case "codex": return "codex"
         default: return providerId
         }
     }

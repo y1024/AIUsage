@@ -171,7 +171,7 @@ struct ProxyConfigEditorView: View {
                 case .anthropicDirect:
                     anthropicDirectSection
                     modelMappingSection
-                case .openaiProxy:
+                case .openaiProxy, .codexProxy:
                     networkSection
                     upstreamSection
                     modelMappingSection
@@ -264,7 +264,10 @@ struct ProxyConfigEditorView: View {
                         profile.metadata.proxy.defaultModel = "claude-sonnet-4-6"
                     case .openaiProxy:
                         profile.metadata.proxy.modelMapping = .openAIDefault
-                        profile.metadata.proxy.defaultModel = "gpt-5.4"
+                        profile.metadata.proxy.defaultModel = "gpt-5.5"
+                    case .codexProxy:
+                        profile.metadata.proxy.modelMapping = .codexDefault
+                        profile.metadata.proxy.defaultModel = ProxyConfiguration.ModelMapping.codexDefault.bigModel.name
                     }
                     profile.syncEnvFromProxy()
                 }
@@ -527,7 +530,7 @@ struct ProxyConfigEditorView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(L("Default Model", "主模型")).font(.subheadline.weight(.semibold))
                 modelTextField(text: $profile.metadata.proxy.defaultModel,
-                               placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.4" : "claude-sonnet-4-6")
+                               placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.5" : "claude-sonnet-4-6")
                 Text(L("The model field in settings.json. Claude Code uses this as the active model.",
                        "settings.json 中的 model 字段，Claude Code 以此作为当前使用的模型。"))
                     .font(.caption2).foregroundStyle(.tertiary)
@@ -538,7 +541,7 @@ struct ProxyConfigEditorView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(L("Model Slots", "模型槽位")).font(.subheadline.weight(.semibold))
                 modelSlotRow(label: "Opus", binding: $profile.metadata.proxy.modelMapping.bigModel.name,
-                             placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.4" : "claude-opus-4-6")
+                             placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.5" : "claude-opus-4-6")
                 modelSlotRow(label: "Sonnet", binding: $profile.metadata.proxy.modelMapping.middleModel.name,
                              placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.4-mini" : "claude-sonnet-4-6")
                 modelSlotRow(label: "Haiku", binding: $profile.metadata.proxy.modelMapping.smallModel.name,
@@ -796,6 +799,14 @@ struct ProxyConfigEditorView: View {
                 !proxy.modelMapping.bigModel.name.isEmpty &&
                 !proxy.modelMapping.middleModel.name.isEmpty &&
                 !proxy.modelMapping.smallModel.name.isEmpty
+        case .codexProxy:
+            // CodeX 单模型：仅校验 bigModel（middle/small 留空）。
+            return nameValid &&
+                !proxy.host.isEmpty &&
+                proxy.port > 0 && proxy.port < 65536 &&
+                !proxy.normalizedUpstreamBaseURL.isEmpty &&
+                !proxy.upstreamAPIKey.isEmpty &&
+                !proxy.modelMapping.bigModel.name.isEmpty
         }
     }
 

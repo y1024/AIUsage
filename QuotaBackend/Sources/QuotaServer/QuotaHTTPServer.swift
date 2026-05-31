@@ -26,6 +26,8 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     let engine = ProviderEngine()
     var proxyService: ClaudeProxyService?
     var proxyConfig: ClaudeProxyConfiguration?
+    var codexProxyService: CodexProxyService?
+    var codexConfig: CodexProxyConfiguration?
     var httpsConfig: HTTPSConfig?
     private let lifecycleQueue = DispatchQueue(label: "com.aiusage.quotaserver.lifecycle")
     private var ipv4Listener: NWListener?
@@ -35,13 +37,23 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
     var isPassthrough: Bool { proxyConfig?.mode == .anthropicPassthrough }
 
-    public init(host: String, port: Int, proxyConfig: ClaudeProxyConfiguration? = nil, httpsConfig: HTTPSConfig? = nil) {
+    public init(
+        host: String,
+        port: Int,
+        proxyConfig: ClaudeProxyConfiguration? = nil,
+        codexConfig: CodexProxyConfiguration? = nil,
+        httpsConfig: HTTPSConfig? = nil
+    ) {
         self.host = host
         self.port = port
         self.proxyConfig = proxyConfig
+        self.codexConfig = codexConfig
         self.httpsConfig = httpsConfig
         if let config = proxyConfig, config.enabled, config.mode == .openaiConvert {
             self.proxyService = try? ClaudeProxyService(configuration: config)
+        }
+        if let codexConfig, codexConfig.enabled, codexConfig.mode == .openaiConvert {
+            self.codexProxyService = try? CodexProxyService(configuration: codexConfig)
         }
     }
 
@@ -218,6 +230,9 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         if self.isPassthrough {
             httpLog.info("  POST /v1/messages (Anthropic Passthrough)")
         }
+        if self.codexProxyService != nil {
+            httpLog.info("  POST /v1/responses (CodeX Proxy - OpenAI Convert)")
+        }
     }
 
     // MARK: - Connection Handling
@@ -249,6 +264,19 @@ public final class QuotaHTTPServer: @unchecked Sendable {
                     await handleStreamingProxy(connection, request: request)
                     return
                 }
+            }
+        }
+
+        if request.method == "POST", cleanPath == "/v1/responses", codexProxyService != nil {
+            let isStreaming: Bool
+            if let json = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any] {
+                isStreaming = json["stream"] as? Bool ?? false
+            } else {
+                isStreaming = false
+            }
+            if isStreaming {
+                await handleCodexStreamingProxy(connection, request: request)
+                return
             }
         }
 
@@ -285,6 +313,14 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
         case ("POST", "/v1/messages"):
             return await handleMessagesEndpoint(request: request, headers: corsHeaders)
+
+        // MARK: - CodeX Proxy Endpoint
+
+        case ("POST", "/v1/responses"):
+            return await handleCodexResponsesEndpoint(request: request, headers: corsHeaders)
+
+        case ("GET", "/v1/models") where codexProxyService != nil:
+            return await handleCodexModelsEndpoint(request: request, headers: corsHeaders)
 
         case ("POST", "/v1/messages/count_tokens"):
             return await handleCountTokensEndpoint(request: request, headers: corsHeaders)

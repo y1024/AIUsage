@@ -14,11 +14,13 @@ AIUsage/
 │   ├── AppSettings.swift         # UserDefaults-backed preferences (ObservableObject)
 │   ├── AccountStore.swift        # Account registry & credential management
 │   ├── ProviderModels.swift      # App-side ProviderData, alerts, etc.
-│   ├── ProxyConfiguration.swift  # Proxy node config model (legacy, kept for compat)
+│   ├── ProxyConfiguration.swift  # Proxy node config model (legacy, kept for compat) + NodeType / ProxyNodeFamily
 │   └── NodeProfile.swift         # File-based node profile (_metadata + full settings.json)
 ├── Services/
 │   ├── APIService.swift          # HTTP client for remote QuotaServer
 │   ├── SecureAccountVault.swift  # Keychain read/write for account metadata
+│   ├── SystemProxyDetector.swift # Detects macOS system proxy (CodeX no_proxy fix)
+│   ├── CodexNoProxyFixer.swift   # Writes/removes managed no_proxy block in ~/.codex/.env
 │   ├── ProviderAuthManager.swift # Auth flow orchestration (slim router)
 │   └── ProviderAuth/
 │       ├── ProviderAuthTypes.swift
@@ -31,16 +33,21 @@ AIUsage/
 ├── ViewModels/
 │   ├── ProviderRefreshCoordinator.swift  # Refresh engine, timers, data pipeline
 │   ├── ProviderActivationManager.swift   # CLI active account detection
-│   ├── ProxyViewModel.swift              # Proxy node lifecycle & process management
+│   ├── ProxyViewModel.swift              # Proxy node lifecycle (dual track: Claude + CodeX) & process management
+│   ├── CodexConfigManager.swift          # ~/.codex/config.toml surgical merge + backup/restore
 │   ├── NodeProfileStore.swift            # File-based profile CRUD (~/.config/aiusage/profiles/)
 │   └── ClaudeSettingsManager.swift       # ~/.claude/settings.json full write + backup/restore
 └── Views/
     ├── ContentView.swift           # NavigationSplitView shell
     ├── DashboardView.swift         # Main dashboard
     ├── ProviderCard.swift          # Rich quota card UI
-    ├── CostTrackingView.swift      # Token stats for Claude Code + Codex (per-source / All Sources)
-    ├── ProxyManagementView.swift   # Proxy node list
-    ├── ProxyStatsView.swift        # Proxy usage statistics
+    ├── StatsHubView.swift          # Unified "Usage Stats" entry: Local Logs / Proxy segmented switch
+    ├── CostTrackingView.swift      # Usage stats for Claude Code + Codex (per-source / All Sources)
+    ├── ProxyManagementView.swift   # Proxy node list (family-filtered: .claude / .codex) + gesture drag-to-reorder
+    ├── CodexProxyManagementView.swift # CodeX proxy menu (wraps ProxyManagementView(family: .codex))
+    ├── CodexProxyEditorView.swift  # CodeX node editor (single model)
+    ├── SystemProxyWarningBanner.swift # System-proxy notice in CodeX menu
+    ├── ProxyStatsView.swift        # Proxy usage statistics (family-aware)
     ├── SettingsView.swift          # Preferences UI (sidebar navigation, 7 categories)
     ├── JSONRawEditorView.swift     # Raw JSON editor for node profiles
     ├── SettingsVisualEditorView.swift # Visual settings.json editor
@@ -73,16 +80,17 @@ QuotaBackend/Sources/
 │   │   └── ProviderSummary.swift        # Normalized summary structs
 │   ├── ClaudeProxy/
 │   │   ├── Canonical/             # Unified middle layer (production pipeline)
-│   │   ├── Runtime/               # Proxy service, upstream client
+│   │   ├── Runtime/               # Proxy service, upstream client (+ CodexProxyConfiguration/Service)
 │   │   ├── Conversion/            # Legacy converters (reference impl)
 │   │   ├── Models/                # API model definitions
 │   │   └── Utilities/             # SSE encoder
 │   └── Utilities/
 │       └── DateFormatting.swift   # Shared formatters (SharedFormatters, DateFormat)
 └── QuotaServer/
-    ├── main.swift                          # CLI entry point
+    ├── main.swift                          # CLI entry point (PROXY_TARGET=codex selects CodeX proxy)
     ├── QuotaHTTPServer.swift               # NWListener HTTP server + StreamingResponse
     ├── QuotaHTTPServer+ClaudeProxy.swift   # Claude API routing & streaming bridge
+    ├── QuotaHTTPServer+CodexProxy.swift    # CodeX /v1/responses + /v1/models faithful passthrough
     └── QuotaHTTPServer+Passthrough.swift   # Anthropic passthrough proxy
 ```
 
@@ -141,23 +149,30 @@ sequenceDiagram
 
 详细架构文档见 [PROXY_ARCHITECTURE.md](PROXY_ARCHITECTURE.md)。
 
+两条相互独立、可同时激活的代理轨道（`ProxyViewModel` 用 `activatedConfigId` / `activatedCodexConfigId` 分别跟踪，互斥仅限同家族 `ProxyNodeFamily`）：
+
+- **Claude Code 轨道**（`.anthropicDirect` / `.openaiProxy`）：写 `~/.claude/settings.json`。
+- **CodeX 轨道**（`.codexProxy`）：写 `~/.codex/config.toml`（`CodexConfigManager` 外科式合并），详见 PROXY_ARCHITECTURE.md「CodeX 代理」章。
+
 **Process lifecycle** (managed by `ProxyViewModel` + `ProxyRuntimeService`):
 
 1. User activates a proxy node in the UI
 2. `ProxyViewModel` executes transactional activation:
    - Loads full settings from `NodeProfileStore` profile (v0.5.0+) or legacy `ProxyConfiguration`
-   - Writes complete `~/.claude/settings.json` via `ClaudeSettingsManager.writeFullSettings()` (with automatic backup to `settings.backup.json`)
+   - **Claude track**: writes complete `~/.claude/settings.json` via `ClaudeSettingsManager.writeFullSettings()` (auto-backup to `settings.backup.json`)
+   - **CodeX track**: spawns `QuotaServer(PROXY_TARGET=codex)`, then injects managed block into `~/.codex/config.toml` (backup-as-source-of-truth); if a system proxy is detected, writes `no_proxy` into `~/.codex/.env`
    - Spawns `QuotaServer` process (via `ProxyRuntimeService`)
-   - Writes pricing override
-   - Persists `activatedConfigId` only after all steps succeed
+   - Writes pricing override (Claude track only)
+   - Persists `activatedConfigId` / `activatedCodexConfigId` only after all steps succeed
 3. Pipes stdout/stderr, parses `PROXY_LOG:` JSON lines for stats
-4. On deactivation: kills process, restores `settings.json` from backup, rolls back state
+4. On deactivation: kills process, restores `settings.json` / `config.toml` (+ `.env`) from backup, rolls back state
 
 **Proxy modes**:
-- **OpenAI Convert**: Claude API → Canonical Middle Layer → OpenAI `chat/completions` or `responses` → upstream
-- **Anthropic Passthrough**: Transparent forwarding with token usage logging
+- **OpenAI Convert** (Claude track): Claude API → Canonical Middle Layer → OpenAI `chat/completions` or `responses` → upstream
+- **Anthropic Passthrough** (Claude track): Transparent forwarding with token usage logging
+- **CodeX Faithful Passthrough**: OpenAI Responses inbound forwarded verbatim to an OpenAI-compatible upstream (no Canonical rewrite; only model + auth adjusted)
 
-**Conversion pipeline**: All protocol conversion goes through a Canonical Middle Layer (see [CANONICAL_MIDDLE_LAYER_DESIGN.md](CANONICAL_MIDDLE_LAYER_DESIGN.md)).
+**Conversion pipeline**: Claude-track protocol conversion goes through a Canonical Middle Layer (see [CANONICAL_MIDDLE_LAYER_DESIGN.md](CANONICAL_MIDDLE_LAYER_DESIGN.md)). The CodeX track is passthrough-only in Phase B.
 
 ## Storage Locations
 
@@ -171,6 +186,9 @@ sequenceDiagram
 | `~/.claude/settings.backup.json` | Backup of `settings.json` before activation |
 | `~/.config/aiusage/proxy-logs.json` | Proxy request logs (with day-based retention) |
 | `~/.config/aiusage/proxy-pricing.json` | Model pricing overrides |
+| `~/.codex/config.toml` | CodeX configuration; managed `model_provider=aiusage-proxy` block injected on activation (chmod 0600) |
+| `~/.codex/config.toml.aiusage.bak` | Backup of `config.toml` before injection (backup-as-source-of-truth; removed on restore) |
+| `~/.codex/.env` | Managed `no_proxy` block (loopback only) written when a system proxy is detected; removed on deactivation |
 | `~/.config/claude/projects/**/*.jsonl` | Claude Code usage logs (read-only by ClaudeProvider) |
 | `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/**/*.jsonl` | Codex session logs (read-only by CodexCostProvider; overridable via `$CODEX_HOME`) |
 | `~/Library/Caches/AIUsage/codex-cost-file-cache-v*.json` | CodexCostFileScanCache — per-file scan results, keyed on size + mtime so reopened sessions skip re-parsing |

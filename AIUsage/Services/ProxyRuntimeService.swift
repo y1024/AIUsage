@@ -205,6 +205,97 @@ final class ProxyRuntimeService {
         try clearPricingOverrides()
     }
 
+    // MARK: - CodeX Runtime
+    // CodeX 节点与 Claude 节点写不同文件（~/.codex/config.toml vs ~/.claude/settings.json），
+    // 因此可与 Claude 节点并存。代理成本由 App 端按节点重算，故不写共享的 proxy-pricing.json。
+
+    private let codexConfigManager = CodexConfigManager.shared
+
+    /// CodeX 节点是否已注入受管理的 config.toml。
+    func isCodexConfigManaged() -> Bool {
+        codexConfigManager.isManaged
+    }
+
+    /// 激活 CodeX 节点：启动本地 QuotaServer(PROXY_TARGET=codex)，再外科式注入 config.toml。
+    /// - Parameters:
+    ///   - globalTOML: 全局通用配置基底（启用时由 ViewModel 传入）。
+    ///   - nodeTOML: 该节点的额外 TOML（覆盖全局同名顶层键 / 表）。
+    func activateCodexRuntime(
+        for config: ProxyConfiguration,
+        globalTOML: String? = nil,
+        nodeTOML: String? = nil
+    ) async throws {
+        try await startProxy(config)
+
+        do {
+            try codexConfigManager.activate(
+                baseURL: codexProxyBaseURL(for: config),
+                bearerToken: config.effectiveClientKey,
+                model: config.codexModel,
+                globalTOML: globalTOML,
+                nodeTOML: nodeTOML
+            )
+        } catch {
+            stopProxy(config)
+            do {
+                try codexConfigManager.restore()
+            } catch {
+                proxyRuntimeLog.error("Failed to restore config.toml while rolling back CodeX node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+            throw error
+        }
+
+        // 系统代理会拦截 codex 发往本地回环的请求并回 502。检测到系统代理时，自动往
+        // ~/.codex/.env 写入 no_proxy（仅对 codex 生效），让 codex 跳过本地代理。
+        // 写入失败不阻断激活（UI 横幅仍提供手动复制兜底）。
+        if SystemProxyDetector.current().isAnyEnabled {
+            do {
+                try CodexNoProxyFixer.apply()
+            } catch {
+                proxyRuntimeLog.error("Failed to write no_proxy to ~/.codex/.env for node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// 停用 CodeX 节点：停止进程并从备份还原 config.toml。
+    func deactivateCodexRuntime(for config: ProxyConfiguration) async throws {
+        stopProxy(config)
+
+        // 移除激活时写入的 no_proxy 受管理块（仅清理我们自己的块，不动用户内容）。
+        try? CodexNoProxyFixer.remove()
+
+        do {
+            try codexConfigManager.restore()
+        } catch {
+            do {
+                try await activateCodexRuntime(for: config)
+            } catch {
+                proxyRuntimeLog.error("Failed to re-activate CodeX runtime for node \(config.name, privacy: .public) after deactivation rollback: \(String(describing: error), privacy: .public)")
+            }
+            throw error
+        }
+    }
+
+    /// 还原 CodeX config.toml（启动时清理残留激活态用）。
+    func clearCodexRuntime() throws {
+        try? CodexNoProxyFixer.remove()
+        try codexConfigManager.restore()
+    }
+
+    /// CodeX 的 base_url 需包含 /v1，CodeX 会在其后拼接 /responses。
+    private func codexProxyBaseURL(for config: ProxyConfiguration) -> String {
+        let scheme: String
+        let portValue: Int
+        if config.enableHTTPS {
+            scheme = "https"
+            portValue = config.effectiveHTTPSPort
+        } else {
+            scheme = "http"
+            portValue = config.port
+        }
+        return "\(scheme)://\(config.host):\(portValue)/v1"
+    }
+
     // MARK: - Proxy-Only Mode
 
     /// Start the proxy process without writing to settings.json.
@@ -263,7 +354,22 @@ final class ProxyRuntimeService {
 
         var environment = ProcessInfo.processInfo.environment
 
-        if config.nodeType == .anthropicDirect && config.usePassthroughProxy {
+        if config.nodeType == .codexProxy {
+            // CodeX 节点: QuotaServer 以 PROXY_TARGET=codex 启动 Responses 入站，转换到 OpenAI 兼容上游。
+            environment["PROXY_TARGET"] = "codex"
+            environment["OPENAI_API_KEY"] = config.upstreamAPIKey
+            environment["OPENAI_BASE_URL"] = config.normalizedUpstreamBaseURL
+            // CodeX 的 wire_api 恒为 responses：强制 Responses 忠实透传，避免误用 Chat Completions 造成有损转换。
+            environment["OPENAI_API_MODE"] = OpenAIUpstreamAPI.responses.rawValue
+            let codexModel = config.codexModel
+            if !codexModel.isEmpty {
+                environment["CODEX_UPSTREAM_MODEL"] = codexModel
+            }
+            if config.maxOutputTokens > 0 {
+                environment["MAX_OUTPUT_TOKENS"] = "\(config.maxOutputTokens)"
+            }
+            environment["CODEX_CLIENT_KEY"] = config.effectiveClientKey
+        } else if config.nodeType == .anthropicDirect && config.usePassthroughProxy {
             environment["PROXY_MODE"] = "passthrough"
             environment["ANTHROPIC_UPSTREAM_URL"] = config.anthropicBaseURL
             environment["ANTHROPIC_UPSTREAM_KEY"] = config.anthropicAPIKey

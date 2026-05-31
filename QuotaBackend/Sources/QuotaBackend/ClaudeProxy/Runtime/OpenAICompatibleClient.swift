@@ -993,6 +993,176 @@ public actor OpenAICompatibleClient {
 
         return String(decoding: data, as: UTF8.self)
     }
+
+    // MARK: - Raw Responses Passthrough
+    // 忠实透传：直接转发原始 Responses 请求体（不经过 Canonical 改写），最大化兼容 CodeX 原生语义。
+    // 仅在出站时附加上游鉴权头（由 makeUpstreamRequest 注入），并允许转发入站客户端的关键头。
+
+    /// 上游瞬时故障（网关 5xx）可重试——很多第三方中转/Cloudflare 会偶发 500/502/503/504。
+    static let rawPassthroughMaxAttempts = 3
+    static func isRetryableUpstreamStatus(_ code: Int) -> Bool {
+        code == 500 || code == 502 || code == 503 || code == 504
+    }
+    /// 第 attempt 次（从 1 起）失败后的退避时长。
+    private static func retryBackoffNanos(_ attempt: Int) -> UInt64 {
+        // 0.4s, 0.9s ...
+        let ms = 400 + (attempt - 1) * 500
+        return UInt64(ms) * 1_000_000
+    }
+
+    /// 非流式原样转发，返回上游原始状态码 + 响应体。瞬时 5xx 自动重试。
+    func sendRawResponses(
+        bodyJSON: Data,
+        extraHeaders: [String: String]
+    ) async throws -> RawResponsesResult {
+        let maxAttempts = Self.rawPassthroughMaxAttempts
+        for attempt in 1...maxAttempts {
+            var request = try makeUpstreamRequest(path: "/responses", method: "POST", contentType: "application/json")
+            for (key, value) in extraHeaders {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            request.httpBody = bodyJSON
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw UpstreamError.invalidResponse("Not an HTTP response")
+            }
+            if attempt < maxAttempts, Self.isRetryableUpstreamStatus(httpResponse.statusCode) {
+                upstreamLog.warning("Upstream raw \(httpResponse.statusCode) (attempt \(attempt)/\(maxAttempts)); retrying")
+                try? await Task.sleep(nanoseconds: Self.retryBackoffNanos(attempt))
+                continue
+            }
+            return RawResponsesResult(
+                statusCode: httpResponse.statusCode,
+                data: data,
+                requestID: upstreamRequestID(from: httpResponse)
+            )
+        }
+        throw UpstreamError.invalidResponse("retry loop exhausted")
+    }
+
+    /// GET 原样转发上游模型列表（/v1/models）。瞬时 5xx 自动重试，返回上游原始状态码 + 响应体。
+    func fetchRawModels(extraHeaders: [String: String]) async throws -> RawResponsesResult {
+        let maxAttempts = Self.rawPassthroughMaxAttempts
+        for attempt in 1...maxAttempts {
+            var request = try makeUpstreamRequest(path: "/models", method: "GET")
+            for (key, value) in extraHeaders {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw UpstreamError.invalidResponse("Not an HTTP response")
+            }
+            if attempt < maxAttempts, Self.isRetryableUpstreamStatus(httpResponse.statusCode) {
+                upstreamLog.warning("Upstream models \(httpResponse.statusCode) (attempt \(attempt)/\(maxAttempts)); retrying")
+                try? await Task.sleep(nanoseconds: Self.retryBackoffNanos(attempt))
+                continue
+            }
+            return RawResponsesResult(
+                statusCode: httpResponse.statusCode,
+                data: data,
+                requestID: upstreamRequestID(from: httpResponse)
+            )
+        }
+        throw UpstreamError.invalidResponse("retry loop exhausted")
+    }
+
+    /// 建立上游流式连接，瞬时 5xx 自动重试，直到拿到 200 或耗尽重试/不可重试状态。
+    private func connectStreamWithRetry(
+        bodyJSON: Data,
+        extraHeaders: [String: String],
+        maxAttempts: Int
+    ) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
+        for attempt in 1...maxAttempts {
+            var request = try makeUpstreamRequest(path: "/responses", method: "POST", contentType: "application/json")
+            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+            for (key, value) in extraHeaders {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            request.httpBody = bodyJSON
+
+            let (bytes, response) = try await session.bytes(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw UpstreamError.invalidResponse("Not an HTTP response")
+            }
+            if httpResponse.statusCode == 200
+                || attempt == maxAttempts
+                || !Self.isRetryableUpstreamStatus(httpResponse.statusCode) {
+                return (bytes, httpResponse)
+            }
+            // 可重试的瞬时 5xx：丢弃少量响应体释放连接，退避后重试。
+            _ = try? await readUTF8TextPrefix(from: bytes, maxBytes: 1024)
+            upstreamLog.warning("Upstream raw streaming \(httpResponse.statusCode) (attempt \(attempt)/\(maxAttempts)); retrying")
+            try? await Task.sleep(nanoseconds: Self.retryBackoffNanos(attempt))
+        }
+        throw UpstreamError.invalidResponse("stream retry loop exhausted")
+    }
+
+    /// 流式原样转发：按 SSE 帧（空行分隔）逐帧回调 (event, data)，data 为原始 JSON 文本。
+    /// 上游非 200 时抛出 UpstreamError.httpError（携带响应体片段）。
+    func streamRawResponses(
+        bodyJSON: Data,
+        extraHeaders: [String: String],
+        onFrame: @escaping (_ event: String?, _ data: String) async throws -> Void
+    ) async throws {
+        // 在开始转发任何 SSE 帧之前完成状态码判定，因此瞬时 5xx 可安全重试
+        // （客户端此时只收到了 200 响应头，仍在等待 SSE，延迟一点的成功流是无害的）。
+        let maxAttempts = Self.rawPassthroughMaxAttempts
+        let (bytes, httpResponse) = try await connectStreamWithRetry(
+            bodyJSON: bodyJSON,
+            extraHeaders: extraHeaders,
+            maxAttempts: maxAttempts
+        )
+        guard httpResponse.statusCode == 200 else {
+            let errorBody = try await readUTF8TextPrefix(from: bytes, maxBytes: 4096)
+            upstreamLog.warning("Upstream raw streaming \(httpResponse.statusCode): \(String(errorBody.prefix(500)), privacy: .private)")
+            throw UpstreamError.httpError(
+                statusCode: httpResponse.statusCode,
+                message: errorBody.isEmpty ? "Upstream returned status \(httpResponse.statusCode)" : errorBody,
+                requestID: upstreamRequestID(from: httpResponse)
+            )
+        }
+
+        // 注意：Foundation 的 `AsyncBytes.lines` 会吞掉 SSE 帧之间的空行，
+        // 因此不能只靠 `line.isEmpty` 切帧——否则上游多帧会被拼成一帧。
+        // OpenAI Responses 每帧都以 `event:` 开头，故新 `event:` 行也作为切帧信号。
+        var currentEvent: String?
+        var dataLines: [String] = []
+        func flushFrame() async throws {
+            guard !dataLines.isEmpty else { return }
+            try await onFrame(currentEvent, dataLines.joined(separator: "\n"))
+            currentEvent = nil
+            dataLines = []
+        }
+        for try await line in bytes.lines {
+            if line.isEmpty {
+                try await flushFrame()
+                continue
+            }
+            if line.hasPrefix("event:") {
+                // 新的 event 行 = 新帧开始：先把上一帧（若有）刷出去。
+                try await flushFrame()
+                currentEvent = String(line.dropFirst("event:".count)).trimmingCharacters(in: .whitespaces)
+            } else if line.hasPrefix("data:") {
+                dataLines.append(String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces))
+            }
+            // 其它行（注释/心跳 ':' 等）忽略。
+        }
+        // 末帧兜底（部分上游结尾不带空行）。
+        try await flushFrame()
+    }
+}
+
+/// 原始响应透传结果。
+public struct RawResponsesResult: Sendable {
+    public let statusCode: Int
+    public let data: Data
+    public let requestID: String?
+
+    public init(statusCode: Int, data: Data, requestID: String?) {
+        self.statusCode = statusCode
+        self.data = data
+        self.requestID = requestID
+    }
 }
 
 private extension String {

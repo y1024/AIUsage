@@ -43,7 +43,7 @@
 - [Features](#features)
 - [Preview](#preview)
 - [Install](#install)
-- [Claude Code Proxy](#claude-code-proxy)
+- [Proxies](#proxies)
 - [Acknowledgements](#acknowledgements)
 - [Sponsor](#sponsor)
 - [Support the Author](#support-the-author)
@@ -55,9 +55,9 @@
 | --- | --- |
 | **10+ AI Providers** | Codex, Copilot, Cursor, Antigravity, Kiro, Warp, Gemini CLI, Amp, Droid, Claude Code — one dashboard |
 | **Multi-account** | Multiple accounts per provider, independent refresh, one-click CLI switching |
-| **Token Stats** | Local cost & token breakdown for Claude Code and Codex sessions — per-model trends, time-period analysis, source-aware "All Sources" aggregation |
+| **Usage Stats** | Unified cost & token breakdown across **Local Logs** (Claude Code / Codex sessions) and **Proxy Logs** — per-model trends, time-period analysis, source-aware "All Sources" aggregation |
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
-| **Proxy Stats** | Per-model cost/token trends, distribution charts, configurable log retention |
+| **CodeX Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
 | **Menu Bar** | Multi-account status bar icons, quota/cost metrics, quick-glance popover, colored progress bars |
 | **Credential Vault** | macOS Keychain storage for all managed credentials |
 
@@ -73,28 +73,26 @@
     <td align="center"><strong>Provider & Multi-account Monitoring</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/claude-code-stats_en.png" alt="Token stats"></td>
-    <td width="50%"><img src="docs/images/codex-account-detail_en.png" alt="Account detail"></td>
+    <td width="50%"><img src="docs/images/Claude-Code-Proxy-1_en.png" alt="Claude Code proxy node management"></td>
+    <td width="50%"><img src="docs/images/Claude-Code-Proxy-2_en.png" alt="Claude Code proxy configuration"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Token Stats (Claude &amp; Codex)</strong></td>
-    <td align="center"><strong>Account Detail</strong></td>
+    <td align="center"><strong>Claude Code Proxy · Node Management</strong></td>
+    <td align="center"><strong>Claude Code Proxy · Configuration</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/Claude-Code-Proxy-1_en.png" alt="Proxy management"></td>
-    <td width="50%"><img src="docs/images/Claude-Code-Proxy-2_en.png" alt="Proxy configuration"></td>
+    <td width="50%"><img src="docs/images/Codex-Proxy-stats_en.png" alt="CodeX proxy"></td>
+    <td width="50%"><img src="docs/images/proxy-stats_en.png" alt="Usage stats"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Proxy Node Management</strong></td>
-    <td align="center"><strong>Proxy Configuration</strong></td>
+    <td align="center"><strong>CodeX Proxy · Nodes &amp; Subscriptions</strong></td>
+    <td align="center"><strong>Usage Stats (Claude &amp; Codex)</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/proxy-stats_en.png" alt="Proxy stats"></td>
-    <td width="50%"><img src="docs/images/menu_bar_en.png" alt="Menu bar"></td>
+    <td colspan="2" align="center"><img src="docs/images/menu_bar_en.png" alt="Menu bar" width="50%"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Proxy Statistics</strong></td>
-    <td align="center"><strong>Menu Bar</strong></td>
+    <td colspan="2" align="center"><strong>Menu Bar</strong></td>
   </tr>
 </table>
 
@@ -102,7 +100,11 @@
 
 Download `.dmg` or `.zip` from the [Releases](https://github.com/sylearn/AIUsage/releases) page.
 
-## Claude Code Proxy
+## Proxies
+
+AIUsage ships two independent proxies — one for **Claude Code**, one for **CodeX (Codex CLI)** — each with node management, usage logging and a unified switcher.
+
+### Claude Code Proxy
 
 Use Claude Code CLI with any OpenAI-compatible model, or transparently log Anthropic API usage.
 
@@ -112,6 +114,18 @@ Use Claude Code CLI with any OpenAI-compatible model, or transparently log Anthr
 | **Anthropic Passthrough** | Forwards requests as-is, logs input/output/cache tokens for cost tracking |
 
 **Quick start:** Open AIUsage → Claude Code Proxy → New Node → Configure → Activate. Settings are written to `~/.claude/settings.json` automatically.
+
+### CodeX Proxy
+
+Point the Codex CLI at any OpenAI-compatible upstream (Responses API), and switch between **subscription accounts** and **API nodes** from one place — they are mutually exclusive, so only one identity is ever active.
+
+| Capability | What it does |
+|------------|-------------|
+| **OpenAI-compatible upstream** | Routes Codex CLI through any `responses`-compatible endpoint |
+| **Unified switcher** | One toggle across subscription accounts (`~/.codex/auth.json`) and API nodes (`config.toml`) |
+| **Surgical config merge** | Injects managed blocks into `~/.codex/config.toml` while preserving your own settings; global fragment + per-node TOML override |
+
+**Quick start:** Open AIUsage → CodeX Proxy → New Node (or pick a subscription account) → Configure → Activate. `~/.codex/config.toml` is merged automatically.
 
 ---
 

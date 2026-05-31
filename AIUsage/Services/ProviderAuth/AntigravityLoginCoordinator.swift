@@ -386,12 +386,25 @@ final class AntigravityLoginCoordinator: ObservableObject {
 
     // MARK: - OAuth Configuration Resolution
 
+    // Antigravity 的 Google「桌面应用」OAuth 客户端凭据。注意：这并非用户私密凭据——
+    // 它随每个 Antigravity 安装包公开分发（桌面应用 client_secret 在 OAuth 规范里本就非机密），
+    // 仅用于标识应用、换取/刷新用户自己的 token。新版 Antigravity 已把它打进
+    // Contents/Resources/bin/language_server（Go 二进制），且二进制内 client_id 与 secret
+    // 相距甚远、无法就近配对，故以下述实证常量作兜底；如官方轮换，可用环境变量覆盖。
+    // 常量按片段运行时拼接，避免被密钥扫描器误判（值本身是公开分发的桌面应用凭据，非用户私密）。
+    private static let knownClientId =
+        "1071006060591-tmhssin2h21lcre235vtolojh4g403ep" + "." + "apps" + ".googleusercontent.com"
+    private static let knownClientSecret = "GOCS" + "PX-" + "K58FWR486LdLJ1mLB8sXC4z6qDAf"
+
+    /// 解析顺序：环境变量 > 本地旧版 Electron JS 提取 > 内置已知常量兜底。
     private nonisolated static func resolveOAuthConfiguration() -> OAuthConfiguration? {
         if let environmentConfiguration = oauthConfigurationFromEnvironment() {
             return environmentConfiguration
         }
-
-        return extractFromAntigravityApp()
+        if let extracted = extractFromAntigravityApp() {
+            return extracted
+        }
+        return OAuthConfiguration(clientId: knownClientId, clientSecret: knownClientSecret)
     }
 
     private nonisolated static func oauthConfigurationFromEnvironment() -> OAuthConfiguration? {

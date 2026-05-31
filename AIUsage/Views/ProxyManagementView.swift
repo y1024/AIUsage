@@ -5,6 +5,9 @@ import QuotaBackend
 // MARK: - Proxy Management View
 
 struct ProxyManagementView: View {
+    /// 节点家族过滤：Claude 菜单只列 Claude 家族节点，CodeX 菜单只列 CodeX 节点。
+    var family: ProxyNodeFamily = .claude
+
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var viewModel: ProxyViewModel
     @State private var showingNewConfigEditor = false
@@ -13,24 +16,78 @@ struct ProxyManagementView: View {
     @State private var selectedConfigId: String?
     @State private var pendingDeletionConfig: ProxyConfiguration?
     @State private var draggingConfigId: String?
-    @State private var dropTargetIndex: Int?
+    @State private var dragTranslation: CGFloat = 0
+    @State private var nodeRowHeights: [String: CGFloat] = [:]
     @State private var showingImporter = false
     @State private var showingExporter = false
     @State private var importResult: NodeProfileStore.ImportResult?
     @State private var showImportResult = false
     @State private var exportSelectedIds: Set<String> = []
     @State private var showingSettingsEditor = false
+    // MARK: - Family Filtering
+
+    /// 当前家族下展示的节点（Claude 家族过滤掉 codex，CodeX 家族只留 codex）。
+    private var displayConfigs: [ProxyConfiguration] {
+        viewModel.configurations.filter { family.contains($0.nodeType) }
+    }
+
+    /// CodeX 订阅账号（OAuth，~/.codex/auth.json）。仅 CodeX 家族用于统一切换器的「订阅账号」区。
+    private var codexSubscriptionEntries: [ProviderAccountEntry] {
+        guard family.isCodex else { return [] }
+        return appState.providerAccountGroups.first { $0.providerId == "codex" }?.accounts ?? []
+    }
+
+    /// 是否有任何可展示内容：API 节点，或（CodeX）订阅账号。决定显示空态还是列表。
+    private var hasAnyContent: Bool {
+        !displayConfigs.isEmpty || !codexSubscriptionEntries.isEmpty
+    }
+
+    /// 当前家族的激活节点 id（Claude 走 activatedConfigId，CodeX 走 activatedCodexConfigId）。
+    private var familyActivatedId: String? {
+        viewModel.activatedId(isCodex: family.isCodex)
+    }
+
+    /// 把过滤后列表的插入槽位换算为全局 `configurations` 数组下标，保证拖拽重排正确。
+    private func globalSlotIndex(forDisplayedIndex i: Int) -> Int {
+        let displayed = displayConfigs
+        if i < displayed.count {
+            return viewModel.configurations.firstIndex(where: { $0.id == displayed[i].id })
+                ?? viewModel.configurations.count
+        }
+        if let last = displayed.last,
+           let gi = viewModel.configurations.firstIndex(where: { $0.id == last.id }) {
+            return gi + 1
+        }
+        return viewModel.configurations.count
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if viewModel.configurations.isEmpty {
+            // CodeX 专属：系统代理会拦截 codex 发往本地的请求导致 502，开启时顶部提示+一键修复。
+            if family.isCodex {
+                SystemProxyWarningBanner()
+            }
+            if !hasAnyContent {
                 emptyState
             } else {
                 ScrollView {
                     LazyVStack(spacing: 16) {
                         actionBar
                         summaryStrip
-                        GlobalConfigSection()
-                        configurationsList
+                        if family.isCodex {
+                            // CodeX 的「通用配置」就是 live config.toml 本体（唯一编辑入口，置顶）。
+                            CodexGlobalConfigSection()
+                            // 统一切换器（订阅账号 + API 节点，单一互斥激活）。
+                            if !codexSubscriptionEntries.isEmpty {
+                                CodexSubscriptionSection(entries: codexSubscriptionEntries)
+                            }
+                        } else {
+                            // 通用配置仅作用于 Claude 的 ~/.claude/settings.json。
+                            GlobalConfigSection()
+                        }
+                        if !displayConfigs.isEmpty {
+                            configurationsList
+                        }
                     }
                     .padding(20)
                 }
@@ -80,19 +137,37 @@ struct ProxyManagementView: View {
             LocalSettingsEditorView()
         }
         .sheet(isPresented: $showingNewConfigEditor) {
-            ProxyConfigEditorView()
-                .environmentObject(viewModel)
-                .environmentObject(appState)
+            if family.isCodex {
+                CodexProxyEditorView()
+                    .environmentObject(viewModel)
+                    .environmentObject(appState)
+            } else {
+                ProxyConfigEditorView()
+                    .environmentObject(viewModel)
+                    .environmentObject(appState)
+            }
         }
         .sheet(item: $editingProfile) { profile in
-            ProxyConfigEditorView(profile: profile)
-                .environmentObject(viewModel)
-                .environmentObject(appState)
+            if profile.metadata.nodeType.isCodex {
+                CodexProxyEditorView(profile: profile)
+                    .environmentObject(viewModel)
+                    .environmentObject(appState)
+            } else {
+                ProxyConfigEditorView(profile: profile)
+                    .environmentObject(viewModel)
+                    .environmentObject(appState)
+            }
         }
         .sheet(item: $editingConfig) { config in
-            ProxyConfigEditorView(config: config)
-                .environmentObject(viewModel)
-                .environmentObject(appState)
+            if config.nodeType.isCodex {
+                CodexProxyEditorView(config: config)
+                    .environmentObject(viewModel)
+                    .environmentObject(appState)
+            } else {
+                ProxyConfigEditorView(config: config)
+                    .environmentObject(viewModel)
+                    .environmentObject(appState)
+            }
         }
         .alert(
             L("Node Operation Failed", "节点操作失败"),
@@ -149,12 +224,15 @@ struct ProxyManagementView: View {
         HStack(spacing: 10) {
             Spacer()
 
-            actionBarButton(
-                title: L("settings.json", "settings.json"),
-                icon: "doc.text.fill",
-                tint: .secondary
-            ) {
-                showingSettingsEditor = true
+            // CodeX 的 config.toml 编辑入口统一收敛到下方「通用配置」卡片，避免与工具栏按钮重复。
+            if !family.isCodex {
+                actionBarButton(
+                    title: L("settings.json", "settings.json"),
+                    icon: "doc.text.fill",
+                    tint: .secondary
+                ) {
+                    showingSettingsEditor = true
+                }
             }
 
             actionBarButton(
@@ -170,10 +248,10 @@ struct ProxyManagementView: View {
                 icon: "square.and.arrow.up",
                 tint: .secondary
             ) {
-                exportSelectedIds = Set(viewModel.configurations.map(\.id))
+                exportSelectedIds = Set(displayConfigs.map(\.id))
                 showingExporter = true
             }
-            .disabled(viewModel.configurations.isEmpty)
+            .disabled(displayConfigs.isEmpty)
 
             actionBarButton(
                 title: L("New Node", "新建节点"),
@@ -228,13 +306,13 @@ struct ProxyManagementView: View {
             summaryCell(
                 icon: "point.3.connected.trianglepath.dotted",
                 title: L("Nodes", "节点数"),
-                value: "\(viewModel.configurations.count)",
+                value: "\(displayConfigs.count)",
                 tint: .blue
             )
             summaryCell(
                 icon: "checkmark.circle.fill",
                 title: L("Active", "已激活"),
-                value: viewModel.activatedConfigId != nil ? "1" : "0",
+                value: familyActivatedId != nil ? "1" : "0",
                 tint: .green
             )
             summaryCell(
@@ -300,27 +378,37 @@ struct ProxyManagementView: View {
     private var configurationsList: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(L("Node Configurations", "节点配置"))
+                Text(L("Node List", "节点列表"))
                     .font(.headline.weight(.bold))
                 Spacer()
             }
 
             LazyVStack(spacing: 0) {
-                ForEach(Array(viewModel.configurations.enumerated()), id: \.element.id) { index, config in
+                let ids = displayConfigs.map(\.id)
+                let srcIdx = draggingConfigId.flatMap { id in ids.firstIndex(of: id) }
+                let target = srcIdx.map { nodeTarget(ids: ids, srcIdx: $0) }
+                ForEach(Array(displayConfigs.enumerated()), id: \.element.id) { index, config in
                     let stats = viewModel.statistics[config.id] ?? .empty
                     let isSelected = selectedConfigId == config.id
+                    let isDragging = draggingConfigId == config.id
                     VStack(spacing: 0) {
-                        dropIndicator(at: index)
                         ConfigurationCardView(
                             config: config,
-                            isActive: viewModel.activatedConfigId == config.id,
+                            isActive: viewModel.isNodeActivated(config.id),
                             isProxyOnlyRunning: viewModel.proxyOnlyRunningIds.contains(config.id),
                             isBusy: viewModel.isOperationInProgress(config.id),
                             isSelected: isSelected,
                             statsRequests: stats.totalRequests,
                             statsSuccessRate: stats.successRate,
                             lastRequestAt: stats.lastRequestAt,
-                            onDragStart: { draggingConfigId = config.id },
+                            onDragChanged: { t in
+                                if draggingConfigId != config.id {
+                                    draggingConfigId = config.id
+                                    if selectedConfigId != nil { selectedConfigId = nil }
+                                }
+                                dragTranslation = t
+                            },
+                            onDragEnded: { commitNodeDrag() },
                             onToggleActivation: { Task { await viewModel.toggleActivation(config.id) } },
                             onToggleProxyOnly: { Task { await viewModel.toggleProxyOnly(config.id) } },
                             onCopyLaunchCommand: { viewModel.copyLaunchCommand(for: config.id) },
@@ -340,13 +428,7 @@ struct ProxyManagementView: View {
                             }
                         )
                         .equatable()
-                        .opacity(draggingConfigId == config.id ? 0.3 : 1.0)
-                        .onDrop(of: [.text], delegate: CardDropDelegate(
-                            targetIndex: index,
-                            draggingId: $draggingConfigId,
-                            dropTarget: $dropTargetIndex,
-                            viewModel: viewModel
-                        ))
+                        .background(nodeRowHeightReader(for: config.id))
                         .padding(.vertical, 4)
 
                         if isSelected && config.needsProxyProcess {
@@ -357,9 +439,16 @@ struct ProxyManagementView: View {
                                 .padding(.bottom, 4)
                         }
                     }
+                    .offset(y: nodeRowOffset(index: index, id: config.id, srcIdx: srcIdx, target: target))
+                    .scaleEffect(isDragging ? 1.02 : 1, anchor: .center)
+                    .shadow(color: .black.opacity(isDragging ? 0.22 : 0),
+                            radius: isDragging ? 9 : 0, x: 0, y: isDragging ? 5 : 0)
+                    .zIndex(isDragging ? 1 : 0)
+                    .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.82), value: target)
+                    .animation(.interactiveSpring(response: 0.30, dampingFraction: 0.85), value: draggingConfigId)
                 }
-                dropIndicator(at: viewModel.configurations.count)
             }
+            .onPreferenceChange(NodeRowHeightKey.self) { nodeRowHeights = $0 }
         }
         .padding(16)
         .background(
@@ -372,23 +461,72 @@ struct ProxyManagementView: View {
         )
     }
 
-    // MARK: - Drag & Drop Helpers
+    // MARK: - Drag & Drop Helpers (手势驱动「拖拽实时让位」，与订阅账号列表同一套手感)
 
-    private func dropIndicator(at index: Int) -> some View {
-        let isActive = dropTargetIndex == index
-        return HStack(spacing: 0) {
-            if isActive {
-                Circle()
-                    .fill(Color.accentColor)
-                    .frame(width: 6, height: 6)
-            }
-            Rectangle()
-                .fill(isActive ? Color.accentColor : Color.clear)
-                .frame(height: isActive ? 2 : 0)
+    // 节点卡片在 LazyVStack(spacing:0) 中各带 .padding(.vertical,4)，上下合计 8 作为行间距。
+    private static let nodeRowSpacing: CGFloat = 8
+    private static let nodeFallbackHeight: CGFloat = 96
+
+    private func nodeRowHeightReader(for id: String) -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(key: NodeRowHeightKey.self, value: [id: geo.size.height])
         }
-        .frame(height: isActive ? 6 : 2)
-        .padding(.horizontal, 4)
-        .animation(.easeInOut(duration: 0.15), value: isActive)
+    }
+
+    /// 被拖行的步幅（实测卡片高度 + 行间距），即让位时其余行平移的距离。
+    private func nodeStride(_ id: String) -> CGFloat {
+        (nodeRowHeights[id] ?? Self.nodeFallbackHeight) + Self.nodeRowSpacing
+    }
+
+    /// 各行在基础布局中的中心 Y（被拖行仍按原槽位计入），用于阈值判断。
+    private func nodeBaseCenters(_ ids: [String]) -> [CGFloat] {
+        var centers: [CGFloat] = []
+        var top: CGFloat = 0
+        for id in ids {
+            let h = nodeRowHeights[id] ?? Self.nodeFallbackHeight
+            centers.append(top + h / 2)
+            top += h + Self.nodeRowSpacing
+        }
+        return centers
+    }
+
+    /// 由跟手位移推出被拖行应落入的目标「条目下标」（与相邻行中心比较，支持变高行）。
+    private func nodeTarget(ids: [String], srcIdx: Int) -> Int {
+        guard !ids.isEmpty, srcIdx < ids.count else { return srcIdx }
+        let centers = nodeBaseCenters(ids)
+        let draggedCenter = centers[srcIdx] + dragTranslation
+        var t = srcIdx
+        while t < ids.count - 1 && draggedCenter > centers[t + 1] { t += 1 }
+        while t > 0 && draggedCenter < centers[t - 1] { t -= 1 }
+        return t
+    }
+
+    /// 单行的 y 位移：被拖行跟手；其余行按「让位」规则平移一个被拖行步幅。
+    private func nodeRowOffset(index: Int, id: String, srcIdx: Int?, target: Int?) -> CGFloat {
+        if id == draggingConfigId { return dragTranslation }
+        guard let srcIdx, let target, let dragId = draggingConfigId else { return 0 }
+        let step = nodeStride(dragId)
+        if target > srcIdx, index > srcIdx, index <= target { return -step }
+        if target < srcIdx, index >= target, index < srcIdx { return step }
+        return 0
+    }
+
+    /// 松手时把被拖卡片落到目标条目下标（换算为全局插入下标），并清空拖拽状态。
+    private func commitNodeDrag() {
+        let ids = displayConfigs.map(\.id)
+        defer {
+            draggingConfigId = nil
+            dragTranslation = 0
+        }
+        guard let id = draggingConfigId, let srcIdx = ids.firstIndex(of: id) else { return }
+        let target = nodeTarget(ids: ids, srcIdx: srcIdx)
+        guard target != srcIdx else { return }
+        // 目标「条目下标」→ 当前展示列表的插入间隙 → 全局插入下标（moveConfiguration 用间隙语义）。
+        let displayedGap = target > srcIdx ? target + 1 : target
+        let globalTo = globalSlotIndex(forDisplayedIndex: displayedGap)
+        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) {
+            viewModel.moveConfiguration(fromId: id, toIndex: globalTo)
+        }
     }
 
     // MARK: - Statistics Section
@@ -684,8 +822,11 @@ struct ProxyManagementView: View {
                 .foregroundStyle(.secondary)
             Text(L("No Nodes", "暂无节点"))
                 .font(.title3.weight(.bold))
-            Text(L("Add Anthropic Direct or OpenAI Proxy nodes to manage Claude Code endpoints.",
-                    "添加 Anthropic 直连或 OpenAI 代理节点来管理 Claude Code 端点。"))
+            Text(family.isCodex
+                 ? L("Add a CodeX proxy node to route CodeX through an OpenAI-compatible upstream.",
+                     "添加 CodeX 代理节点，把 CodeX 接入 OpenAI 兼容上游。")
+                 : L("Add Anthropic Direct or OpenAI Proxy nodes to manage Claude Code endpoints.",
+                     "添加 Anthropic 直连或 OpenAI 代理节点来管理 Claude Code 端点。"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -727,7 +868,8 @@ struct ProxyManagementView: View {
 
     private var aggregatedStats: AggregatedStats {
         var agg = AggregatedStats()
-        for s in viewModel.statistics.values {
+        let familyIds = Set(displayConfigs.map(\.id))
+        for (id, s) in viewModel.statistics where familyIds.contains(id) {
             agg.requests += s.totalRequests
             agg.successful += s.successfulRequests
             agg.tokens += s.totalTokens
@@ -749,8 +891,8 @@ struct ProxyManagementView: View {
     private func duplicateConfig(_ config: ProxyConfiguration) {
         if let duplicated = viewModel.profileStore.duplicate(config.id) {
             let newConfig = duplicated.metadata.proxy.toProxyConfiguration(metadata: duplicated.metadata)
-            viewModel.configurations.append(newConfig)
-            if newConfig.nodeType == .openaiProxy {
+            viewModel.configurations.insert(newConfig, at: 0)
+            if newConfig.nodeType == .openaiProxy || newConfig.nodeType == .codexProxy {
                 viewModel.statistics[newConfig.id] = .empty
                 viewModel.recentLogs[newConfig.id] = []
             }
@@ -815,7 +957,8 @@ private struct ConfigurationCardView: View, Equatable {
     let statsSuccessRate: Double
     let lastRequestAt: Date?
 
-    var onDragStart: () -> Void = {}
+    var onDragChanged: (CGFloat) -> Void = { _ in }
+    var onDragEnded: () -> Void = {}
     var onToggleActivation: () -> Void = {}
     var onToggleProxyOnly: () -> Void = {}
     var onCopyLaunchCommand: () -> Void = {}
@@ -837,9 +980,14 @@ private struct ConfigurationCardView: View, Equatable {
 
     private static let anthropicBrand = Color(red: 0.85, green: 0.47, blue: 0.34)
     private static let openAIBrand = Color(red: 0.29, green: 0.73, blue: 0.56)
+    private static let codexBrand = Color(red: 0.40, green: 0.52, blue: 0.92)
 
     private var brandColor: Color {
-        config.nodeType == .anthropicDirect ? Self.anthropicBrand : Self.openAIBrand
+        switch config.nodeType {
+        case .anthropicDirect: return Self.anthropicBrand
+        case .openaiProxy: return Self.openAIBrand
+        case .codexProxy: return Self.codexBrand
+        }
     }
 
     var body: some View {
@@ -856,10 +1004,11 @@ private struct ConfigurationCardView: View, Equatable {
                         if hovering { NSCursor.openHand.push() }
                         else { NSCursor.pop() }
                     }
-                    .onDrag {
-                        onDragStart()
-                        return NSItemProvider(object: config.id as NSString)
-                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                            .onChanged { onDragChanged($0.translation.height) }
+                            .onEnded { _ in onDragEnded() }
+                    )
 
                 VStack(alignment: .trailing, spacing: 4) {
                     statPill(icon: "arrow.up.arrow.down", value: "\(statsRequests)", color: .blue)
@@ -1042,6 +1191,8 @@ private struct ConfigurationCardView: View, Equatable {
                 return ("Anthropic Direct", "bolt.horizontal.fill", Self.anthropicBrand)
             case .openaiProxy:
                 return ("OpenAI Proxy", "arrow.triangle.swap", Self.openAIBrand)
+            case .codexProxy:
+                return ("CodeX Proxy", "terminal.fill", Self.codexBrand)
             }
         }()
 
@@ -1100,6 +1251,12 @@ private struct ConfigurationCardView: View, Equatable {
                     detailItem(label: "HTTPS", value: "https://\(config.host):\(config.effectiveHTTPSPort)")
                 }
                 detailItem(label: L("LAN Access", "局域网访问"), value: config.allowLAN ? L("Enabled", "已启用") : L("Disabled", "已禁用"))
+            case .codexProxy:
+                detailItem(label: L("Upstream", "上游"), value: config.normalizedUpstreamBaseURL)
+                detailItem(label: L("API Mode", "接口模式"), value: "Responses")
+                detailItem(label: L("Model", "模型"), value: config.codexModel.isEmpty ? "—" : config.codexModel)
+                detailItem(label: L("CodeX Endpoint", "CodeX 接入"), value: "http://\(config.host):\(config.port)/v1")
+                detailItem(label: L("LAN Access", "局域网访问"), value: config.allowLAN ? L("Enabled", "已启用") : L("Disabled", "已禁用"))
             }
             if let lastUsed = lastRequestAt ?? config.lastUsedAt {
                 detailItem(label: L("Last Used", "最后使用"), value: Self.relativeFormatter.localizedString(for: lastUsed, relativeTo: Date()))
@@ -1119,51 +1276,20 @@ private struct ConfigurationCardView: View, Equatable {
     }
 }
 
-// MARK: - Drag & Drop Delegate
+// MARK: - Node Row Height Preference
 
-private struct CardDropDelegate: DropDelegate {
-    let targetIndex: Int
-    @Binding var draggingId: String?
-    @Binding var dropTarget: Int?
-    let viewModel: ProxyViewModel
-
-    func dropEntered(info: DropInfo) {
-        guard draggingId != nil else { return }
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-            dropTarget = targetIndex
-        }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func dropExited(info: DropInfo) {
-        if dropTarget == targetIndex {
-            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                dropTarget = nil
-            }
-        }
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard let id = draggingId else { return false }
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            viewModel.moveConfiguration(fromId: id, toIndex: targetIndex)
-        }
-        draggingId = nil
-        dropTarget = nil
-        return true
-    }
-
-    func validateDrop(info: DropInfo) -> Bool {
-        draggingId != nil
+/// 收集每张节点卡片的实测高度，供手势拖拽计算落点/让位偏移。
+private struct NodeRowHeightKey: PreferenceKey {
+    static var defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 
 // MARK: - Proxy Activation Toggle Style
 
-private struct ProxyActivationToggleStyle: ToggleStyle {
+// 复用：CodeX 账号列表的激活开关也用此样式，保持与节点列表一致。
+struct ProxyActivationToggleStyle: ToggleStyle {
     let brandColor: Color
     let isBusy: Bool
 

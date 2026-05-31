@@ -47,6 +47,9 @@ class ProxyViewModel: ObservableObject {
 
     @Published var configurations: [ProxyConfiguration] = []
     @Published var activatedConfigId: String?
+    /// CodeX 节点独立的激活轨道。CodeX 写 ~/.codex/config.toml，与 Claude 节点（~/.claude/settings.json）
+    /// 写不同文件，故二者可同时激活，分别用 `activatedConfigId` / `activatedCodexConfigId` 跟踪。
+    @Published var activatedCodexConfigId: String?
     @Published var proxyOnlyRunningIds: Set<String> = []
     // `statistics` and `recentLogs` are intentionally NOT @Published: writes happen on every
     // proxied request (potentially many per second during streaming) and each publish would
@@ -62,6 +65,7 @@ class ProxyViewModel: ObservableObject {
     struct LogCacheKey: Hashable {
         let nodeFilter: String?
         let modelFilter: String?
+        var family: ProxyNodeFamily?
     }
 
     var _logCache: [LogCacheKey: [ProxyRequestLog]] = [:]
@@ -71,17 +75,23 @@ class ProxyViewModel: ObservableObject {
     struct TimeSeriesKey: Hashable {
         let nodeFilter: String?
         let granularity: String
+        var family: ProxyNodeFamily?
     }
     struct AggregateKey: Hashable {
         let nodeFilter: String?
         let modelFilter: String?
         let since: Date?
+        var family: ProxyNodeFamily?
+    }
+    struct UpstreamModelsKey: Hashable {
+        let nodeFilter: String?
+        var family: ProxyNodeFamily?
     }
     var _timeSeriesCache: [TimeSeriesKey: Any] = [:]
     var _modelAggCache: [AggregateKey: Any] = [:]
     var _overallStatsCache: [AggregateKey: Any] = [:]
     var _dateRangeCache: [LogCacheKey: (earliest: Date?, latest: Date?, days: Int)] = [:]
-    var _upstreamModelsCache: [String: [String]] = [:]
+    var _upstreamModelsCache: [UpstreamModelsKey: [String]] = [:]
 
     let logsChangeSubject = PassthroughSubject<Void, Never>()
     var logsChangeCancellable: AnyCancellable?
@@ -122,6 +132,22 @@ class ProxyViewModel: ObservableObject {
         loadStatistics()
         loadLogs()
         restoreActivatedNode()
+        observeCodexAccountActivation()
+    }
+
+    /// 互斥：监听 CodeX 订阅账号激活通知。账号写 ~/.codex/auth.json 前，先停用正在运行的
+    /// CodeX 代理并还原 config.toml，避免两条轨道同时改 ~/.codex 造成冲突与统计串台。
+    private func observeCodexAccountActivation() {
+        NotificationCenter.default.addObserver(
+            forName: .codexSubscriptionAccountActivating,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let id = self.activatedCodexConfigId else { return }
+                await self.deactivateConfiguration(id)
+            }
+        }
     }
 
     /// Marks that logs/statistics have changed. Caches are invalidated immediately so that
@@ -184,6 +210,30 @@ class ProxyViewModel: ObservableObject {
         profileStore.saveActivatedId()
     }
 
+    func saveActivatedCodexId() {
+        if let id = activatedCodexConfigId {
+            UserDefaults.standard.set(id, forKey: DefaultsKey.proxyActivatedCodexConfigId)
+        } else {
+            UserDefaults.standard.removeObject(forKey: DefaultsKey.proxyActivatedCodexConfigId)
+        }
+    }
+
+    // MARK: - Activation Family Helpers
+
+    /// 某节点是否处于激活态（任一轨道）。
+    func isNodeActivated(_ id: String) -> Bool {
+        activatedConfigId == id || activatedCodexConfigId == id
+    }
+
+    /// 取指定家族当前激活的节点 id（CodeX 走独立轨道）。
+    func activatedId(isCodex: Bool) -> String? {
+        isCodex ? activatedCodexConfigId : activatedConfigId
+    }
+
+    private func nodeIsCodex(_ id: String) -> Bool {
+        configurations.first(where: { $0.id == id })?.nodeType.isCodex ?? false
+    }
+
     func moveConfiguration(fromId: String, toIndex: Int) {
         guard let fromIndex = configurations.firstIndex(where: { $0.id == fromId }) else { return }
         let clampedTarget = min(max(toIndex, 0), configurations.count)
@@ -197,8 +247,8 @@ class ProxyViewModel: ObservableObject {
     func addConfiguration(_ config: ProxyConfiguration) {
         let profile = NodeProfile.fromLegacyConfiguration(config)
         profileStore.save(profile)
-        configurations.append(config)
-        if config.nodeType == .openaiProxy {
+        configurations.insert(config, at: 0)
+        if config.nodeType == .openaiProxy || config.nodeType == .codexProxy {
             statistics[config.id] = .empty
             recentLogs[config.id] = []
         }
@@ -210,8 +260,8 @@ class ProxyViewModel: ObservableObject {
     func addProfile(_ profile: NodeProfile) {
         profileStore.save(profile)
         let config = profile.metadata.proxy.toProxyConfiguration(metadata: profile.metadata)
-        configurations.append(config)
-        if profile.metadata.nodeType == .openaiProxy {
+        configurations.insert(config, at: 0)
+        if profile.metadata.nodeType == .openaiProxy || profile.metadata.nodeType == .codexProxy {
             statistics[profile.id] = .empty
             recentLogs[profile.id] = []
         }
@@ -225,7 +275,7 @@ class ProxyViewModel: ObservableObject {
         profileStore.save(profile)
 
         if let index = configurations.firstIndex(where: { $0.id == profile.id }) {
-            let wasActivated = activatedConfigId == profile.id
+            let wasActivated = isNodeActivated(profile.id)
             let wasProxyOnly = proxyOnlyRunningIds.contains(profile.id)
             let busyIds: Set<String> = [profile.id]
             setOperationInProgress(busyIds, isActive: true)
@@ -262,7 +312,7 @@ class ProxyViewModel: ObservableObject {
 
     func updateConfiguration(_ config: ProxyConfiguration) async {
         if let index = configurations.firstIndex(where: { $0.id == config.id }) {
-            let wasActivated = activatedConfigId == config.id
+            let wasActivated = isNodeActivated(config.id)
             let wasProxyOnly = proxyOnlyRunningIds.contains(config.id)
             let busyIds: Set<String> = [config.id]
             setOperationInProgress(busyIds, isActive: true)
@@ -304,7 +354,7 @@ class ProxyViewModel: ObservableObject {
         setOperationInProgress(busyIds, isActive: true)
         defer { setOperationInProgress(busyIds, isActive: false) }
 
-        if activatedConfigId == id {
+        if isNodeActivated(id) {
             do {
                 try await performDeactivationTransaction(id)
             } catch {
@@ -355,7 +405,9 @@ class ProxyViewModel: ObservableObject {
             }
             return .init(baseURL: config.anthropicBaseURL, authToken: config.anthropicAPIKey,
                          defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
-        case .openaiProxy:
+        case .openaiProxy, .codexProxy:
+            // CodeX 节点通过 activateCodexRuntime 走 config.toml，不会调用本方法；
+            // 这里仅为满足 switch 穷尽性，返回与 openaiProxy 同形的配置，实际不会写入 settings.json。
             let proxyKey = config.expectedClientKey.isEmpty ? "proxy-key" : config.expectedClientKey
             let baseURL: String
             if config.enableHTTPS {
@@ -370,7 +422,9 @@ class ProxyViewModel: ObservableObject {
     }
 
     func activateConfiguration(_ id: String) async {
-        let busyIds = Set([id, activatedConfigId].compactMap { $0 })
+        // 仅与同家族当前激活节点互斥（CodeX 与 Claude 各自独立轨道）。
+        let currentActive = activatedId(isCodex: nodeIsCodex(id))
+        let busyIds = Set([id, currentActive].compactMap { $0 })
         guard !busyIds.contains(where: { operationInProgressConfigIds.contains($0) }) else { return }
 
         setOperationInProgress(busyIds, isActive: true)
@@ -400,7 +454,7 @@ class ProxyViewModel: ObservableObject {
     }
 
     func toggleActivation(_ id: String) async {
-        if activatedConfigId == id {
+        if isNodeActivated(id) {
             await deactivateConfiguration(id)
         } else {
             await activateConfiguration(id)
@@ -412,13 +466,16 @@ class ProxyViewModel: ObservableObject {
             throw ProxyRuntimeError.configurationNotFound
         }
 
-        if activatedConfigId == id {
+        let isCodex = config.nodeType.isCodex
+
+        if activatedId(isCodex: isCodex) == id {
             return
         }
 
         let wasProxyOnly = proxyOnlyRunningIds.contains(id)
 
-        let previousActiveConfig = activatedConfigId.flatMap { currentId in
+        // 只停用同家族的前一个激活节点；另一家族节点保持激活。
+        let previousActiveConfig = activatedId(isCodex: isCodex).flatMap { currentId in
             configurations.first(where: { $0.id == currentId })
         }
 
@@ -431,7 +488,7 @@ class ProxyViewModel: ObservableObject {
             proxyOnlyRunningIds.remove(id)
             saveProxyOnlyIds()
             do {
-                try persistActivationSelection(config.id, touchLastUsedAt: true)
+                try persistActivationSelection(config.id, touchLastUsedAt: true, isCodex: isCodex)
             } catch {
                 do {
                     try await deactivateRuntime(for: config)
@@ -466,19 +523,27 @@ class ProxyViewModel: ObservableObject {
             throw error
         }
 
+        // 互斥（代理→账号方向）：CodeX 代理接管 config.toml 后，把订阅账号标记为未激活。
+        if isCodex {
+            ProviderActivationManager.shared.markCodexSubscriptionInactiveForProxy()
+        }
+
         proxyRuntimeLog.info("Node activated: \(config.name, privacy: .public)")
     }
 
     func performDeactivationTransaction(_ id: String) async throws {
-        guard activatedConfigId == id,
-              let config = configurations.first(where: { $0.id == id }) else {
+        guard let config = configurations.first(where: { $0.id == id }) else {
+            return
+        }
+        let isCodex = config.nodeType.isCodex
+        guard activatedId(isCodex: isCodex) == id else {
             return
         }
 
         try await deactivateRuntime(for: config)
 
         do {
-            try persistActivationSelection(nil, touchLastUsedAt: false)
+            try persistActivationSelection(nil, touchLastUsedAt: false, isCodex: isCodex)
         } catch {
             do {
                 try await activateRuntime(for: config)
@@ -491,16 +556,22 @@ class ProxyViewModel: ObservableObject {
         proxyRuntimeLog.info("Node deactivated: \(config.name, privacy: .public)")
     }
 
-    func persistActivationSelection(_ activeId: String?, touchLastUsedAt: Bool) throws {
-        let previousConfigurations = configurations
-        let previousActivatedConfigId = activatedConfigId
+    func persistActivationSelection(_ activeId: String?, touchLastUsedAt: Bool, isCodex: Bool) throws {
         let now = touchLastUsedAt ? Date() : nil
 
-        activatedConfigId = activeId
+        // 只更新本家族的激活轨道，保留另一家族的激活态。
+        if isCodex {
+            activatedCodexConfigId = activeId
+        } else {
+            activatedConfigId = activeId
+        }
+
+        // isEnabled 反映「任一轨道处于激活」，兼顾 CodeX 与 Claude 同时激活。
+        let activeSet = Set([activatedConfigId, activatedCodexConfigId].compactMap { $0 })
         for index in configurations.indices {
-            let isActive = configurations[index].id == activeId
+            let isActive = activeSet.contains(configurations[index].id)
             configurations[index].isEnabled = isActive
-            if isActive, let now {
+            if configurations[index].id == activeId, let now {
                 configurations[index].lastUsedAt = now
             }
         }
@@ -511,7 +582,11 @@ class ProxyViewModel: ObservableObject {
             profileStore.save(profile)
         }
 
-        saveActivatedId()
+        if isCodex {
+            saveActivatedCodexId()
+        } else {
+            saveActivatedId()
+        }
     }
 
     func setOperationInProgress(_ ids: Set<String>, isActive: Bool) {

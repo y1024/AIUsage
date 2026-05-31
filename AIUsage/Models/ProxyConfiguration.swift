@@ -7,6 +7,28 @@ import QuotaBackend
 enum NodeType: String, Codable, CaseIterable {
     case anthropicDirect
     case openaiProxy
+    case codexProxy
+
+    /// CodeX 节点：把 OpenAI 兼容上游接入 CodeX（写 ~/.codex/config.toml，本地起 QuotaServer）。
+    var isCodex: Bool { self == .codexProxy }
+}
+
+// MARK: - Node Family
+// 节点家族决定它们在 UI / 激活轨道上的归属：
+// Claude 家族写 ~/.claude/settings.json，CodeX 家族写 ~/.codex/config.toml，二者互不影响。
+
+enum ProxyNodeFamily: Hashable {
+    case claude   // anthropicDirect + openaiProxy
+    case codex    // codexProxy
+
+    func contains(_ type: NodeType) -> Bool {
+        switch self {
+        case .claude: return type != .codexProxy
+        case .codex: return type == .codexProxy
+        }
+    }
+
+    var isCodex: Bool { self == .codex }
 }
 
 // MARK: - Proxy Configuration
@@ -159,7 +181,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
 
         static var openAIDefault: ModelMapping {
             ModelMapping(
-                bigModel: MappedModel(name: "gpt-5.4"),
+                bigModel: MappedModel(name: "gpt-5.5"),
                 middleModel: MappedModel(name: "gpt-5.4-mini"),
                 smallModel: MappedModel(name: "gpt-4o-mini")
             )
@@ -170,6 +192,15 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
                 bigModel: MappedModel(name: "claude-opus-4-6"),
                 middleModel: MappedModel(name: "claude-sonnet-4-6"),
                 smallModel: MappedModel(name: "claude-haiku-4-5")
+            )
+        }
+
+        /// CodeX 节点只有一个有效模型（存 bigModel），middle/small 留空不参与定价/统计。
+        static var codexDefault: ModelMapping {
+            ModelMapping(
+                bigModel: MappedModel(name: "gpt-5.5"),
+                middleModel: MappedModel(name: ""),
+                smallModel: MappedModel(name: "")
             )
         }
 
@@ -275,7 +306,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         switch nodeType {
         case .anthropicDirect:
             return usePassthroughProxy ? "http://\(host):\(port)" : anthropicBaseURL
-        case .openaiProxy:
+        case .openaiProxy, .codexProxy:
             return "http://\(host):\(port)"
         }
     }
@@ -283,7 +314,20 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
     var effectiveHTTPSPort: Int { httpsPort ?? (port + 1) }
 
     var needsProxyProcess: Bool {
-        nodeType == .openaiProxy || (nodeType == .anthropicDirect && usePassthroughProxy)
+        nodeType == .openaiProxy
+            || nodeType == .codexProxy
+            || (nodeType == .anthropicDirect && usePassthroughProxy)
+    }
+
+    /// CodeX 节点：单一模型 + 价格存放在 `modelMapping.bigModel`。
+    /// 该模型同时作为写入 `config.toml` 的 `model`、上游模型名与定价键。
+    var codexModel: String {
+        modelMapping.bigModel.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 客户端向本地代理鉴权用的 key；留空时回退到约定的 "proxy-key"。
+    var effectiveClientKey: String {
+        expectedClientKey.isEmpty ? "proxy-key" : expectedClientKey
     }
 
     func pricingForModel(_ model: String) -> ModelPricing? {

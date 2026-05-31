@@ -17,6 +17,7 @@ class NodeProfileStore: ObservableObject {
     @Published var profiles: [NodeProfile] = []
     @Published var activatedProfileId: String?
     @Published var globalConfig: GlobalConfig = .empty
+    @Published var codexGlobalConfig: CodexGlobalConfig = .empty
 
     private let fileManager = FileManager.default
 
@@ -30,6 +31,11 @@ class NodeProfileStore: ObservableObject {
         return (home as NSString).appendingPathComponent(".config/aiusage/global-config.json")
     }
 
+    static var codexGlobalConfigPath: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent(".config/aiusage/codex-global-config.json")
+    }
+
     // MARK: - Lifecycle
 
     init() {
@@ -37,6 +43,7 @@ class NodeProfileStore: ObservableObject {
         migrateFromUserDefaultsIfNeeded()
         loadAll()
         loadGlobalConfig()
+        loadCodexGlobalConfig()
         restoreActivatedId()
     }
 
@@ -91,7 +98,9 @@ class NodeProfileStore: ObservableObject {
         var p = profile
         let isNew = !profiles.contains(where: { $0.id == p.id })
         if isNew && p.metadata.sortOrder == Int.max {
-            p.metadata.sortOrder = profiles.count
+            // 新建/复制节点默认排到列表最前（取最小 sortOrder - 1）。
+            let minOrder = profiles.map { $0.metadata.sortOrder }.min() ?? 0
+            p.metadata.sortOrder = minOrder - 1
         }
         let path = filePath(for: p.id)
         do {
@@ -100,7 +109,7 @@ class NodeProfileStore: ObservableObject {
             if let index = profiles.firstIndex(where: { $0.id == p.id }) {
                 profiles[index] = p
             } else {
-                profiles.append(p)
+                profiles.insert(p, at: 0)
             }
             return true
         } catch {
@@ -151,12 +160,11 @@ class NodeProfileStore: ObservableObject {
         persistSortOrder()
     }
 
+    /// 增量持久化排序：仅把 `sortOrder` 与新下标不一致的节点落盘，避免每次拖拽全量重写。
     private func persistSortOrder() {
-        for (index, _) in profiles.enumerated() {
+        for index in profiles.indices where profiles[index].metadata.sortOrder != index {
             profiles[index].metadata.sortOrder = index
-        }
-        for profile in profiles {
-            save(profile)
+            save(profiles[index])
         }
     }
 
@@ -320,6 +328,38 @@ class NodeProfileStore: ObservableObject {
             return true
         } catch {
             storeLog.error("Failed to save global config: \(String(describing: error), privacy: .public)")
+            return false
+        }
+    }
+
+    // MARK: - CodeX Global Config
+
+    func loadCodexGlobalConfig() {
+        let path = Self.codexGlobalConfigPath
+        guard let data = fileManager.contents(atPath: path) else {
+            codexGlobalConfig = .empty
+            return
+        }
+        do {
+            codexGlobalConfig = try CodexGlobalConfig.fromFileData(data)
+        } catch {
+            storeLog.error("Failed to load CodeX global config: \(String(describing: error), privacy: .public)")
+            codexGlobalConfig = .empty
+        }
+    }
+
+    @discardableResult
+    func saveCodexGlobalConfig(_ config: CodexGlobalConfig? = nil) -> Bool {
+        if let config { codexGlobalConfig = config }
+        let path = Self.codexGlobalConfigPath
+        do {
+            let data = try codexGlobalConfig.toFileData()
+            let dir = (path as NSString).deletingLastPathComponent
+            try fileManager.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            return true
+        } catch {
+            storeLog.error("Failed to save CodeX global config: \(String(describing: error), privacy: .public)")
             return false
         }
     }

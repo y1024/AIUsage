@@ -791,7 +791,7 @@
 "AIUsage/Views/ProxyManagementView.swift::No requests yet" = "No requests yet";
 
 /* Views/ProxyManagementView.swift */
-"AIUsage/Views/ProxyManagementView.swift::Node Configurations" = "Node Configurations";
+"AIUsage/Views/ProxyManagementView.swift::Node List" = "Node List";
 
 /* Views/ProxyManagementView.swift */
 "AIUsage/Views/ProxyManagementView.swift::Node Operation Failed" = "Node Operation Failed";
@@ -1244,7 +1244,7 @@
 "dashboard.providers" = "Providers";
 
 /* Views/DashboardView.swift */
-"dashboard.summary.cost_tracking" = "Token Stats";
+"dashboard.summary.cost_tracking" = "Usage Stats";
 
 /* Views/DashboardView.swift */
 "dashboard.summary.live_accounts" = "Live Accounts";
@@ -1262,7 +1262,7 @@
 "help.refresh_all" = "Refresh every app and every account";
 
 /* Views/ContentView.swift */
-"nav.cost_tracking" = "Token Stats";
+"nav.cost_tracking" = "Usage Stats";
 
 /* Views/ContentView.swift */
 "nav.dashboard" = "Dashboard";

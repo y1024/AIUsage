@@ -122,10 +122,13 @@ struct NodeProfile: Identifiable, Equatable {
         switch nodeType {
         case .openaiProxy:
             proxy = .defaultOpenAI
-            defaultModel = "gpt-5.4"
+            defaultModel = "gpt-5.5"
         case .anthropicDirect:
             proxy = .defaultAnthropic
             defaultModel = "claude-sonnet-4-6"
+        case .codexProxy:
+            proxy = .defaultCodex
+            defaultModel = ProxyConfiguration.ModelMapping.codexDefault.bigModel.name
         }
 
         let envConfig = proxy.buildEnvConfig(nodeType: nodeType)
@@ -253,6 +256,10 @@ struct ProxySettings: Codable, Equatable {
     var enableHTTPS: Bool?
     var httpsPort: Int?
 
+    /// CodeX 专用：该节点的额外 TOML 顶层键（如 model_reasoning_effort、request_max_retries）。
+    /// 激活时与全局通用配置按顶层键合并（节点键覆盖全局），注入受管理 BASE 块。可选以兼容旧档。
+    var extraTOML: String?
+
     var effectiveHTTPSPort: Int { httpsPort ?? (port + 1) }
 
     static var defaultOpenAI: ProxySettings {
@@ -261,7 +268,7 @@ struct ProxySettings: Codable, Equatable {
             upstreamBaseURL: "https://api.openai.com",
             openAIUpstreamAPI: .chatCompletions,
             upstreamAPIKey: "", expectedClientKey: "",
-            maxOutputTokens: 0, defaultModel: "gpt-5.4",
+            maxOutputTokens: 0, defaultModel: "gpt-5.5",
             modelMapping: .openAIDefault,
             anthropicBaseURL: "https://api.anthropic.com",
             anthropicAPIKey: "", usePassthroughProxy: false,
@@ -285,6 +292,24 @@ struct ProxySettings: Codable, Equatable {
         )
     }
 
+    /// CodeX 节点默认：端口 4319（避开 Claude 默认 8080），单模型存 modelMapping.bigModel，
+    /// 上游走 Responses（CodeX 的 wire_api），不启用 HTTPS（本地 http 即可，CodeX 不信任自签证书）。
+    static var defaultCodex: ProxySettings {
+        ProxySettings(
+            host: "127.0.0.1", port: 4319, allowLAN: false,
+            upstreamBaseURL: "https://api.openai.com",
+            openAIUpstreamAPI: .responses,
+            upstreamAPIKey: "", expectedClientKey: "",
+            maxOutputTokens: 0,
+            defaultModel: ProxyConfiguration.ModelMapping.codexDefault.bigModel.name,
+            modelMapping: .codexDefault,
+            anthropicBaseURL: "https://api.anthropic.com",
+            anthropicAPIKey: "", usePassthroughProxy: false,
+            enableModelAliasMapping: false,
+            enableHTTPS: false, httpsPort: nil
+        )
+    }
+
     init(from config: ProxyConfiguration) {
         host = config.host
         port = config.port
@@ -302,6 +327,7 @@ struct ProxySettings: Codable, Equatable {
         enableModelAliasMapping = config.enableModelAliasMapping
         enableHTTPS = config.enableHTTPS
         httpsPort = config.httpsPort
+        extraTOML = nil
     }
 
     init(
@@ -312,7 +338,8 @@ struct ProxySettings: Codable, Equatable {
         modelMapping: ProxyConfiguration.ModelMapping,
         anthropicBaseURL: String, anthropicAPIKey: String, usePassthroughProxy: Bool,
         enableModelAliasMapping: Bool = false,
-        enableHTTPS: Bool? = nil, httpsPort: Int? = nil
+        enableHTTPS: Bool? = nil, httpsPort: Int? = nil,
+        extraTOML: String? = nil
     ) {
         self.host = host
         self.port = port
@@ -330,6 +357,7 @@ struct ProxySettings: Codable, Equatable {
         self.enableModelAliasMapping = enableModelAliasMapping
         self.enableHTTPS = enableHTTPS
         self.httpsPort = httpsPort
+        self.extraTOML = extraTOML
     }
 
     var bindAddress: String { allowLAN ? "0.0.0.0" : host }
@@ -341,7 +369,9 @@ struct ProxySettings: Codable, Equatable {
     }
 
     func needsProxyProcess(nodeType: NodeType) -> Bool {
-        nodeType == .openaiProxy || (nodeType == .anthropicDirect && usePassthroughProxy)
+        nodeType == .openaiProxy
+            || nodeType == .codexProxy
+            || (nodeType == .anthropicDirect && usePassthroughProxy)
     }
 
     func pricingForModel(_ model: String) -> ProxyConfiguration.ModelPricing? {
@@ -371,6 +401,12 @@ struct ProxySettings: Codable, Equatable {
             let proxyKey = expectedClientKey.isEmpty ? "proxy-key" : expectedClientKey
             return .init(baseURL: displayURL, authToken: proxyKey,
                          defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
+        case .codexProxy:
+            // CodeX 节点不写 ~/.claude/settings.json（改写 ~/.codex/config.toml），
+            // 故此处返回空 env，profile 的 settings 内容对 CodeX 运行时无影响。
+            return .init(baseURL: nil, authToken: nil,
+                         defaultModel: nil, opusModel: nil, sonnetModel: nil, haikuModel: nil,
+                         nodeExtraCACerts: nil)
         }
     }
 

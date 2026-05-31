@@ -612,3 +612,137 @@ scripts/run_claude_proxy_regression.sh
 3. **旧转换器保留**：`ClaudeToOpenAIConverter` / `OpenAIToClaudeConverter` 不再处于生产主链路，但保留为测试参考基线，需注意不要让两套实现漂移。
 
 4. **Canonical 层 v1 范围**：当前 canonical 层覆盖核心共享语义，vendor-specific 能力（如 Claude `cache_control`、`citations`、OpenAI `encrypted_content`）通过 `rawExtensions` 透传而非强类型建模。
+
+---
+
+## CodeX 代理（CodeX Proxy）
+
+让 OpenAI Codex CLI 通过第三方 **OpenAI 兼容上游** 运行，是与 Claude Code 代理平行、相互独立的第二条代理轨道。
+
+```
+Codex CLI ──(OpenAI Responses API)──▶ QuotaServer(PROXY_TARGET=codex) ──(原样转发)──▶ OpenAI 兼容上游
+```
+
+### 设计要点：忠实透传（Phase B）
+
+Codex 的 `wire_api` 恒为 **Responses**。代理对 Codex **完全透明（等价直连）**：不经过 Canonical 改写，原样转发请求体，仅做三件事——
+
+1. 按节点配置把 `model` 映射到上游模型（未配置覆盖则不动）；
+2. 注入上游鉴权（`OPENAI_API_KEY`），剔除会与上游连接/鉴权冲突的入站头；
+3. 转发 Codex 的关键头（`OpenAI-Beta` / `originator` / `session_id` / `conversation_id` / `User-Agent`）。
+
+usage 走**旁路解析**（非流式读响应体顶层 `usage`，流式读 `response.completed` 帧内 `response.usage`），用于复用既有 `PROXY_LOG` 与统计，不改变回传给 Codex 的字节。
+
+> **为什么不做协议转换**：忠实透传最大化兼容 Codex 原生的 `instructions` / `reasoning` / 工具语义（`local_shell`、`apply_patch`、`function`、`custom` 等），避免有损改写。Canonical→Responses 转换层与 chat-completions / 非透传分支已在本阶段裁剪，留待 Phase 2（见下「技术债」）。
+
+### 进程与隔离模型
+
+- 每个 CodeX 节点启动**独立的 QuotaServer 进程**，以环境变量 `PROXY_TARGET=codex` 区分；`main.swift` 中 `PROXY_TARGET=codex` 时启用 CodeX 代理并禁用 Claude 代理，避免端口/语义冲突。
+- CodeX 写 `~/.codex/config.toml`，Claude 写 `~/.claude/settings.json`，**两条轨道互不影响、可同时激活**。
+- 默认端口 **4319**（避开 Claude 默认 8080）；本地 `http`（Codex 不信任自签证书，默认不启用 HTTPS）。
+
+### 配置文件管理（外科式合并）
+
+`CodexConfigManager`（App 侧，`~/.codex/config.toml`）：
+
+- 激活时注入三段**受管理 sentinel 块**（纯字符串处理，不引入 TOML 第三方库）：
+  - **HEADER 块**：顶层 `model` / `model_provider = aiusage-proxy`；
+  - **BASE 块（通用配置基底，可选）**：把「通用配置」`CodexGlobalConfig.tomlText` 与节点 `ProxySettings.extraTOML` 按**顶层键合并**后注入（**节点键覆盖全局同名键 / 同名表头**），顶层 key 与 `[table]` 分别归位，避免重复键报错；
+  - **PROVIDER 块**：`[model_providers.aiusage-proxy]`（`base_url = http://host:port/v1`、`wire_api = "responses"`、`experimental_bearer_token = <clientKey>`）。
+- 注入前会从用户原文里剥离与 BASE 块冲突的顶层键与表段，再按「HEADER → BASE 顶层键 → 清理后的用户正文 → BASE 表段 → PROVIDER」重新组装，保证 TOML 结构合法。
+- **备份即真相源**：激活前把干净原文备份到 `config.toml.aiusage.bak`，保证重复激活幂等；停用整文还原并删除备份。
+- `config.toml` 可能含 token，写入后 `chmod 0600`。
+
+#### 双层配置模型（对齐 Claude Code）
+
+CodeX 与 Claude 一致采用「实时文件 + 受管理片段」双层心智，二者职责严格区分：
+
+- **通用配置基底**（`CodexGlobalConfig`，存 `~/.config/aiusage/codex-global-config.json`，由 `NodeProfileStore` 持久化）：带 `enabled`（Merge 开关）+ 原文 `tomlText`，仅在激活节点/订阅时合并写入 `config.toml`；类比 Claude 的 `GlobalConfig`/`settings.json` 片段。
+- **节点原文 TOML**（`ProxySettings.extraTOML`）：单个 CodeX 节点的额外顶层键，激活时与通用配置合并，**优先级更高**。
+- **`config.toml` 实时文件**：磁盘上真实生效的文件本身（含上面注入的受管理块），只读/编辑入口与上面两层解耦。
+
+### 鉴权链（两段密钥分离）
+
+```
+Codex CLI  ──Bearer <clientKey>──▶  本地代理(校验 expectedClientKey)  ──OPENAI_API_KEY──▶  上游
+```
+
+`clientKey`（即 `effectiveClientKey`，留空回退 `"proxy-key"`）由 `config.toml` 的 `experimental_bearer_token` 下发给 Codex，本地代理据此校验；真实上游密钥仅存在于服务进程环境变量，不下发给 Codex。
+
+### 系统代理 no_proxy 自动修复
+
+Codex（Rust `reqwest`）会读取 macOS 系统代理，且**不尊重** `127.0.0.1` 例外，导致发往本地回环的请求被系统代理拦截回 502（`curl` 不受影响，故曾长期误判为上游问题）。
+
+- `SystemProxyDetector`（`SCDynamicStoreCopyProxies`）检测系统代理是否启用。
+- `CodexNoProxyFixer`：激活 CodeX 节点且**检测到系统代理时**，往 `~/.codex/.env` 写入受管理块 `no_proxy/NO_PROXY = 127.0.0.1,localhost,::1`（Codex 启动会加载该文件）；停用/启动清理时移除还原。
+- **隔离保证**：no_proxy 仅含本地回环，对订阅账号（chatgpt.com）/ 任意外网 API **零影响**（它们照常走系统代理）；只作用于 `~/.codex`，不碰用户 shell 配置。
+- UI 横幅（`SystemProxyWarningBanner`）作轻量信息提示并提供「复制 no_proxy」兜底。
+
+### `/v1/models` 透传
+
+Codex 启动会 `GET /v1/models` 刷新模型列表。代理忠实转发上游结果（`fetchRawModels`），避免 404 噪音。
+
+### 上游瞬时故障重试
+
+第三方中转 / Cloudflare 偶发 5xx。`OpenAICompatibleClient` 对 **500/502/503/504** 自动重试（最多 3 次，退避 0.4s/0.9s）：
+
+- 非流式（`sendRawResponses`）/ 模型列表（`fetchRawModels`）：拿到响应后判定状态码再决定重试。
+- 流式（`streamRawResponses` → `connectStreamWithRetry`）：**在回传任何 SSE 帧之前**完成状态码判定，因此重试对客户端无副作用（此时只发了 200 响应头）。
+
+> SSE 切帧注意：Foundation 的 `AsyncBytes.lines` 会吞掉帧间空行，故除空行外，新的 `event:` 行也作为切帧信号，避免上游多帧被拼成一帧。
+
+### 双轨激活与互斥
+
+- `ProxyViewModel` 用 `activatedConfigId`（Claude）与 `activatedCodexConfigId`（CodeX）**两条独立激活轨道**；`persistActivationSelection(isCodex:)` 只更新本轨道，`isEnabled` 以「任一轨道激活」聚合；互斥仅在**同家族**内（切换 Claude 节点不影响 CodeX，反之亦然）。
+- **代理 ↔ 订阅账号互斥**（都写 `~/.codex`）：激活 CodeX 代理 → `markCodexSubscriptionInactiveForProxy()` 把订阅账号标记为未激活；激活 CodeX 订阅账号（写 `~/.codex/auth.json`）→ 发 `codexSubscriptionAccountActivating` 通知 → `ProxyViewModel` 自动停用正在运行的 CodeX 代理并还原 `config.toml`。
+- **UI 层防双高亮（启动期竞态兜底）**：菜单栏轨道 / 侧边栏订阅区 / 订阅菜单项统一以「代理节点占用 `config.toml`（`activatedId(isCodex:) != nil`）即为生效身份」为准——此时订阅一律渲染为未激活，杜绝两条轨道在 UI 同时高亮。
+
+### 统计与 UI
+
+- `ProxyNodeFamily`（`.claude` / `.codex`）贯穿聚合层：`allLogs` / `modelAggregates` / `overallStats` 等均支持可选 `family` 过滤（缓存键含 family）。
+- 侧边栏新增独立「CodeX 代理」菜单（`CodexProxyManagementView`，基于 `ProxyManagementView(family: .codex)`）；CodeX 菜单隐藏 Claude 的 `GlobalConfigSection` / `settings.json` 入口，确保字段隔离。
+- **统一切换器（订阅账号 + API 节点）**：CodeX 菜单顶部用 `CodexSubscriptionSection` 列出订阅账号（`~/.codex/auth.json`，点击经 `ProviderActivationManager.activateAccount` 激活，自动停用代理节点）；顶部菜单栏 `proxyTrackSwitcher(.codex)` 在同一轨道里同时列「订阅 / API 节点」两段，单一激活态在菜单栏、侧边栏、订阅项三处同步高亮。
+- **配置编辑（双层，置于订阅区上方）**：`CodexGlobalConfigSection` 提供两个解耦入口——
+  - **通用配置卡片**：Merge 开关 + 顶层条目数摘要 + 编辑（`CodexGlobalConfigEditorView`，编辑 `CodexGlobalConfig.tomlText` 原文片段）；
+  - **`config.toml` 实时文件入口**：`CodexConfigEditorView` 查看/编辑磁盘真实文件，含受管理代理块只读提示 + 保存后恢复 0600 权限。
+  - 两个编辑器复用同一套 **TOML 语法高亮**（`TOMLSyntaxTextView` 包 NSTextView + `TOMLHighlighter` 行级词法着色）+ **轻量语法检查**（`TOMLLinter`：段头括号闭合 / 引号成对，宽松不误报跨行数组与多行字符串）。CodeX 家族工具栏不再重复 `config.toml` / `settings.json` 按钮。
+- **节点编辑器原文 TOML 页**：`CodexProxyEditorView` 新增「Advanced · Extra TOML」分节，可视化字段之外直接编辑该节点 `extraTOML`（同样高亮 + 检查），激活时与通用配置合并、节点优先。
+- **订阅行 UX（账号列表）**：区标题为「账号列表」（`CodexSubscriptionSection`）。每行 = 抓手 + 图标 + 主标题(邮箱) + 色彩 plan 徽标（`membershipBadgeTint`：Free/Plus/Pro/Business/Enterprise 统一色板）+ 可编辑备注行（`noteRow` → `AccountNoteEditorView`，取代无意义的 ID 文本）+ 内联用量 pill（`usageWindowPills`：取订阅 OAuth 直连的 ChatGPT 用量窗口剩余百分比，>50% 绿 / >20% 橙 / 其余红）+ 激活开关。激活态行底色/描边用品牌蓝（`codexBrand`），与节点列表一致。
+- **激活开关统一**：订阅行用与节点列表同一套 `ProxyActivationToggleStyle`（开=`activateAccount` 互斥激活、关=`deactivateAccount` 清除激活标记），不再用「激活按钮 + 状态药丸」。plan 映射对齐 openai/codex `KnownPlan`（见下「Plan 映射」）。
+- **拖拽重排（手势驱动「实时让位」）**：节点列表（`ProxyManagementView`，含 Claude/CodeX）与账号列表（`CodexSubscriptionSection`）共用同一套**仅抓手** `DragGesture`（`.global` 坐标系）方案，取代旧的 `onDrag/onDrop` + `DropDelegate`（已删除）。变高行用 `PreferenceKey`（`NodeRowHeightKey` / `SubscriptionRowHeightKey`）实测高度算中心点；被拖行跟手浮起（scale + 阴影 + `zIndex`），其余行按目标条目下标实时平移一个步幅让位；`onEnded` + `defer` 必定复位拖拽态（修复旧实现「松手卡黑」）。落点经 `moveConfiguration(fromId:toIndex:)`（节点，过滤家族后换算全局插入下标）/ `CodexSubscriptionOrderStore.reorder(_:)`（账号，整表持久化到 UserDefaults，菜单栏共用）提交。节点区标题为「节点列表」。
+- 「用量统计」（`StatsHubView`，原「Token 统计」，侧边栏已重命名并下移至「消息」上方；消息与设置同区、上方加分割线）顶部分段在 **本地日志 / 代理实测** 间切换（二者口径重叠，分层展示、绝不相加）；代理统计页在混合家族时显示 全部 / Claude 代理 / CodeX 代理 分段。
+- **新建/复制节点默认排到列表最前**（`NodeProfileStore.save` 对新档取 `min(sortOrder)-1` 并前插，UI 数组同步前插）。
+
+### Plan 映射（ChatGPT / Codex 订阅）
+
+`CodexProvider.planDisplayName(forRaw:)` / `workspaceType(fromPlan:)` 基于 openai/codex `codex-rs/login/src/token_data.rs` 的 `KnownPlan` 解析 JWT `chatgpt_plan_type`，但展示名贴合 ChatGPT 现行命名：
+
+- 个人计划：`free` → Free、`go` → Go、`plus` → Plus、`pro` → Pro（工作区均归 Personal）；
+- 团队/企业/教育：`team` / `business` / `self_serve_business_usage_based` → **Business**（ChatGPT Team 已更名为 Business，旧 `team` 值统一展示为 Business）、`enterprise` / `enterprise_cbp_usage_based` / `hc` → Enterprise、`edu` / `education` → Edu（归对应工作区）；
+- 未知值原样透传。`accountPlan` 统一存展示名，徽标与 `eyebrow` 直接复用。
+
+### 关键文件
+
+| 文件 | 职责 |
+|------|------|
+| `ClaudeProxy/Runtime/CodexProxyConfiguration.swift` | CodeX 代理配置 + 环境变量加载（`PROXY_TARGET=codex`） |
+| `ClaudeProxy/Runtime/CodexProxyService.swift` | `public actor`：鉴权、忠实透传（响应/流式/models）、usage 旁路解析、错误映射 |
+| `QuotaServer/QuotaHTTPServer+CodexProxy.swift` | `/v1/responses`（流式/非流式）+ `/v1/models` 入站处理 |
+| `ClaudeProxy/Runtime/OpenAICompatibleClient.swift` | `sendRawResponses` / `streamRawResponses` / `fetchRawModels` + 瞬时 5xx 重试 |
+| `AIUsage/Models/ProxyConfiguration.swift` | `NodeType.codexProxy`、`ProxyNodeFamily` |
+| `AIUsage/Models/CodexGlobalConfig.swift` | CodeX「通用配置基底」模型（`enabled` + `tomlText`，存 `codex-global-config.json`） |
+| `AIUsage/ViewModels/CodexConfigManager.swift` | `~/.codex/config.toml` 外科式合并（HEADER/BASE/PROVIDER 三段，顶层键合并、节点覆盖全局）+ 备份还原 |
+| `AIUsage/Services/SystemProxyDetector.swift` | 系统代理检测 |
+| `AIUsage/Services/CodexNoProxyFixer.swift` | `~/.codex/.env` no_proxy 受管理块写入/还原 |
+| `AIUsage/Views/CodexProxyManagementView.swift` | CodeX 菜单 + 统一切换器组件（`CodexSubscriptionSection`：账号列表/手势拖拽重排/可编辑备注/用量 pill/统一激活开关 + `CodexGlobalConfigSection` 双层配置卡片）+ `CodexSubscriptionOrderStore`（订阅顺序持久化，菜单栏共用） |
+| `AIUsage/Views/ProxyManagementView.swift` | 节点列表（Claude/CodeX 共用，`family` 过滤）+ 手势拖拽重排（`DragGesture` 实时让位，落点经 `moveConfiguration` 换算全局下标）+ 统计/最近请求展开 |
+| `AIUsage/Views/CodexConfigEditorView.swift` | `config.toml` 实时文件编辑器 + 通用配置片段编辑器（`CodexGlobalConfigEditorView`）+ TOML 语法高亮（`TOMLSyntaxTextView` / `TOMLHighlighter`）+ 语法检查（`TOMLLinter`） |
+| `AIUsage/Views/CodexProxyEditorView.swift` / `SystemProxyWarningBanner.swift` / `StatsHubView.swift` | CodeX 节点编辑器（含「Advanced · Extra TOML」原文页）、系统代理提示、统一统计入口 |
+| `QuotaBackend/.../Providers/CodexProvider.swift` | CodeX usage 抓取 + `planDisplayName`/`workspaceType`（对齐 openai/codex `KnownPlan`） |
+
+### 已知限制 / 技术债（Phase 2）
+
+1. **仅 OpenAI 兼容上游**：当前 Phase B 只闭环 OpenAI 兼容上游的 Responses 忠实透传。**Anthropic 上游 / 仅支持 chat-completions 的上游**接入 CodeX 属 Phase 2——届时需重新引入 Canonical→Responses 转换层（本阶段已裁剪以保持无冗余）。
+2. **`makeUpstreamClientConfiguration()` 复用 `ClaudeProxyConfiguration`** 作为「OpenAI 上游配置」载体（与 Claude 入站无关），是有意的代码复用技术债，Phase 2 抽象上游配置时再拆分。
+3. **`maxOutputTokens` 在忠实透传下不生效**：透传不改写请求体，故节点的「最大输出 Token」字段对 CodeX 当前无强制作用（保留字段供 Phase 2 转换层使用）。
+4. **原生工具受上游能力约束**：若上游不支持 Codex 原生工具类型（`local_shell` / `apply_patch` 等），由上游返回错误，代理忠实回传——属上游限制，非代理问题。

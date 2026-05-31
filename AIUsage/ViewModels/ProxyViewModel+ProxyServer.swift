@@ -7,7 +7,47 @@ extension ProxyViewModel {
     func restoreActivatedNode() {
         Task {
             await restoreActivatedNodeAsync()
+            await restoreActivatedCodexNodeAsync()
             await restoreProxyOnlyNodes()
+        }
+    }
+
+    /// 启动时恢复 CodeX 代理激活态（独立于 Claude 轨道）。
+    private func restoreActivatedCodexNodeAsync() async {
+        let shouldAutoRestore = AppSettings.shared.proxyAutoRestoreOnLaunch
+        let savedId = shouldAutoRestore
+            ? UserDefaults.standard.string(forKey: DefaultsKey.proxyActivatedCodexConfigId)
+            : nil
+
+        guard let id = savedId,
+              let config = configurations.first(where: { $0.id == id }),
+              config.nodeType.isCodex else {
+            activatedCodexConfigId = nil
+            saveActivatedCodexId()
+            // 清理任何残留的受管理 config.toml（仅当确实由我们注入时才会动作）。
+            if runtimeService.isCodexConfigManaged() {
+                do {
+                    try runtimeService.clearCodexRuntime()
+                } catch {
+                    proxyRuntimeLog.error("Failed to clear CodeX runtime while restoring empty activation state: \(String(describing: error), privacy: .public)")
+                }
+            }
+            return
+        }
+
+        proxyRuntimeLog.info("Restoring CodeX node \(config.name, privacy: .public)")
+        do {
+            try await activateRuntime(for: config)
+            try persistActivationSelection(config.id, touchLastUsedAt: false, isCodex: true)
+        } catch {
+            proxyRuntimeLog.error("Failed to restore CodeX node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
+            activatedCodexConfigId = nil
+            saveActivatedCodexId()
+            do {
+                try runtimeService.clearCodexRuntime()
+            } catch {
+                proxyRuntimeLog.error("Failed to clear CodeX runtime after restore failure: \(String(describing: error), privacy: .public)")
+            }
         }
     }
 
@@ -59,7 +99,7 @@ extension ProxyViewModel {
 
         do {
             try await activateRuntime(for: config)
-            try persistActivationSelection(config.id, touchLastUsedAt: false)
+            try persistActivationSelection(config.id, touchLastUsedAt: false, isCodex: false)
         } catch {
             proxyRuntimeLog.error("Failed to restore proxy node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
             activatedConfigId = nil
@@ -88,6 +128,20 @@ extension ProxyViewModel {
     }
 
     func activateRuntime(for config: ProxyConfiguration) async throws {
+        if config.nodeType.isCodex {
+            // 通用配置基底（启用时）+ 节点额外 TOML，交由 CodexConfigManager 按顶层键合并注入。
+            let globalTOML = profileStore.codexGlobalConfig.hasContent
+                ? profileStore.codexGlobalConfig.tomlText
+                : nil
+            let nodeTOML = profileStore.profile(for: config.id)?.metadata.proxy.extraTOML?.nilIfBlank
+            try await runtimeService.activateCodexRuntime(
+                for: config,
+                globalTOML: globalTOML,
+                nodeTOML: nodeTOML
+            )
+            return
+        }
+
         if let profile = profileStore.profile(for: config.id) {
             let finalSettings: [String: Any]
             if profileStore.globalConfig.enabled {
@@ -121,6 +175,11 @@ extension ProxyViewModel {
     }
 
     func deactivateRuntime(for config: ProxyConfiguration) async throws {
+        if config.nodeType.isCodex {
+            try await runtimeService.deactivateCodexRuntime(for: config)
+            return
+        }
+
         if let profile = profileStore.profile(for: config.id) {
             try await runtimeService.deactivateRuntime(
                 for: config,
@@ -179,6 +238,7 @@ extension ProxyViewModel {
         }
 
         let config = configurations.first { $0.id == configId }
+        let requestPath = config?.nodeType.isCodex == true ? "/v1/responses" : "/v1/messages"
         let pricing = config?.pricingForModel(upstreamModel)
         let estimatedCost = pricing?.costForTokens(
             input: tokensInput,
@@ -190,7 +250,7 @@ extension ProxyViewModel {
         let log = ProxyRequestLog(
             configId: configId,
             method: "POST",
-            path: "/v1/messages",
+            path: requestPath,
             claudeModel: json["claude_model"] as? String ?? "unknown",
             upstreamModel: upstreamModel,
             success: json["success"] as? Bool ?? false,

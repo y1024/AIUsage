@@ -20,6 +20,8 @@ struct MenuBarView: View {
             Divider()
             summaryStatsRow
             Divider()
+            proxyTracksRow
+            Divider()
             menuBarContent
             costTrackingSection
             Divider()
@@ -106,8 +108,6 @@ struct MenuBarView: View {
         let totalAccounts = groups.reduce(0) { $0 + $1.accounts.count }
         let connectedAccounts = groups.reduce(0) { $0 + $1.connectedCount }
 
-        let activeNode = proxyVM.configurations.first { $0.id == proxyVM.activatedConfigId }
-
         let accountIconColor: Color = connectedAccounts == totalAccounts && totalAccounts > 0
             ? Color(red: 0.15, green: 0.78, blue: 0.40)
             : connectedAccounts > 0 ? .orange : .secondary
@@ -125,11 +125,6 @@ struct MenuBarView: View {
 
             summaryStatDivider
 
-            proxyNodeSwitcher(activeNode: activeNode)
-                .frame(maxWidth: .infinity)
-
-            summaryStatDivider
-
             statsSummaryCell()
                 .frame(maxWidth: .infinity)
         }
@@ -137,64 +132,117 @@ struct MenuBarView: View {
         .padding(.vertical, 10)
     }
 
-    private func proxyNodeSwitcher(activeNode: ProxyConfiguration?) -> some View {
-        Menu {
-            if proxyVM.configurations.isEmpty {
+    // MARK: - Proxy Tracks Row (Claude Code / CodeX 两条独立轨道)
+
+    /// 顶部两条互相独立的代理轨道：Claude Code（写 ~/.claude/settings.json）与
+    /// CodeX（写 ~/.codex/config.toml）。二者可同时激活，各自显示激活节点并提供停止按钮。
+    private var proxyTracksRow: some View {
+        HStack(spacing: 0) {
+            proxyTrackSwitcher(family: .claude)
+                .frame(maxWidth: .infinity)
+
+            summaryStatDivider
+
+            proxyTrackSwitcher(family: .codex)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private func proxyTrackSwitcher(family: ProxyNodeFamily) -> some View {
+        let activeId = proxyVM.activatedId(isCodex: family.isCodex)
+        let activeNode = proxyVM.configurations.first { $0.id == activeId }
+        let familyNodes = proxyVM.configurations.filter { family.contains($0.nodeType) }
+        let title = family.isCodex ? "CodeX" : "Claude Code"
+        let brandAsset = family.isCodex ? "codex" : "claude"
+        let accent: Color = family.isCodex
+            ? Color(red: 0.40, green: 0.52, blue: 0.92)
+            : Color(red: 0.85, green: 0.45, blue: 0.25)
+
+        // CodeX 统一切换器：订阅账号（auth.json）与 API 节点（config.toml）单一互斥激活。
+        // 订阅顺序沿用代理页的自定义拖拽排序，保持两处一致。
+        let subEntries: [ProviderAccountEntry] = family.isCodex
+            ? CodexSubscriptionOrderStore.shared.ordered(
+                appState.providerAccountGroups.first { $0.providerId == "codex" }?.accounts ?? [])
+            : []
+        // 单一激活：代理节点占用 config.toml 时即为生效身份，订阅不再视为 active（防启动期竞态双高亮）。
+        let activeSub = activeNode == nil
+            ? subEntries.first { ProviderActivationManager.shared.isActiveAccount($0) }
+            : nil
+        let isOn = activeNode != nil || activeSub != nil
+        let activeLabel = activeNode?.name
+            ?? activeSub?.accountPrimaryLabel
+            ?? L("Off", "未启用")
+
+        return Menu {
+            if family.isCodex {
+                if subEntries.isEmpty && familyNodes.isEmpty {
+                    Text(L("No CodeX accounts or nodes", "暂无 CodeX 账号或节点"))
+                }
+                if !subEntries.isEmpty {
+                    Section(L("Subscription", "订阅账号")) {
+                        ForEach(subEntries, id: \.id) { codexSubscriptionMenuItem($0) }
+                    }
+                }
+                if !familyNodes.isEmpty {
+                    Section(L("API Nodes", "API 节点")) {
+                        ForEach(familyNodes) { proxyNodeMenuItem($0) }
+                    }
+                }
+            } else if familyNodes.isEmpty {
                 Text(L("No proxy nodes", "暂无代理节点"))
             } else {
-                let anthropicNodes = proxyVM.configurations.filter { $0.nodeType == .anthropicDirect }
-                let openaiNodes = proxyVM.configurations.filter { $0.nodeType == .openaiProxy }
-
+                let anthropicNodes = familyNodes.filter { $0.nodeType == .anthropicDirect }
+                let openaiNodes = familyNodes.filter { $0.nodeType == .openaiProxy }
                 if !anthropicNodes.isEmpty {
                     Section("Anthropic") {
-                        ForEach(anthropicNodes) { config in
-                            proxyNodeMenuItem(config)
-                        }
+                        ForEach(anthropicNodes) { proxyNodeMenuItem($0) }
                     }
                 }
-
                 if !openaiNodes.isEmpty {
                     Section("OpenAI") {
-                        ForEach(openaiNodes) { config in
-                            proxyNodeMenuItem(config)
-                        }
+                        ForEach(openaiNodes) { proxyNodeMenuItem($0) }
                     }
                 }
+            }
 
+            if isOn {
                 Divider()
-
+                // 停止仅作用于 API 代理节点；订阅账号无「关闭」语义（切到别的账号即可）。
                 Button {
-                    if let activeId = proxyVM.activatedConfigId {
+                    if let activeId {
                         Task { await proxyVM.deactivateConfiguration(activeId) }
                     }
                 } label: {
-                    Label(L("Stop Proxy", "停止代理"), systemImage: "stop.circle")
+                    Label(L("Stop proxy node", "停止代理节点"), systemImage: "stop.circle")
                 }
-                .disabled(proxyVM.activatedConfigId == nil)
+                .disabled(activeId == nil)
             }
         } label: {
-            VStack(spacing: 3) {
-                HStack(spacing: 5) {
-                    Image(systemName: activeNode != nil ? "bolt.circle.fill" : "bolt.slash.circle")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(activeNode != nil ? Color(red: 0.20, green: 0.84, blue: 0.42) : .gray)
-                        .shadow(color: activeNode != nil ? Color.green.opacity(0.4) : .clear, radius: 3)
-                    Text(activeNode?.name ?? L("Off", "未启用"))
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(activeNode != nil ? Color(red: 0.20, green: 0.84, blue: 0.42) : .secondary)
+            VStack(spacing: 2) {
+                HStack(spacing: 4) {
+                    ProviderIconView(brandAsset, size: 13)
+                        .opacity(isOn ? 1.0 : 0.5)
+                        .overlay(alignment: .bottomTrailing) {
+                            if isOn {
+                                Circle()
+                                    .fill(Color(red: 0.20, green: 0.84, blue: 0.42))
+                                    .frame(width: 5, height: 5)
+                            }
+                        }
+                    Text(title)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(isOn ? accent : .secondary)
                         .lineLimit(1)
-                        .truncationMode(.tail)
-                        .minimumScaleFactor(0.7)
+                        .minimumScaleFactor(0.8)
                 }
-                if let node = activeNode {
-                    Text(proxyNodeTypeLabel(node))
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(proxyNodeTypeColor(node))
-                } else {
-                    Text(L("Proxy", "代理"))
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
+                Text(activeLabel)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(isOn ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.7)
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -203,9 +251,25 @@ struct MenuBarView: View {
         .menuIndicator(.hidden)
     }
 
+    /// CodeX 订阅账号菜单项：点击激活（写 auth.json，自动停用代理节点），已激活打勾。
+    @ViewBuilder
+    private func codexSubscriptionMenuItem(_ entry: ProviderAccountEntry) -> some View {
+        let proxyActive = proxyVM.activatedId(isCodex: true) != nil
+        let isActive = !proxyActive && ProviderActivationManager.shared.isActiveAccount(entry)
+        Button {
+            try? ProviderActivationManager.shared.activateAccount(entry: entry)
+        } label: {
+            if isActive {
+                Label(entry.accountPrimaryLabel, systemImage: "checkmark")
+            } else {
+                Text(entry.accountPrimaryLabel)
+            }
+        }
+    }
+
     @ViewBuilder
     private func proxyNodeMenuItem(_ config: ProxyConfiguration) -> some View {
-        let isActive = config.id == proxyVM.activatedConfigId
+        let isActive = proxyVM.isNodeActivated(config.id)
         Button {
             Task { await proxyVM.toggleActivation(config.id) }
         } label: {
@@ -214,31 +278,6 @@ struct MenuBarView: View {
             } icon: {
                 Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
             }
-        }
-    }
-
-    private func proxyNodeTypeLabel(_ config: ProxyConfiguration) -> String {
-        switch config.nodeType {
-        case .anthropicDirect:
-            return config.usePassthroughProxy ? "Anthropic Proxy" : "Anthropic Direct"
-        case .openaiProxy:
-            return "OpenAI Proxy"
-        }
-    }
-
-    private func proxyNodeIcon(_ config: ProxyConfiguration) -> String {
-        switch config.nodeType {
-        case .anthropicDirect:
-            return config.usePassthroughProxy ? "bolt.shield.fill" : "bolt.horizontal.fill"
-        case .openaiProxy:
-            return "arrow.triangle.swap"
-        }
-    }
-
-    private func proxyNodeTypeColor(_ config: ProxyConfiguration) -> Color {
-        switch config.nodeType {
-        case .anthropicDirect: return Color(red: 0.85, green: 0.45, blue: 0.25)
-        case .openaiProxy: return Color(red: 0.40, green: 0.78, blue: 0.55)
         }
     }
 

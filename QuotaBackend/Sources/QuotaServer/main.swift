@@ -30,8 +30,10 @@ let port = Int(args["port"] ?? "4318") ?? 4318
 
 startupLog.info("QuotaServer starting on \(host):\(port)")
 
-// Load proxy configuration from environment
-let proxyConfig = ClaudeProxyConfiguration.loadFromEnvironment()
+// Load proxy configuration from environment.
+// PROXY_TARGET=codex 时启用 CodeX 代理（/v1/responses），并禁用 Claude 代理以避免端口/语义冲突。
+let codexConfig = CodexProxyConfiguration.loadFromEnvironment()
+let proxyConfig = codexConfig == nil ? ClaudeProxyConfiguration.loadFromEnvironment() : nil
 
 if let cfg = proxyConfig {
     let modeStr = cfg.mode == .anthropicPassthrough ? "passthrough" : "openai-convert"
@@ -39,6 +41,12 @@ if let cfg = proxyConfig {
     startupLog.info("Claude Code Proxy: enabled (mode=\(modeStr), upstream_api=\(apiStr), upstream=\(cfg.upstreamBaseURL, privacy: .private))")
 } else {
     startupLog.info("Claude Code Proxy: disabled")
+}
+
+if let codexCfg = codexConfig {
+    startupLog.info("CodeX Proxy: enabled (upstream_api=\(codexCfg.openAIUpstreamAPI.rawValue), upstream=\(codexCfg.upstreamBaseURL, privacy: .private))")
+} else {
+    startupLog.info("CodeX Proxy: disabled")
 }
 
 var httpsConfig: HTTPSConfig?
@@ -49,7 +57,7 @@ if ProcessInfo.processInfo.environment["ENABLE_HTTPS"] == "1",
     startupLog.info("HTTPS: enabled on port \(httpsPort)")
 }
 
-let server = QuotaHTTPServer(host: host, port: port, proxyConfig: proxyConfig, httpsConfig: httpsConfig)
+let server = QuotaHTTPServer(host: host, port: port, proxyConfig: proxyConfig, codexConfig: codexConfig, httpsConfig: httpsConfig)
 try await server.run()
 
 private func parseArgs() -> [String: String] {

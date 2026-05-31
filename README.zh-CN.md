@@ -43,7 +43,7 @@
 - [功能](#功能)
 - [界面预览](#界面预览)
 - [安装](#安装)
-- [Claude Code 代理](#claude-code-代理)
+- [代理](#代理)
 - [致谢](#致谢)
 - [赞助商](#赞助商)
 - [支持作者](#支持作者)
@@ -55,9 +55,9 @@
 | --- | --- |
 | **10+ AI 服务商** | Codex、Copilot、Cursor、Antigravity、Kiro、Warp、Gemini CLI、Amp、Droid、Claude Code — 一个看板搞定 |
 | **多账号管理** | 同一服务商多个账号独立刷新，一键切换 CLI 活跃账号 |
-| **Token 统计** | 同时统计 Claude Code 与 Codex 本地会话日志：按模型拆分费用与 Token，趋势曲线、多时段分析，可按单一来源或「综合」聚合查看 |
+| **用量统计** | 统一汇总**本地日志**（Claude Code / Codex 会话）与**代理日志**：按模型拆分费用与 Token，趋势曲线、多时段分析，可按单一来源或「综合」聚合查看 |
 | **Claude Code 代理** | 用 Claude Code 跑 DeepSeek、GPT、Ollama 等任意 OpenAI 兼容模型；Anthropic 透传模式记录用量 |
-| **代理统计** | 按模型的费用/Token 趋势、分布图，可配置日志保留天数 |
+| **CodeX 代理** | 把 Codex CLI 指向任意 OpenAI 兼容上游；订阅账号与 API 节点统一切换器，外科式合并 `config.toml` |
 | **菜单栏快览** | 多账号状态栏图标 + 配额/费用指标，快览弹窗含摘要统计、彩色进度条、费用追踪 |
 | **凭证保险库** | macOS Keychain 安全存储 |
 
@@ -73,28 +73,26 @@
     <td align="center"><strong>服务商与多账号监控</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/claude-code-stats.png" alt="Token 统计"></td>
-    <td width="50%"><img src="docs/images/codex-account-detail.png" alt="账号详情"></td>
+    <td width="50%"><img src="docs/images/Claude-Code-Proxy-1.png" alt="Claude Code 代理节点管理"></td>
+    <td width="50%"><img src="docs/images/Claude-Code-Proxy-2.png" alt="Claude Code 代理配置"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Token 统计（Claude 与 Codex）</strong></td>
-    <td align="center"><strong>账号详情</strong></td>
+    <td align="center"><strong>Claude Code 代理 · 节点管理</strong></td>
+    <td align="center"><strong>Claude Code 代理 · 配置</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/Claude-Code-Proxy-1.png" alt="代理管理"></td>
-    <td width="50%"><img src="docs/images/Claude-Code-Proxy-2.png" alt="代理配置"></td>
+    <td width="50%"><img src="docs/images/Codex-Proxy-stats.png" alt="CodeX 代理"></td>
+    <td width="50%"><img src="docs/images/proxy-stats.png" alt="用量统计"></td>
   </tr>
   <tr>
-    <td align="center"><strong>代理节点管理</strong></td>
-    <td align="center"><strong>代理配置</strong></td>
+    <td align="center"><strong>CodeX 代理 · 节点与订阅</strong></td>
+    <td align="center"><strong>用量统计（Claude 与 Codex）</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/proxy-stats.png" alt="代理统计"></td>
-    <td width="50%"><img src="docs/images/menu_bar.png" alt="菜单栏"></td>
+    <td colspan="2" align="center"><img src="docs/images/menu_bar.png" alt="菜单栏" width="50%"></td>
   </tr>
   <tr>
-    <td align="center"><strong>代理统计</strong></td>
-    <td align="center"><strong>菜单栏</strong></td>
+    <td colspan="2" align="center"><strong>菜单栏</strong></td>
   </tr>
 </table>
 
@@ -102,7 +100,11 @@
 
 从 [Releases](https://github.com/sylearn/AIUsage/releases) 页面下载 `.dmg` 或 `.zip`。
 
-## Claude Code 代理
+## 代理
+
+AIUsage 内置两套相互独立的代理 —— 分别面向 **Claude Code** 与 **CodeX（Codex CLI）**，各自支持节点管理、用量记录与统一切换器。
+
+### Claude Code 代理
 
 将 Claude Code CLI 接入任意 OpenAI 兼容模型，或透明记录 Anthropic API 用量。
 
@@ -112,6 +114,18 @@
 | **Anthropic 透传** | 请求原样转发，记录输入/输出/缓存 Token，精确追踪费用 |
 
 **快速开始：** 打开 AIUsage → Claude Code 代理 → 新建节点 → 配置 → 激活。`~/.claude/settings.json` 自动更新。
+
+### CodeX 代理
+
+把 Codex CLI 指向任意 OpenAI 兼容上游（Responses API），并在**订阅账号**与 **API 节点**之间一处切换 —— 两者互斥，任意时刻只有一个身份生效。
+
+| 能力 | 说明 |
+|------|------|
+| **OpenAI 兼容上游** | 让 Codex CLI 走任意 `responses` 兼容端点 |
+| **统一切换器** | 订阅账号（`~/.codex/auth.json`）与 API 节点（`config.toml`）一个开关统一切换 |
+| **外科式合并** | 向 `~/.codex/config.toml` 注入受管理块、保留你的原有配置；通用配置片段 + 节点级 TOML 覆盖 |
+
+**快速开始：** 打开 AIUsage → CodeX 代理 → 新建节点（或选择订阅账号）→ 配置 → 激活。`~/.codex/config.toml` 自动合并。
 
 ---
 

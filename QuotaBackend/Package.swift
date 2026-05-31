@@ -27,6 +27,7 @@ let package = Package(
             exclude: [
                 "QuotaHTTPServer.swift",
                 "QuotaHTTPServer+ClaudeProxy.swift",
+                "QuotaHTTPServer+CodexProxy.swift",
                 "QuotaHTTPServer+Passthrough.swift",
                 "QuotaHTTPServer+TLS.swift",
             ],

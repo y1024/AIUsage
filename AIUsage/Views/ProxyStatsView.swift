@@ -10,6 +10,7 @@ struct ProxyStatsView: View {
     @AppStorage(DefaultsKey.proxyStatsMetric) private var metric: StatMetric = .cost
     @AppStorage(DefaultsKey.proxyStatsChartRange) private var chartTimeRange: ChartTimeRange = .today
     @AppStorage(DefaultsKey.proxyStatsDistributionMetric) private var distributionMetric: StatMetric = .cost
+    @AppStorage(DefaultsKey.proxyStatsFamily) private var familyRaw: String = FamilyFilter.all.rawValue
     @State private var contentWidth: CGFloat = 0
     @State private var expandedModels: Set<String> = []
     @State private var distributionPeriod: DistributionPeriod = .all
@@ -18,17 +19,50 @@ struct ProxyStatsView: View {
 
     enum DistributionPeriod: String, CaseIterable { case today, week, month, all }
 
+    /// 代理实测的家族过滤：全部 / Claude 代理 / CodeX 代理。
+    enum FamilyFilter: String, CaseIterable {
+        case all, claude, codex
+
+        var scope: ProxyNodeFamily? {
+            switch self {
+            case .all: return nil
+            case .claude: return .claude
+            case .codex: return .codex
+            }
+        }
+    }
+
+    private var familyFilter: FamilyFilter { FamilyFilter(rawValue: familyRaw) ?? .all }
+    private var familyBinding: Binding<FamilyFilter> {
+        Binding(get: { familyFilter }, set: { familyRaw = $0.rawValue })
+    }
+    private var selectedFamily: ProxyNodeFamily? { familyFilter.scope }
+
+    /// 当前家族下可见的节点（家族=全部时为所有节点）。
+    private var familyNodes: [ProxyConfiguration] {
+        guard let scope = selectedFamily else { return viewModel.configurations }
+        return viewModel.configurations.filter { scope.contains($0.nodeType) }
+    }
+
+    /// 是否同时存在 Claude 与 CodeX 两类节点；只有混合时才展示家族切换控件。
+    private var hasMixedFamilies: Bool {
+        let hasCodex = viewModel.configurations.contains { $0.nodeType.isCodex }
+        let hasClaude = viewModel.configurations.contains { !$0.nodeType.isCodex }
+        return hasCodex && hasClaude
+    }
+
     private var nodeBinding: Binding<String> {
         Binding(get: { selectedNodeIdRaw }, set: { selectedNodeIdRaw = $0 })
     }
     private var selectedNodeId: String? { selectedNodeIdRaw.isEmpty ? nil : selectedNodeIdRaw }
     private func validateSelections() {
+        // 节点选择必须落在当前家族内；否则回退到「家族内全部」。
         if !selectedNodeIdRaw.isEmpty,
-           !viewModel.configurations.contains(where: { $0.id == selectedNodeIdRaw }) {
+           !familyNodes.contains(where: { $0.id == selectedNodeIdRaw }) {
             selectedNodeIdRaw = ""
         }
         selectedModels = selectedModels.filter {
-            viewModel.allUpstreamModels(nodeFilter: selectedNodeId).contains($0)
+            viewModel.allUpstreamModels(nodeFilter: selectedNodeId, family: selectedFamily).contains($0)
         }
     }
 
@@ -76,6 +110,10 @@ struct ProxyStatsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { validateSelections() }
         .onChange(of: selectedNodeIdRaw) { _, _ in validateSelections() }
+        .onChange(of: familyRaw) { _, _ in
+            chartHoverDate = nil
+            validateSelections()
+        }
         .onPreferenceChange(ProxyStatsContentWidthPreferenceKey.self) { newWidth in
             // Threshold avoids rebuilding the whole body on sub-pixel width jitter during scroll
             // or expand/collapse. 8pt is well below the 1080pt breakpoint used by usesStackedInsightsLayout.
@@ -95,8 +133,8 @@ struct ProxyStatsView: View {
             Text(L("No proxy nodes configured", "尚未配置代理节点"))
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
-            Text(L("Add a proxy node in Claude Code Proxy to start tracking usage.",
-                   "在 Claude Code 代理中添加节点后即可开始统计用量。"))
+            Text(L("Add a node in Claude Code Proxy or CodeX Proxy to start tracking usage.",
+                   "在 Claude Code 代理或 CodeX 代理中添加节点后即可开始统计用量。"))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -110,17 +148,26 @@ struct ProxyStatsView: View {
             Text(L("Proxy Stats", "代理统计"))
                 .font(.title2.weight(.bold))
             Spacer()
+            if hasMixedFamilies {
+                Picker("", selection: familyBinding) {
+                    Text(L("All", "全部")).tag(FamilyFilter.all)
+                    Text(L("Claude Proxy", "Claude 代理")).tag(FamilyFilter.claude)
+                    Text(L("CodeX Proxy", "CodeX 代理")).tag(FamilyFilter.codex)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
         }
     }
 
     // MARK: - Summary
 
     private var stats: ProxyViewModel.OverallStats {
-        viewModel.overallStats(nodeFilter: selectedNodeId, modelFilter: nil)
+        viewModel.overallStats(nodeFilter: selectedNodeId, modelFilter: nil, family: selectedFamily)
     }
 
     private var dateRange: (earliest: Date?, latest: Date?, days: Int) {
-        viewModel.dataDateRange(nodeFilter: selectedNodeId, modelFilter: nil)
+        viewModel.dataDateRange(nodeFilter: selectedNodeId, modelFilter: nil, family: selectedFamily)
     }
 
     private static let bannerDateFormatter: DateFormatter = {
@@ -177,7 +224,7 @@ struct ProxyStatsView: View {
                 summaryCell(icon: "checkmark.seal.fill", title: L("Success Rate", "成功率"),
                             value: String(format: "%.1f%%", s.successRate), tint: .green)
                 summaryCell(icon: "cpu", title: L("Models", "模型数"),
-                            value: "\(viewModel.modelAggregates(nodeFilter: selectedNodeId, modelFilter: nil).count)",
+                            value: "\(viewModel.modelAggregates(nodeFilter: selectedNodeId, modelFilter: nil, family: selectedFamily).count)",
                             tint: .pink)
             }
             dataRangeBanner
@@ -211,7 +258,7 @@ struct ProxyStatsView: View {
     // MARK: - Trend Chart
 
     private var modelTimeSeries: [ProxyViewModel.ModelTimePoint] {
-        let all = viewModel.modelTimeSeries(nodeFilter: selectedNodeId, granularity: granularity == .hourly ? "hourly" : "daily")
+        let all = viewModel.modelTimeSeries(nodeFilter: selectedNodeId, granularity: granularity == .hourly ? "hourly" : "daily", family: selectedFamily)
         guard let start = chartTimeRange.startDate() else { return all }
         return all.filter { $0.date >= start }
     }
@@ -307,10 +354,10 @@ struct ProxyStatsView: View {
 
                 Spacer()
 
-                if viewModel.configurations.count > 1 {
+                if familyNodes.count > 1 {
                     Picker(L("Node", "节点"), selection: nodeBinding) {
                         Text(L("All Nodes", "全部节点")).tag("")
-                        ForEach(viewModel.configurations, id: \.id) { config in
+                        ForEach(familyNodes, id: \.id) { config in
                             Text(config.name).tag(config.id)
                         }
                     }
@@ -392,7 +439,7 @@ struct ProxyStatsView: View {
     }
 
     private var filteredModelData: [ProxyViewModel.ModelAggregate] {
-        viewModel.modelAggregates(nodeFilter: selectedNodeId, modelFilter: nil, since: distributionSinceDate)
+        viewModel.modelAggregates(nodeFilter: selectedNodeId, modelFilter: nil, since: distributionSinceDate, family: selectedFamily)
     }
 
     private var modelData: [ProxyViewModel.ModelAggregate] {

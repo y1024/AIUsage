@@ -38,6 +38,19 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .about: return "info.circle"
         }
     }
+
+    // 品牌化强调色：未选中时图标用各自的色，选中时转白底色。
+    var color: Color {
+        switch self {
+        case .general: return .gray
+        case .dataRefresh: return .blue
+        case .menuBar: return .indigo
+        case .cardAppearance: return .teal
+        case .proxy: return .orange
+        case .notifications: return .red
+        case .about: return .gray
+        }
+    }
 }
 
 // MARK: - Settings View
@@ -240,7 +253,7 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Image(systemName: category.icon)
                     .font(.system(size: 13))
-                    .foregroundStyle(selectedCategory == category ? .white : .secondary)
+                    .foregroundStyle(selectedCategory == category ? .white : category.color)
                     .frame(width: 20)
 
                 Text(category.title)
