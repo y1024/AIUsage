@@ -256,27 +256,6 @@
 /* Views/ProviderAccountEditorView+Actions.swift */
 "AIUsage/Views/ProviderAccountEditorView+Actions.swift::Still waiting. Click login again to retry." = "仍在等待，再次点击登录重试。";
 
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::Completing Codex login…" = "正在完成 Codex 登录…";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::Copy Link" = "复制链接";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::If nothing appears in a moment, use the button above to open the page in your browser." = "如果稍后仍未出现，请使用上方按钮在浏览器中打开登录页。";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::Open in Browser" = "浏览器打开";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::OpenAI Sign-In" = "OpenAI 登录";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::Preparing the official login page…" = "正在准备官方登录页面…";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::You can return to AIUsage now. The account will connect automatically after Codex finishes." = "现在可以回到 AIUsage。Codex 完成收尾后，账号会自动接入。";
-
 /* Views/ProviderAccountEditorView+Sections.swift */
 "AIUsage/Views/ProviderAccountEditorView+Sections.swift::AIUsage found local login state for this provider. Connect one of the sessions below directly." = "AIUsage 检测到了这个服务商的本地登录状态。你可以直接连接下面的会话。";
 
@@ -287,7 +266,7 @@
 "AIUsage/Views/ProviderAccountEditorView+Sections.swift::Cancel Login" = "取消登录";
 
 /* Views/ProviderAccountEditorView+Sections.swift */
-"AIUsage/Views/ProviderAccountEditorView+Sections.swift::Complete sign-in below" = "请在下方完成登录";
+"AIUsage/Views/ProviderAccountEditorView+Sections.swift::Complete sign-in in your browser" = "请在浏览器中完成登录";
 
 /* Views/ProviderAccountEditorView+Sections.swift */
 "AIUsage/Views/ProviderAccountEditorView+Sections.swift::Connect" = "连接";

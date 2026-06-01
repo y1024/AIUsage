@@ -62,13 +62,12 @@ struct ProviderAccountEditorView: View {
     }
 
     var editorWidth: CGFloat {
-        showsCodexBrowser ? 880 : 520
+        520
     }
 
     var editorHeight: CGFloat {
-        if showsCodexBrowser { return 580 }
         if showsCopilotLogin || showsKiroLogin { return 440 }
-        if showsGeminiLogin || showsAntigravityLogin { return 360 }
+        if showsGeminiLogin || showsAntigravityLogin || showsCodexBrowser { return 360 }
 
         let visibleCandidateCount = candidates.count
         let detectedSessionExtra = CGFloat(min(visibleCandidateCount, 3)) * 86

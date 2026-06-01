@@ -256,27 +256,6 @@
 /* Views/ProviderAccountEditorView+Actions.swift */
 "AIUsage/Views/ProviderAccountEditorView+Actions.swift::Still waiting. Click login again to retry." = "Still waiting. Click login again to retry.";
 
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::Completing Codex login…" = "Completing Codex login…";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::Copy Link" = "Copy Link";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::If nothing appears in a moment, use the button above to open the page in your browser." = "If nothing appears in a moment, use the button above to open the page in your browser.";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::Open in Browser" = "Open in Browser";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::OpenAI Sign-In" = "OpenAI Sign-In";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::Preparing the official login page…" = "Preparing the official login page…";
-
-/* Views/ProviderAccountEditorView+CodexOAuth.swift */
-"AIUsage/Views/ProviderAccountEditorView+CodexOAuth.swift::You can return to AIUsage now. The account will connect automatically after Codex finishes." = "You can return to AIUsage now. The account will connect automatically after Codex finishes.";
-
 /* Views/ProviderAccountEditorView+Sections.swift */
 "AIUsage/Views/ProviderAccountEditorView+Sections.swift::AIUsage found local login state for this provider. Connect one of the sessions below directly." = "AIUsage found local login state for this provider. Connect one of the sessions below directly.";
 
@@ -287,7 +266,7 @@
 "AIUsage/Views/ProviderAccountEditorView+Sections.swift::Cancel Login" = "Cancel Login";
 
 /* Views/ProviderAccountEditorView+Sections.swift */
-"AIUsage/Views/ProviderAccountEditorView+Sections.swift::Complete sign-in below" = "Complete sign-in below";
+"AIUsage/Views/ProviderAccountEditorView+Sections.swift::Complete sign-in in your browser" = "Complete sign-in in your browser";
 
 /* Views/ProviderAccountEditorView+Sections.swift */
 "AIUsage/Views/ProviderAccountEditorView+Sections.swift::Connect" = "Connect";

@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import QuotaBackend
@@ -12,19 +13,11 @@ private final class WeakCodexCoordinatorBox: @unchecked Sendable {
 
 @MainActor
 final class CodexLoginCoordinator: ObservableObject {
-    enum Phase: Equatable {
-        case idle
-        case launching
-        case waitingForBrowser
-        case waitingForCompletion
-        case succeeded
-        case failed(String)
-    }
-
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: LoginPhase = .idle
     @Published private(set) var authURL: URL?
     @Published private(set) var callbackURL: URL?
-    @Published private(set) var outputSummary: String?
+    // 仅内部记录人类可读进度，UI 不直接展示；保持普通存储属性避免无谓的视图重渲染。
+    private var outputSummary: String?
     @Published private(set) var importedAuthFileURL: URL?
 
     private var process: Process?
@@ -165,10 +158,13 @@ final class CodexLoginCoordinator: ObservableObject {
             authURL = Self.firstURL(in: sanitized, matchingHost: "auth.openai.com")
         }
 
-        if authURL != nil {
+        if let authURL {
             if !didSeeAuthURL {
                 phase = .waitingForBrowser
                 didSeeAuthURL = true
+                // 拿到官方登录链接立即弹系统浏览器，行为与其它服务商一致，
+                // 不再依赖 codex CLI 自身的自动打开（在部分机器上会失败）。
+                NSWorkspace.shared.open(authURL)
             } else {
                 phase = .waitingForCompletion
             }
@@ -179,14 +175,9 @@ final class CodexLoginCoordinator: ObservableObject {
         }
     }
 
-    func noteBrowserNavigation(_ url: URL) {
-        callbackURL = url
-
-        guard Self.isSuccessfulCallbackURL(url) else { return }
-
-        phase = .waitingForCompletion
-        outputSummary = "Codex login approved. Finalizing account…"
-        beginWaitingForAuthFile()
+    func reopenInBrowser() {
+        guard let authURL else { return }
+        NSWorkspace.shared.open(authURL)
     }
 
     private func finish(status: Int32) {

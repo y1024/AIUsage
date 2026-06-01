@@ -26,8 +26,12 @@ AIUsage/
 │       ├── ProviderAuthTypes.swift
 │       ├── ProviderManagedImportStore.swift
 │       ├── CLIExecutableResolver.swift
-│       ├── CodexLoginCoordinator.swift
-│       ├── GeminiLoginCoordinator.swift
+│       ├── LoginPhase.swift              # Shared login phase enum for all login coordinators
+│       ├── CodexLoginCoordinator.swift   # Browser login (CLI subprocess + auto-open system browser)
+│       ├── GeminiLoginCoordinator.swift  # Browser login (loopback OAuth)
+│       ├── AntigravityLoginCoordinator.swift # Browser login (loopback OAuth)
+│       ├── CopilotLoginCoordinator.swift # GitHub device flow
+│       ├── KiroLoginCoordinator.swift    # AWS SSO device flow
 │       ├── ProviderAuthCandidateDiscovery.swift
 │       └── ProviderAuthParsing.swift
 ├── ViewModels/
@@ -52,6 +56,8 @@ AIUsage/
     ├── JSONRawEditorView.swift     # Raw JSON editor for node profiles
     ├── SettingsVisualEditorView.swift # Visual settings.json editor
     ├── ProfileExportView.swift     # Batch profile export UI
+    ├── ProviderAccountEditorView.swift # "Connect account" sheet (per provider)
+    ├── ProviderLoginStatusCard.swift   # Unified login card shared by all 5 login flows
     └── ...
 
 QuotaBackend/Sources/
@@ -198,17 +204,35 @@ sequenceDiagram
 
 | ID | Provider | Channel | Auth Method |
 |----|----------|---------|-------------|
-| codex | Codex (OpenAI) | CLI | `codex login` flow |
-| copilot | GitHub Copilot | IDE | Browser session / gh CLI |
+| codex | Codex (OpenAI) | CLI | `codex login` flow (system browser) |
+| copilot | GitHub Copilot | IDE | GitHub device flow |
 | cursor | Cursor | IDE | Browser session |
-| antigravity | Antigravity | IDE | Browser session |
-| kiro | Kiro | IDE | Auth file |
+| antigravity | Antigravity | IDE | Google OAuth (loopback) |
+| kiro | Kiro | IDE | AWS SSO device flow |
 | warp | Warp | IDE | Auth file |
 | gemini | Gemini CLI | CLI | Google OAuth |
 | amp | Amp | CLI | Browser session |
 | droid | Droid | CLI | Browser session / API |
 | claude | Claude Code | Local | JSONL log scan (`~/.config/claude/projects`) |
 | codex-cost | Codex | Local | JSONL log scan (`~/.codex/sessions` + archived sessions, full-history import on demand) |
+
+## Account Login Flow (v0.7.1+)
+
+Five providers use an interactive sign-in flow driven by a dedicated `*LoginCoordinator`
+(Codex / Gemini / Antigravity browser-loopback, Copilot / Kiro device-code). They share:
+
+- **`LoginPhase`** (Service layer, `ProviderAuth/LoginPhase.swift`): the single phase enum
+  (`idle / launching / waitingForBrowser / waitingForCompletion / succeeded / failed`) every
+  coordinator publishes. Coordinators never auto-open an embedded WebView — they open the
+  **system browser** via `NSWorkspace`, matching native macOS sign-in behavior.
+- **`ProviderLoginStatusCard`** (View layer): one card UI reused by all five sections. The
+  view maps `LoginPhase` + the editor's `errorMessage`/`isWorking` into a single
+  `ProviderLoginVisualState` where **error always wins over success** and the account-import
+  step shows a distinct `connecting` state. This removes the previous bug where a green
+  "completed" badge and a red error could appear at once.
+
+`coordinator.phase == .succeeded` only means the browser/device step finished; the account is
+actually connected by the subsequent `importCandidate` step in `ProviderAccountEditorView+Actions`.
 
 ## CI/CD
 

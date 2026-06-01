@@ -11,19 +11,11 @@ import QuotaBackend
 
 @MainActor
 final class CopilotLoginCoordinator: ObservableObject {
-    enum Phase: Equatable {
-        case idle
-        case launching
-        case waitingForBrowser
-        case waitingForCompletion
-        case succeeded
-        case failed(String)
-    }
-
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: LoginPhase = .idle
     @Published private(set) var userCode: String?
     @Published private(set) var verificationURL: URL?
-    @Published private(set) var outputSummary: String?
+    // 仅内部记录人类可读进度，UI 不直接展示；保持普通存储属性避免无谓的视图重渲染。
+    private var outputSummary: String?
     @Published private(set) var githubToken: String?
     @Published private(set) var accountLogin: String?
     @Published private(set) var accountEmail: String?

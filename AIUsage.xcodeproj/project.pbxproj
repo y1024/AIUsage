@@ -33,8 +33,8 @@
 		A2B3C4D82F96001000A15674 /* ProxyViewModel+Aggregation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4D72F96001000A15674 /* ProxyViewModel+Aggregation.swift */; };
 		A2B3C4F02F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4EF2F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift */; };
 		A2B3C4DA2F96001000A15674 /* ProviderAccountEditorView+Sections.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4D92F96001000A15674 /* ProviderAccountEditorView+Sections.swift */; };
+		A2B3C4F12F96001000A15699 /* ProviderLoginStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4F02F96001000A15699 /* ProviderLoginStatusCard.swift */; };
 		A2B3C4DC2F96001000A15674 /* ProviderAccountEditorView+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4DB2F96001000A15674 /* ProviderAccountEditorView+Actions.swift */; };
-		A2B3C4DE2F96001000A15674 /* ProviderAccountEditorView+CodexOAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4DD2F96001000A15674 /* ProviderAccountEditorView+CodexOAuth.swift */; };
 		A2B3C4E02F96001000A15674 /* CostTrackingView+Types.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4DF2F96001000A15674 /* CostTrackingView+Types.swift */; };
 		A2B3C4E22F96001000A15674 /* CostTrackingView+Summary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4E12F96001000A15674 /* CostTrackingView+Summary.swift */; };
 		A2B3C4E42F96001000A15674 /* CostTrackingView+Chart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4E32F96001000A15674 /* CostTrackingView+Chart.swift */; };
@@ -92,6 +92,7 @@
 		5EFPA0222F91000200A15674 /* ProviderManagedImportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */; };
 		5EFPA0322F91000300A15674 /* CLIExecutableResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */; };
 		5EFPA0422F91000400A15674 /* CodexLoginCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0412F91000400A15674 /* CodexLoginCoordinator.swift */; };
+		A2B3C4F32F96001000A15699 /* LoginPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4F22F96001000A15699 /* LoginPhase.swift */; };
 		5EFPA0522F91000500A15674 /* GeminiLoginCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0512F91000500A15674 /* GeminiLoginCoordinator.swift */; };
 		5EFPA0562F91000550A15674 /* AntigravityLoginCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0552F91000550A15674 /* AntigravityLoginCoordinator.swift */; };
 		5EFPA0582F91000580A15674 /* CopilotLoginCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0572F91000580A15674 /* CopilotLoginCoordinator.swift */; };
@@ -121,8 +122,8 @@
 		A2B3C4D72F96001000A15674 /* ProxyViewModel+Aggregation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyViewModel+Aggregation.swift"; sourceTree = "<group>"; };
 		A2B3C4EF2F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyViewModel+ProxyOnlyMode.swift"; sourceTree = "<group>"; };
 		A2B3C4D92F96001000A15674 /* ProviderAccountEditorView+Sections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProviderAccountEditorView+Sections.swift"; sourceTree = "<group>"; };
+		A2B3C4F02F96001000A15699 /* ProviderLoginStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderLoginStatusCard.swift; sourceTree = "<group>"; };
 		A2B3C4DB2F96001000A15674 /* ProviderAccountEditorView+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProviderAccountEditorView+Actions.swift"; sourceTree = "<group>"; };
-		A2B3C4DD2F96001000A15674 /* ProviderAccountEditorView+CodexOAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProviderAccountEditorView+CodexOAuth.swift"; sourceTree = "<group>"; };
 		A2B3C4DF2F96001000A15674 /* CostTrackingView+Types.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CostTrackingView+Types.swift"; sourceTree = "<group>"; };
 		A2B3C4E12F96001000A15674 /* CostTrackingView+Summary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CostTrackingView+Summary.swift"; sourceTree = "<group>"; };
 		A2B3C4E32F96001000A15674 /* CostTrackingView+Chart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CostTrackingView+Chart.swift"; sourceTree = "<group>"; };
@@ -193,6 +194,7 @@
 		5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderManagedImportStore.swift; sourceTree = "<group>"; };
 		5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIExecutableResolver.swift; sourceTree = "<group>"; };
 		5EFPA0412F91000400A15674 /* CodexLoginCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLoginCoordinator.swift; sourceTree = "<group>"; };
+		A2B3C4F22F96001000A15699 /* LoginPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginPhase.swift; sourceTree = "<group>"; };
 		5EFPA0512F91000500A15674 /* GeminiLoginCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLoginCoordinator.swift; sourceTree = "<group>"; };
 		5EFPA0552F91000550A15674 /* AntigravityLoginCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityLoginCoordinator.swift; sourceTree = "<group>"; };
 		5EFPA0572F91000580A15674 /* CopilotLoginCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopilotLoginCoordinator.swift; sourceTree = "<group>"; };
@@ -307,6 +309,7 @@
 				5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */,
 				5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */,
 				5EFPA0412F91000400A15674 /* CodexLoginCoordinator.swift */,
+				A2B3C4F22F96001000A15699 /* LoginPhase.swift */,
 				5EFPA0512F91000500A15674 /* GeminiLoginCoordinator.swift */,
 				5EFPA0552F91000550A15674 /* AntigravityLoginCoordinator.swift */,
 				5EFPA0572F91000580A15674 /* CopilotLoginCoordinator.swift */,
@@ -371,8 +374,8 @@
 				5EFAD78A2F87B10300A15674 /* ProviderAccountGroupSection.swift */,
 				5EFAD7882F87B10200A15674 /* ProviderAccountEditorView.swift */,
 				A2B3C4D92F96001000A15674 /* ProviderAccountEditorView+Sections.swift */,
+				A2B3C4F02F96001000A15699 /* ProviderLoginStatusCard.swift */,
 				A2B3C4DB2F96001000A15674 /* ProviderAccountEditorView+Actions.swift */,
-				A2B3C4DD2F96001000A15674 /* ProviderAccountEditorView+CodexOAuth.swift */,
 				5EFAD78C2F87B10400A15674 /* SavedAccountViews.swift */,
 				5EFAD78E2F87B10500A15674 /* AccountNoteEditorView.swift */,
 				B1BAT0022F98000300A15674 /* BatchImportView.swift */,
@@ -581,6 +584,7 @@
 				5EFPA0222F91000200A15674 /* ProviderManagedImportStore.swift in Sources */,
 				5EFPA0322F91000300A15674 /* CLIExecutableResolver.swift in Sources */,
 				5EFPA0422F91000400A15674 /* CodexLoginCoordinator.swift in Sources */,
+				A2B3C4F32F96001000A15699 /* LoginPhase.swift in Sources */,
 				5EFPA0522F91000500A15674 /* GeminiLoginCoordinator.swift in Sources */,
 				5EFPA0562F91000550A15674 /* AntigravityLoginCoordinator.swift in Sources */,
 				5EFPA0582F91000580A15674 /* CopilotLoginCoordinator.swift in Sources */,
@@ -602,8 +606,8 @@
 				A2B3C4D82F96001000A15674 /* ProxyViewModel+Aggregation.swift in Sources */,
 				A2B3C4F02F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift in Sources */,
 				A2B3C4DA2F96001000A15674 /* ProviderAccountEditorView+Sections.swift in Sources */,
+				A2B3C4F12F96001000A15699 /* ProviderLoginStatusCard.swift in Sources */,
 				A2B3C4DC2F96001000A15674 /* ProviderAccountEditorView+Actions.swift in Sources */,
-				A2B3C4DE2F96001000A15674 /* ProviderAccountEditorView+CodexOAuth.swift in Sources */,
 				A2B3C4E02F96001000A15674 /* CostTrackingView+Types.swift in Sources */,
 				A2B3C4E22F96001000A15674 /* CostTrackingView+Summary.swift in Sources */,
 				A2B3C4E42F96001000A15674 /* CostTrackingView+Chart.swift in Sources */,
@@ -765,7 +769,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.7.0;
+				MARKETING_VERSION = 0.7.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -797,7 +801,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.7.0;
+				MARKETING_VERSION = 0.7.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
