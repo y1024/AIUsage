@@ -2,9 +2,11 @@ import SwiftUI
 import Combine
 import Sparkle
 import UserNotifications
+import AppKit
 import os
 
 private let appDelegateLog = Logger(subsystem: "com.aiusage.desktop", category: "AppDelegate")
+private let sparkleLog = Logger(subsystem: "com.aiusage.desktop", category: "Sparkle")
 
 // MARK: - Sparkle Controller
 // 封装 Sparkle 自动更新：启动静默探测 + Sparkle 2 「温和提醒」。
@@ -17,7 +19,12 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     @Published private(set) var availableUpdateVersion: String?
 
     private var updaterController: SPUStandardUpdaterController!
-    private var didRunLaunchProbe = false
+    /// 上次静默探测的时间，对「同一个 SparkleController 实例期间反复触发探测」做最小间隔节流：
+    /// 既覆盖关窗→重开、切应用回来等场景，又避免被 SwiftUI 视图反复 appear/disappear 时打爆 appcast。
+    private var lastLaunchProbeAt: Date?
+    /// 同一进程内两次静默探测之间的最小间隔。15 分钟兼顾「切回前台能很快发现新版本」与「不刷爆 GitHub raw」。
+    private static let launchProbeMinInterval: TimeInterval = 900
+    private var didBecomeActiveObserver: NSObjectProtocol?
 
     override init() {
         super.init()
@@ -31,12 +38,33 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
             .assign(to: &$canCheckForUpdates)
         updater.publisher(for: \.automaticallyChecksForUpdates)
             .assign(to: &$automaticallyChecksForUpdates)
+
+        // 应用从后台/被遮挡状态切回前台时也探测一次。
+        // SwiftUI Window 在「关窗→重开」时并不保证 .task 会重新 fire，靠这个 fallback 兜底。
+        didBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.startLaunchUpdateProbeIfNeeded()
+        }
     }
 
-    /// 启动后的一次性静默探测：不弹任何 UI，发现新版本则点亮更新按钮。
+    deinit {
+        if let didBecomeActiveObserver {
+            NotificationCenter.default.removeObserver(didBecomeActiveObserver)
+        }
+    }
+
+    /// 启动 / 主窗口重新可见 / 应用切回前台时调用：不弹任何 UI，发现新版本则点亮更新按钮。
+    /// 距离上次探测不足 `launchProbeMinInterval` 时直接跳过。
     func startLaunchUpdateProbeIfNeeded() {
-        guard !didRunLaunchProbe else { return }
-        didRunLaunchProbe = true
+        if let last = lastLaunchProbeAt,
+           Date().timeIntervalSince(last) < Self.launchProbeMinInterval {
+            return
+        }
+        lastLaunchProbeAt = Date()
+        sparkleLog.info("Launch probe firing")
         updaterController.updater.checkForUpdateInformation()
     }
 
@@ -82,11 +110,17 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     // MARK: - SPUUpdaterDelegate (静默探测结果)
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        sparkleLog.info("Found valid update: \(item.displayVersionString, privacy: .public)")
         availableUpdateVersion = item.displayVersionString
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
         availableUpdateVersion = nil
+    }
+
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        let ns = error as NSError
+        sparkleLog.error("Updater aborted: \(ns.domain, privacy: .public) #\(ns.code, privacy: .public) — \(ns.localizedDescription, privacy: .public)")
     }
 }
 
