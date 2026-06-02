@@ -864,8 +864,11 @@ public actor OpenAICompatibleClient {
 
         for line in body.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("data: ") else { continue }
-            let payload = String(trimmed.dropFirst(6))
+            // W3C SSE 规范里 `data:` 后面的空格是可选的。原先硬要求 `data: `
+            // 会把 Kimi Coding 这种无空格写法（`data:{...}`）全部漏掉，
+            // 改成 `data:` 前缀 + dropFirst(5) + trim 兼容两种格式。
+            guard trimmed.hasPrefix("data:") else { continue }
+            let payload = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
             if payload == "[DONE]" { break }
 
             guard let chunkData = payload.data(using: .utf8),

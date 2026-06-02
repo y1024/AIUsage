@@ -144,7 +144,31 @@ extension QuotaHTTPServer {
             let elapsed = Date().timeIntervalSince(startTime) * 1000
             let isSuccess = statusCode < 400
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            let usage = json?["usage"] as? [String: Any] ?? [:]
+            var usage = json?["usage"] as? [String: Any] ?? [:]
+
+            if isSuccess {
+                // 与流式路径一致的宽容化 + 兜底：上游漏发 usage 时用请求体字符数估算 input、
+                // 用响应 content 字符数估算 output。input 兜底要先排除「全命中缓存
+                // 导致 input_tokens 真值就是 0」的情况——有 cache 字段就别动 input。
+                let normalizedInput = Self.coerceInt(usage["input_tokens"]) ?? 0
+                let normalizedOutput = Self.coerceInt(usage["output_tokens"]) ?? 0
+                let normalizedCacheRead = Self.coerceInt(usage["cache_read_input_tokens"]) ?? 0
+                let normalizedCacheWrite = Self.coerceInt(usage["cache_creation_input_tokens"]) ?? 0
+
+                if normalizedInput == 0, normalizedCacheRead == 0, normalizedCacheWrite == 0 {
+                    usage["input_tokens"] = Self.estimateAnthropicInputTokens(fromRequestBody: upstreamRequest.httpBody)
+                } else {
+                    usage["input_tokens"] = normalizedInput
+                }
+                if normalizedOutput == 0 {
+                    let chars = Self.estimateAnthropicOutputChars(fromResponseJSON: json)
+                    usage["output_tokens"] = chars > 0 ? max(1, chars / 4) : 0
+                } else {
+                    usage["output_tokens"] = normalizedOutput
+                }
+                usage["cache_read_input_tokens"] = normalizedCacheRead
+                usage["cache_creation_input_tokens"] = normalizedCacheWrite
+            }
 
             var errorType: String?
             var errorMessage: String?
@@ -226,15 +250,32 @@ extension QuotaHTTPServer {
             var totalOutputTokens = 0
             var cacheCreationTokens = 0
             var cacheReadTokens = 0
+            // 兜底估算：当上游漏发 usage（Kimi Coding/Anthropic-compat 在中断或不带缓存的
+            // 短回合里很常见）时，用「请求体字符数」估 input、用「累计 delta 字符数」估 output，
+            // 避免明细行恒显 0/0。估算用 chars/4 的传统启发式，仅当上游真实数据缺失时才介入。
+            var assistantDeltaChars = 0
             var lineBuffer = Data()
 
             func processUsageLine(_ line: String) {
-                guard line.hasPrefix("data: "), let jsonStart = line.firstIndex(of: Character("{")) else {
+                // W3C SSE 规范里 `data:` 后面的空格是可选的；Kimi Coding 的 Anthropic-compat
+                // 端点固定发的就是 `data:{...}`（无空格），原先 hasPrefix("data: ") 直接全部丢弃，
+                // 导致 passthrough 路径下 Kimi 的 usage 一次都抓不到，明细行恒显 0/0。
+                // 现在统一通过定位第一个 `{` 来抠 JSON，兼容有空格 / 没空格两种格式。
+                guard line.hasPrefix("data:"), let jsonStart = line.firstIndex(of: Character("{")) else {
                     return
                 }
                 let jsonStr = String(line[jsonStart...])
                 guard let eventData = try? JSONSerialization.jsonObject(with: Data(jsonStr.utf8)) as? [String: Any] else {
                     return
+                }
+
+                // 累计输出 delta（content_block_delta.delta.{text|partial_json|thinking}），
+                // 用作上游漏发 message_delta.usage 时的 output 兜底估算。
+                if let type = eventData["type"] as? String, type == "content_block_delta",
+                   let delta = eventData["delta"] as? [String: Any] {
+                    if let text = delta["text"] as? String { assistantDeltaChars += text.count }
+                    if let partial = delta["partial_json"] as? String { assistantDeltaChars += partial.count }
+                    if let thinking = delta["thinking"] as? String { assistantDeltaChars += thinking.count }
                 }
 
                 let usage: [String: Any]
@@ -247,10 +288,10 @@ extension QuotaHTTPServer {
                     return
                 }
 
-                if let v = usage["input_tokens"] as? Int { totalInputTokens = v }
-                if let v = usage["output_tokens"] as? Int { totalOutputTokens = v }
-                if let v = usage["cache_creation_input_tokens"] as? Int { cacheCreationTokens = v }
-                if let v = usage["cache_read_input_tokens"] as? Int { cacheReadTokens = v }
+                if let v = Self.coerceInt(usage["input_tokens"]), v > 0 { totalInputTokens = v }
+                if let v = Self.coerceInt(usage["output_tokens"]), v > 0 { totalOutputTokens = v }
+                if let v = Self.coerceInt(usage["cache_creation_input_tokens"]), v > 0 { cacheCreationTokens = v }
+                if let v = Self.coerceInt(usage["cache_read_input_tokens"]), v > 0 { cacheReadTokens = v }
             }
 
             for try await byte in bytes {
@@ -272,6 +313,18 @@ extension QuotaHTTPServer {
                 let trailingLine = String(decoding: lineBuffer, as: UTF8.self)
                 processUsageLine(trailingLine)
                 await streamer.sendDataChunk(lineBuffer)
+            }
+
+            // 上游真没给就用估算补上，至少让明细行不再恒 0/0。
+            // - input：只有在「连 cache 字段都没拿到」时才估算，否则可能是「全命中缓存
+            //   导致 input_tokens 真值就是 0」（Anthropic 语义），不能被估算覆盖成几 K。
+            // - output：上游没给且本地累计的 content delta 也为空时才填 0；
+            //   只要有 delta 文本就用 chars/4 当下界。
+            if totalInputTokens == 0, cacheReadTokens == 0, cacheCreationTokens == 0 {
+                totalInputTokens = Self.estimateAnthropicInputTokens(fromRequestBody: upstreamRequest.httpBody)
+            }
+            if totalOutputTokens == 0, assistantDeltaChars > 0 {
+                totalOutputTokens = max(1, assistantDeltaChars / 4)
             }
 
             let elapsed = Date().timeIntervalSince(startTime) * 1000
@@ -522,5 +575,87 @@ extension QuotaHTTPServer {
         }
 
         return (result, injected)
+    }
+
+    // MARK: - Usage Coercion & Estimation Fallbacks
+
+    /// 把 `Any?` 形态的 token 字段安全转回 Int。
+    /// 不少「Anthropic 兼容」上游（包括 Kimi Coding 在内）会把 token 数写成
+    /// 浮点或字符串，直接 `as? Int` 失败就丢字段；用一组兜底转换把这种 case 拉回来。
+    static func coerceInt(_ value: Any?) -> Int? {
+        if let i = value as? Int { return i }
+        if let n = value as? NSNumber { return n.intValue }
+        if let d = value as? Double { return Int(d) }
+        if let s = value as? String, let i = Int(s) { return i }
+        if let s = value as? String, let d = Double(s) { return Int(d) }
+        return nil
+    }
+
+    /// 用请求体里的 `system + messages + tools` 字符数粗估 input tokens。
+    /// 仅用于上游漏发 `usage.input_tokens` 的兜底，避免明细行显示 0/0。
+    /// 字符数除以 4 是经典启发式，准度有限但是个有意义的下界。
+    static func estimateAnthropicInputTokens(fromRequestBody body: Data?) -> Int {
+        guard let body, !body.isEmpty,
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return 0
+        }
+        var chars = 0
+        if let system = json["system"] as? String {
+            chars += system.count
+        } else if let systemBlocks = json["system"] as? [[String: Any]] {
+            for block in systemBlocks {
+                if let t = block["text"] as? String { chars += t.count }
+            }
+        }
+        if let messages = json["messages"] as? [[String: Any]] {
+            for message in messages {
+                chars += countAnthropicContentChars(message["content"])
+            }
+        }
+        if let tools = json["tools"] as? [[String: Any]] {
+            for tool in tools {
+                if let name = tool["name"] as? String { chars += name.count }
+                if let desc = tool["description"] as? String { chars += desc.count }
+                // tool input schema 经常比较大，给个估算下限免得低估太狠
+                chars += 100
+            }
+        }
+        return chars > 0 ? max(1, chars / 4) : 0
+    }
+
+    /// 非流式响应里，把 assistant content 的字符数加起来做 output 估算。
+    static func estimateAnthropicOutputChars(fromResponseJSON json: [String: Any]?) -> Int {
+        guard let json,
+              let content = json["content"] as? [[String: Any]] else { return 0 }
+        var chars = 0
+        for block in content {
+            if let text = block["text"] as? String { chars += text.count }
+            if let thinking = block["thinking"] as? String { chars += thinking.count }
+            if let input = block["input"] as? [String: Any],
+               let data = try? JSONSerialization.data(withJSONObject: input) {
+                chars += data.count
+            }
+        }
+        return chars
+    }
+
+    private static func countAnthropicContentChars(_ content: Any?) -> Int {
+        if let text = content as? String { return text.count }
+        guard let blocks = content as? [[String: Any]] else { return 0 }
+        var chars = 0
+        for block in blocks {
+            if let t = block["text"] as? String { chars += t.count }
+            if let c = block["content"] as? String { chars += c.count }
+            if let nested = block["content"] as? [[String: Any]] {
+                for inner in nested {
+                    if let t = inner["text"] as? String { chars += t.count }
+                }
+            }
+            if let input = block["input"] as? [String: Any],
+               let data = try? JSONSerialization.data(withJSONObject: input) {
+                chars += data.count
+            }
+        }
+        return chars
     }
 }

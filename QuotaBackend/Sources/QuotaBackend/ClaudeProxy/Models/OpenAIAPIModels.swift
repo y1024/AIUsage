@@ -489,6 +489,21 @@ public struct OpenAIUsage: Codable, Sendable {
         self.promptTokensDetails = promptTokensDetails
     }
 
+    /// 宽容解码：现实里 Kimi-Coding 等上游会把 `prompt_tokens` / `total_tokens`
+    /// 之一漏发或写成 null（尤其是 tool-call 后续 turn），如果坚持非空 Int 解码，
+    /// 一旦缺一个字段整个 usage 就 try? 成 nil，直接连带 cache_read / completion 一起丢，
+    /// 表现就是「明细行 0/0」。这里把缺失或非 Int 的字段降级成 0，
+    /// 让真实存在的字段照常落到 PROXY_LOG 里。
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        promptTokens = (try? container.decodeIfPresent(Int.self, forKey: .promptTokens)) ?? 0
+        completionTokens = (try? container.decodeIfPresent(Int.self, forKey: .completionTokens)) ?? 0
+        totalTokens = (try? container.decodeIfPresent(Int.self, forKey: .totalTokens)) ?? 0
+        promptCacheHitTokens = try? container.decodeIfPresent(Int.self, forKey: .promptCacheHitTokens)
+        promptCacheMissTokens = try? container.decodeIfPresent(Int.self, forKey: .promptCacheMissTokens)
+        promptTokensDetails = try? container.decodeIfPresent(PromptTokensDetails.self, forKey: .promptTokensDetails)
+    }
+
     /// Tokens served from the prompt cache, normalized across vendor shapes.
     /// Returns nil when the upstream reports no cache signal at all (not 0,
     /// so downstream billing can distinguish "no cache" from "0 hits").
@@ -611,11 +626,15 @@ public struct OpenAIStreamChunk: Codable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        object = try container.decode(String.self, forKey: .object)
-        created = try container.decode(Int.self, forKey: .created)
-        model = try container.decode(String.self, forKey: .model)
-        choices = try container.decode([OpenAIStreamChoice].self, forKey: .choices)
+        // 现实里第三方 OpenAI 兼容上游（含 Kimi-Coding、各家代理）经常省略 id / object /
+        // created / model 中的一两个字段，尤其在最后那个只带 usage 的「终止块」上。
+        // 如果坚持必填，整块就 try? 成 nil，于是 usage 也一起被丢——明细行 0/0 的常见根因。
+        // 这里改成「能拿就拿，拿不到就退到空串/0」，唯一真正在乎的还是 choices 与 usage。
+        id = (try? container.decodeIfPresent(String.self, forKey: .id)) ?? ""
+        object = (try? container.decodeIfPresent(String.self, forKey: .object)) ?? ""
+        created = (try? container.decodeIfPresent(Int.self, forKey: .created)) ?? 0
+        model = (try? container.decodeIfPresent(String.self, forKey: .model)) ?? ""
+        choices = (try? container.decodeIfPresent([OpenAIStreamChoice].self, forKey: .choices)) ?? []
         // DeepSeek-v4 sends "usage": {} in intermediate chunks which cannot
         // be decoded into OpenAIUsage (required Int fields missing). Treat
         // any decode failure as nil so the chunk itself is not discarded.
