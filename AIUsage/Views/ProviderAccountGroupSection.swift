@@ -114,12 +114,8 @@ struct ProviderAccountGroupSection: View {
                     ForEach(group.accounts) { account in
                         if isBatchManaging {
                             batchSelectableCard(for: account)
-                        } else if let liveProvider = account.liveProvider {
-                            ManagedProviderAccountCard(account: account, provider: liveProvider)
-                                .environmentObject(appState)
                         } else {
-                            SavedAccountCard(account: account, onReconnect: { onAddAccount() })
-                                .environmentObject(appState)
+                            accountCard(for: account)
                         }
                     }
                 }
@@ -143,6 +139,44 @@ struct ProviderAccountGroupSection: View {
                 "确认从监控中移除 \(selectedForDeletion.count) 个账号？凭据将从钥匙串中删除。"
             ))
         }
+    }
+
+    // MARK: - Account Card Routing
+    // 与仪表盘卡片保持一致：未连接（缺 Key / 未登录）→ 引导卡；
+    // 首屏或该应用刷新中、还没拿到 live 数据 → 加载占位卡（骨架/转圈）；
+    // 否则 live → ManagedProviderAccountCard，已保存但暂无 live → SavedAccountCard。
+    @ViewBuilder
+    private func accountCard(for account: ProviderAccountEntry) -> some View {
+        if let liveProvider = account.liveProvider {
+            if liveProvider.needsCredentialConnection {
+                NeedsConnectionCard(
+                    providerId: account.providerId,
+                    title: account.cardTitle,
+                    subtitle: account.cardSubtitle,
+                    onConnect: onAddAccount
+                )
+            } else {
+                ManagedProviderAccountCard(account: account, provider: liveProvider)
+                    .environmentObject(appState)
+                    .environmentObject(refreshCoordinator)
+            }
+        } else if isAccountLoading(account) {
+            LoadingAccountCard(
+                providerId: account.providerId,
+                title: account.cardTitle,
+                subtitle: account.cardSubtitle
+            )
+        } else {
+            SavedAccountCard(account: account, onReconnect: { onAddAccount() })
+                .environmentObject(appState)
+        }
+    }
+
+    /// 首次全量刷新还没完成，或该应用正在刷新时，未拿到 live 数据的账号显示「加载中」占位，
+    /// 而不是 SavedAccountCard 的「凭证可能已过期」误导态。
+    private func isAccountLoading(_ account: ProviderAccountEntry) -> Bool {
+        !refreshCoordinator.hasCompletedInitialLoad
+            || refreshCoordinator.isProviderRefreshInFlight(account.providerId)
     }
 
     // MARK: - Batch Selection

@@ -119,6 +119,15 @@ enum ProviderAuthManager {
                 ],
                 supportsEmbeddedWebLogin: false
             )
+        case "kimi":
+            return ProviderAuthPlan(
+                titleEn: "Connect a Kimi Code account",
+                titleZh: "连接 Kimi Code 账号",
+                summaryEn: "Paste a Kimi Code API key (sk-…) created in the Kimi Code Console. AIUsage tracks the same weekly and rolling rate-limit windows the `/usage` command shows. Local ~/.kimi keys are detected automatically.",
+                summaryZh: "粘贴在 Kimi Code 控制台创建的 API Key（sk-…）。AIUsage 会监控与 `/usage` 命令一致的本周用量和滚动频控窗口。若本机 ~/.kimi 已有 Key 会自动检测。",
+                launchActions: [],
+                supportsEmbeddedWebLogin: false
+            )
         case "gemini":
             return ProviderAuthPlan(
                 titleEn: "Connect a Gemini CLI account",
@@ -254,6 +263,8 @@ enum ProviderAuthManager {
             rawCandidates = copilotCandidates()
         case "antigravity":
             rawCandidates = antigravityCandidates()
+        case "kimi":
+            rawCandidates = kimiCandidates()
         case "kiro":
             rawCandidates = kiroCandidates()
         case "gemini":

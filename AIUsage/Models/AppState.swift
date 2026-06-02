@@ -32,6 +32,7 @@ class AppState: ObservableObject {
         ProviderCatalogItem(id: "kiro", titleEn: "Kiro", titleZh: "Kiro", summaryEn: "Kiro IDE request lanes from the live app account", summaryZh: "来自 Kiro 应用账号的实时请求通道", channel: "ide", kind: .official),
         ProviderCatalogItem(id: "warp", titleEn: "Warp", titleZh: "Warp", summaryEn: "Warp request reserves and desktop app credits", summaryZh: "Warp 请求余额与桌面应用额度", channel: "ide", kind: .official),
         ProviderCatalogItem(id: "gemini", titleEn: "Gemini CLI", titleZh: "Gemini CLI", summaryEn: "Gemini CLI project quotas and model-family windows", summaryZh: "Gemini CLI 项目配额与模型族窗口", channel: "cli", kind: .official),
+        ProviderCatalogItem(id: "kimi", titleEn: "Kimi Code", titleZh: "Kimi Code", summaryEn: "Kimi Code subscription weekly usage and rolling rate-limit windows", summaryZh: "Kimi Code 订阅的本周用量与滚动频控窗口", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "amp", titleEn: "Amp", titleZh: "Amp", summaryEn: "Replenishing credit pool and refill cadence", summaryZh: "会回补的额度池与回补节奏", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "droid", titleEn: "Droid", titleZh: "Droid", summaryEn: "Token-heavy usage pools and remaining allowances", summaryZh: "以 token 为主的额度池与剩余额度", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "claude", titleEn: "Claude Code", titleZh: "Claude Code", summaryEn: "Local token and cost ledger from Claude Code logs", summaryZh: "基于 Claude Code 本地日志的 Token 与费用账本", channel: "local", kind: .costTracking),
@@ -194,6 +195,9 @@ class AppState: ObservableObject {
                 await Task.yield()
                 providerPickerMode = .initialSetup
             }
+            // 本地 Token 统计（Claude/Codex 日志）不依赖网络，先单独并发拉取，
+            // 让热力图/费用卡尽快出现，而不必等所有网络账号刷新完成。
+            refreshCoordinator.refreshLocalTokenStatsOnly()
         }
         await refreshCoordinator.fetchDashboard()
     }

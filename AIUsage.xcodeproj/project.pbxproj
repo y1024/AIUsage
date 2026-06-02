@@ -60,6 +60,8 @@
 		5EFAD7712F87AFE700A15674 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5EFAD7402F87AC7100A15674 /* Preview Assets.xcassets */; };
 		5EFAD7732F87AFE700A15674 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7472F87AC7100A15674 /* DashboardView.swift */; };
 		5EFHMP012F99002100A15674 /* DashboardView+Heatmap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */; };
+		5EFSCD012F99003100A15674 /* DashboardStatCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSCD002F99003100A15674 /* DashboardStatCards.swift */; };
+		5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSTC002F99003200A15674 /* DashboardStateCards.swift */; };
 		5EFAD7742F87AFE700A15674 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7442F87AC7100A15674 /* APIService.swift */; };
 		B1REFA012F97002000A15674 /* ProxyRuntimeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */; };
 		B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */; };
@@ -171,6 +173,8 @@
 		5EFAD7462F87AC7100A15674 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		5EFAD7472F87AC7100A15674 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DashboardView+Heatmap.swift"; sourceTree = "<group>"; };
+		5EFSCD002F99003100A15674 /* DashboardStatCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStatCards.swift; sourceTree = "<group>"; };
+		5EFSTC002F99003200A15674 /* DashboardStateCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStateCards.swift; sourceTree = "<group>"; };
 		5EFAD7482F87AC7100A15674 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		5EFAD7492F87AC7100A15674 /* ProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderCard.swift; sourceTree = "<group>"; };
 		5EF0C0D12F95000100A15674 /* ProviderCard+MultiWindowQuota.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProviderCard+MultiWindowQuota.swift"; sourceTree = "<group>"; };
@@ -350,6 +354,8 @@
 				5EFAD7462F87AC7100A15674 /* ContentView.swift */,
 				5EFAD7472F87AC7100A15674 /* DashboardView.swift */,
 				5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */,
+				5EFSCD002F99003100A15674 /* DashboardStatCards.swift */,
+				5EFSTC002F99003200A15674 /* DashboardStateCards.swift */,
 				5EFAD7482F87AC7100A15674 /* MenuBarView.swift */,
 				B1C2D3E4F5A60002 /* StatusBarItemView.swift */,
 				5EFAD7492F87AC7100A15674 /* ProviderCard.swift */,
@@ -531,6 +537,8 @@
 			files = (
 				5EFAD7732F87AFE700A15674 /* DashboardView.swift in Sources */,
 				5EFHMP012F99002100A15674 /* DashboardView+Heatmap.swift in Sources */,
+				5EFSCD012F99003100A15674 /* DashboardStatCards.swift in Sources */,
+				5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */,
 				5EFAD7742F87AFE700A15674 /* APIService.swift in Sources */,
 				B1REFA012F97002000A15674 /* ProxyRuntimeService.swift in Sources */,
 				B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */,
@@ -769,7 +777,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.7.1;
+				MARKETING_VERSION = 0.7.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -801,7 +809,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.7.1;
+				MARKETING_VERSION = 0.7.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

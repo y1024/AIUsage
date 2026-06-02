@@ -6,17 +6,25 @@ import os
 
 private let appDelegateLog = Logger(subsystem: "com.aiusage.desktop", category: "AppDelegate")
 
-final class SparkleController: ObservableObject {
+// MARK: - Sparkle Controller
+// 封装 Sparkle 自动更新：启动静默探测 + Sparkle 2 「温和提醒」。
+// 后台/计划内发现新版本时不弹系统大窗，只点亮 `availableUpdateVersion`，
+// 由侧边栏底部的更新按钮承接；用户点击后再走 Sparkle 标准更新流程（发行说明 → 安装并自动重启）。
+final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
     @Published var canCheckForUpdates = false
     @Published private(set) var automaticallyChecksForUpdates = false
+    /// 发现的新版本号（`displayVersionString`）。非空 → 左下角浮现更新按钮。
+    @Published private(set) var availableUpdateVersion: String?
 
-    let updaterController: SPUStandardUpdaterController
+    private var updaterController: SPUStandardUpdaterController!
+    private var didRunLaunchProbe = false
 
-    init() {
+    override init() {
+        super.init()
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
+            updaterDelegate: self,
+            userDriverDelegate: self
         )
         let updater = updaterController.updater
         updater.publisher(for: \.canCheckForUpdates)
@@ -25,12 +33,60 @@ final class SparkleController: ObservableObject {
             .assign(to: &$automaticallyChecksForUpdates)
     }
 
+    /// 启动后的一次性静默探测：不弹任何 UI，发现新版本则点亮更新按钮。
+    func startLaunchUpdateProbeIfNeeded() {
+        guard !didRunLaunchProbe else { return }
+        didRunLaunchProbe = true
+        updaterController.updater.checkForUpdateInformation()
+    }
+
+    /// 用户主动点击「检查更新」或左下角更新按钮：走 Sparkle 标准更新流程。
     func checkForUpdates() {
         updaterController.updater.checkForUpdates()
     }
 
     func setAutoCheckEnabled(_ enabled: Bool) {
         updaterController.updater.automaticallyChecksForUpdates = enabled
+    }
+
+    // MARK: - SPUStandardUserDriverDelegate (温和提醒)
+
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem,
+        andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        // 计划内（后台）更新一律交给我们的温和提醒，不抢焦点弹大窗。
+        false
+    }
+
+    func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool,
+        forUpdate update: SUAppcastItem,
+        state: SPUUserUpdateState
+    ) {
+        // 标准驱动将自行展示（用户主动检查）时不点亮按钮，避免重复提示。
+        guard !handleShowingUpdate else { return }
+        availableUpdateVersion = update.displayVersionString
+    }
+
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        availableUpdateVersion = nil
+    }
+
+    func standardUserDriverWillFinishUpdateSession() {
+        availableUpdateVersion = nil
+    }
+
+    // MARK: - SPUUpdaterDelegate (静默探测结果)
+
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        availableUpdateVersion = item.displayVersionString
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        availableUpdateVersion = nil
     }
 }
 

@@ -231,6 +231,37 @@ extension ProviderAuthManager {
         return deduplicated(candidates)
     }
 
+    internal static func kimiCandidates() -> [ProviderAuthCandidate] {
+        let configURL = URL(fileURLWithPath: expand("~/.kimi/config.toml"))
+        let modifiedAt = modificationDate(for: configURL)
+        let candidates = KimiProvider.discoverLocalCredentials().map { local -> ProviderAuthCandidate in
+            let fingerprint = tokenFingerprint(local.apiKey)
+            let title = local.providerSection.map { "Kimi Code · \($0)" } ?? "Kimi Code"
+            return ProviderAuthCandidate(
+                id: "kimi:\(fingerprint)",
+                providerId: "kimi",
+                sourceIdentifier: "kimi-config:\(fingerprint)",
+                sessionFingerprint: fingerprint,
+                title: title,
+                subtitle: "~/.kimi/config.toml",
+                detail: compactDetail(parts: [maskedSecret(local.apiKey), formattedDate(modifiedAt)]),
+                modifiedAt: modifiedAt,
+                authMethod: .apiKey,
+                credentialValue: local.apiKey,
+                sourcePath: nil,
+                shouldCopyFile: false,
+                identityScope: .accountScoped
+            )
+        }
+        return deduplicated(candidates)
+    }
+
+    private static func maskedSecret(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 10 else { return "••••" }
+        return "\(trimmed.prefix(6))…\(trimmed.suffix(4))"
+    }
+
     internal static func geminiCandidates() -> [ProviderAuthCandidate] {
         let oauthURL = URL(fileURLWithPath: expand("~/.gemini/oauth_creds.json"))
         guard FileManager.default.fileExists(atPath: oauthURL.path),

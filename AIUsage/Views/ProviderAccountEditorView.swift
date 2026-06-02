@@ -15,6 +15,7 @@ struct ProviderAccountEditorView: View {
     @State var isWorking = false
     @State var statusMessage: String?
     @State var errorMessage: String?
+    @State var kimiAPIKey: String = ""
     @State var showWebLogin = false
     @State var showCodexBrowser = false
     @State var candidates: [ProviderAuthCandidate] = []
@@ -71,6 +72,9 @@ struct ProviderAccountEditorView: View {
 
         let visibleCandidateCount = candidates.count
         let detectedSessionExtra = CGFloat(min(visibleCandidateCount, 3)) * 86
+        if providerId == "kimi" {
+            return min(620, 400 + detectedSessionExtra)
+        }
         let batchImportExtra: CGFloat = supportsBatchImport ? 44 : 0
         let baseHeight: CGFloat = (visibleCandidateCount == 0 ? 300 : 360) + batchImportExtra
         return min(600, baseHeight + detectedSessionExtra)
@@ -99,6 +103,10 @@ struct ProviderAccountEditorView: View {
 
                 // Main login button
                 loginButton
+
+                if providerId == "kimi" {
+                    kimiKeyEntrySection
+                }
 
                 if !candidates.isEmpty {
                     detectedCandidatesSection

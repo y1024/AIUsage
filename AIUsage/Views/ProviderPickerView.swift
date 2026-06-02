@@ -410,6 +410,7 @@ struct ProviderPickerView: View {
         case "claude": return .orange
         case "cursor": return .green
         case "gemini": return .teal
+        case "kimi": return Color(red: 0.09, green: 0.51, blue: 1.0)
         case "kiro": return .purple
         case "codex": return .indigo
         case "droid": return .yellow
@@ -498,6 +499,7 @@ private struct SourceSelectionCard: View {
         case "claude": return .orange
         case "cursor": return .green
         case "gemini": return .teal
+        case "kimi": return Color(red: 0.09, green: 0.51, blue: 1.0)
         case "kiro": return .purple
         case "codex": return .indigo
         case "droid": return .yellow

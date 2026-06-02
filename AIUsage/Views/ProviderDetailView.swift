@@ -457,6 +457,7 @@ struct ProviderDetailView: View {
         case "claude": return .purple
         case "cursor": return .green
         case "gemini": return .orange
+        case "kimi": return Color(red: 0.09, green: 0.51, blue: 1.0)
         case "kiro": return .purple
         case "codex": return .indigo
         case "droid": return .yellow

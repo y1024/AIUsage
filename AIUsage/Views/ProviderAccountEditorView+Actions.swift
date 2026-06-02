@@ -355,6 +355,33 @@ extension ProviderAccountEditorView {
         }
     }
 
+    func connectKimiAPIKey() {
+        let key = kimiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            errorMessage = L("Enter your Kimi Code API key first.", "请先填写 Kimi Code API Key。")
+            return
+        }
+        sessionMonitorTask?.cancel()
+        Task {
+            await withWorkingState {
+                let (credential, usage) = try await ProviderAuthManager.authenticateManualCredential(
+                    providerId: "kimi",
+                    authMethod: .apiKey,
+                    value: key,
+                    suggestedLabel: nil
+                )
+                try await MainActor.run {
+                    try appState.registerAuthenticatedCredential(credential, usage: usage, note: nil)
+                    statusMessage = L("Account connected.", "账号已连接。")
+                    kimiAPIKey = ""
+                    refreshCandidates()
+                }
+                _ = await refreshCoordinator.fetchSingleProvider("kimi")
+                await MainActor.run { dismiss() }
+            }
+        }
+    }
+
     func importEmbeddedWebSession(cookie: String) async {
         let authMethod: AuthMethod = providerId == "cursor" ? .webSession : .cookie
         sessionMonitorTask?.cancel()

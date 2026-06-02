@@ -15,6 +15,7 @@ public enum ProviderRegistry {
         CursorProvider(),
         DroidProvider(),
         GeminiProvider(),
+        KimiProvider(),
         KiroProvider(),
         WarpProvider()
     ]

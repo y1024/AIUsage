@@ -77,6 +77,7 @@ QuotaBackend/Sources/
 │   │   ├── GeminiProvider.swift         # Google Gemini CLI
 │   │   ├── AmpProvider.swift            # Amp
 │   │   ├── DroidProvider.swift          # Droid (+API, +Auth, +Helpers, +Parsing)
+│   │   ├── KimiProvider.swift           # Kimi Code subscription (/usages: weekly + rate-limit windows)
 │   │   ├── KiroProvider.swift           # Kiro (+Auth, +Parsing)
 │   │   ├── WarpProvider.swift           # Warp
 │   │   └── AntigravityProvider.swift    # Antigravity (multi-workspace)
@@ -211,6 +212,7 @@ sequenceDiagram
 | kiro | Kiro | IDE | AWS SSO device flow |
 | warp | Warp | IDE | Auth file |
 | gemini | Gemini CLI | CLI | Google OAuth |
+| kimi | Kimi Code | CLI | API key (`sk-…`, manual paste or `~/.kimi/config.toml`) |
 | amp | Amp | CLI | Browser session |
 | droid | Droid | CLI | Browser session / API |
 | claude | Claude Code | Local | JSONL log scan (`~/.config/claude/projects`) |
@@ -233,6 +235,15 @@ Five providers use an interactive sign-in flow driven by a dedicated `*LoginCoor
 
 `coordinator.phase == .succeeded` only means the browser/device step finished; the account is
 actually connected by the subsequent `importCandidate` step in `ProviderAccountEditorView+Actions`.
+
+## Auto-Update UX (v0.7.2+)
+
+`SparkleController` (`AIUsageApp.swift`) wraps Sparkle with a launch-time silent probe
+(`checkForUpdateInformation()`) and Sparkle 2 **gentle reminders** (`SPUStandardUserDriverDelegate`).
+Scheduled/background update discovery never steals focus with a modal; instead it publishes
+`availableUpdateVersion`. The sidebar footer (`SidebarFooterView` in `ContentView.swift`) always shows
+the current `vX.Y.Z` in the bottom-left and reveals an animated "Update available" pill when a new
+version is found. Clicking it runs the standard Sparkle flow (release notes → install → auto relaunch).
 
 ## CI/CD
 

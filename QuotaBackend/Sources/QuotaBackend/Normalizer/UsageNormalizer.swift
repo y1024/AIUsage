@@ -56,6 +56,7 @@ public enum UsageNormalizer {
         "cursor":  ThemeInfo(accent: "emerald",glow: "#4dd4aa"),
         "droid":   ThemeInfo(accent: "amber",  glow: "#ffb34d"),
         "gemini":  ThemeInfo(accent: "iris",   glow: "#7f8cff"),
+        "kimi":    ThemeInfo(accent: "blue",   glow: "#1783ff"),
         "kiro":    ThemeInfo(accent: "violet", glow: "#9046ff"),
         "warp":    ThemeInfo(accent: "rose",   glow: "#ff7eb2")
     ]
@@ -109,6 +110,7 @@ public enum UsageNormalizer {
         case "copilot": return normalizeCopilot(base: &base, usage: usage)
         case "codex":   return normalizeCodex(base: &base, usage: usage)
         case "gemini":  return normalizeGemini(base: &base, usage: usage)
+        case "kimi":    return normalizeKimi(base: &base, usage: usage)
         case "kiro":    return normalizeKiro(base: &base, usage: usage)
         case "cursor":  return normalizeCursor(base: &base, usage: usage)
         case "amp":     return normalizeAmp(base: &base, usage: usage)
@@ -123,7 +125,7 @@ public enum UsageNormalizer {
     public static func errorSummary(provider: any ProviderFetcher, error: Error) -> ProviderSummary {
         let theme = providerThemes[provider.id] ?? ThemeInfo(accent: "slate", glow: "#8e96a8")
         let msg = SensitiveDataRedactor.redactedMessage(for: error)
-        return ProviderSummary(
+        var summary = ProviderSummary(
             id: provider.id,
             providerId: provider.id,
             accountId: nil,
@@ -152,6 +154,8 @@ public enum UsageNormalizer {
             unpricedModels: nil,
             raw: nil
         )
+        summary.errorCode = (error as? ProviderError)?.code
+        return summary
     }
 
     // MARK: - Dashboard Overview

@@ -70,7 +70,8 @@ extension ProviderRefreshCoordinator {
                     }
                 )
             },
-            sourceFilePath: s.sourceFilePath
+            sourceFilePath: s.sourceFilePath,
+            errorCode: s.errorCode
         )
     }
 
@@ -166,7 +167,8 @@ extension ProviderRefreshCoordinator {
                     modelTimelines: summary.modelTimelines
                 )
             },
-            sourceFilePath: provider.sourceFilePath
+            sourceFilePath: provider.sourceFilePath,
+            errorCode: provider.errorCode
         )
     }
 
@@ -343,6 +345,12 @@ extension ProviderRefreshCoordinator {
             "Cursor mixes percent-based allowances with dollar-based plan spend, so the card pairs remaining percentages with included and on-demand spend signals.": "Cursor 同时存在百分比额度和按美元计的套餐消耗，所以卡片会同时展示剩余百分比、套餐内额度和按量消耗信号。",
             "Amp is best viewed as a replenishing credit pool, so the card highlights remaining balance and refill cadence instead of a hard billing period.": "Amp 更适合看成会持续回补的额度池，所以卡片会重点展示剩余额度和回补节奏，而不是固定账期。",
             "Droid usage is token-heavy, so the panel keeps raw token counts visible next to the percentage-based pools.": "Droid 的用量以 token 为主，所以面板会在百分比池旁边保留原始 token 数量。",
+            "Model": "模型",
+            "5h Reset": "5 小时额度重置",
+            "Weekly Reset": "周限重置",
+            "tightest Kimi Code window": "最紧张的 Kimi Code 窗口",
+            "Kimi Code subscription usage": "Kimi Code 订阅用量",
+            "Kimi Code shares one quota across CLI, IDE, and API keys. The weekly window resets every 7 days; the rolling rate-limit window recovers within a few hours.": "Kimi Code 的 CLI、IDE 与 API Key 共用同一份额度。周限每 7 天重置；5 小时滚动频控窗口会在数小时内回补。",
             "GitHub Education access": "GitHub 教育权益",
             "Personal": "个人",
             "Team": "团队",

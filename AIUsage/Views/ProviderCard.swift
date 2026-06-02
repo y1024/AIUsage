@@ -312,6 +312,7 @@ struct ProviderCard: View {
         case "claude": return .purple
         case "cursor": return .green
         case "gemini": return .orange
+        case "kimi": return Color(red: 0.09, green: 0.51, blue: 1.0)
         case "kiro": return .purple
         case "codex": return .indigo
         case "droid": return .yellow
@@ -356,10 +357,14 @@ struct ProviderCard: View {
     private func activateThisCodexAccount() { activateThisAccount() }
 
     private var useMultiWindowLayout: Bool {
-        provider.providerId == "codex"
+        Self.multiWindowProviderIds.contains(provider.providerId)
             && provider.windows.count >= 2
             && provider.windows.contains(where: { $0.remainingPercent != nil })
     }
+
+    /// 采用 Codex 式双窗口（多行进度）布局的服务商：除 Codex 外，Kimi Code 也有
+    /// 「5 小时滚动频控 + 7 天/本周」两个窗口，需并排展示而非只显示最紧的那一行。
+    private static let multiWindowProviderIds: Set<String> = ["codex", "kimi"]
 
     private var shouldShowStatusBadge: Bool {
         switch provider.status {

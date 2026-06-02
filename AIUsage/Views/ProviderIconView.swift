@@ -74,6 +74,7 @@ struct ProviderIconView: View {
         case "claude":  return "sparkles"
         case "cursor":  return "cursorarrow.rays"
         case "gemini":  return "star.fill"
+        case "kimi":    return "moon.stars.fill"
         case "kiro":    return "cloud.fill"
         case "codex", "codex-cost": return "brain.head.profile"
         case "droid":   return "cpu"
@@ -90,6 +91,7 @@ struct ProviderIconView: View {
         case "claude":  return .purple
         case "cursor":  return .green
         case "gemini":  return .orange
+        case "kimi":    return Color(red: 0.09, green: 0.51, blue: 1.0)
         case "kiro":    return .purple
         case "codex", "codex-cost": return .indigo
         case "droid":   return .yellow

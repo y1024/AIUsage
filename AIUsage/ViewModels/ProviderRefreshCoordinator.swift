@@ -14,6 +14,9 @@ final class ProviderRefreshCoordinator: ObservableObject {
     @Published var providers: [ProviderData] = []
     @Published var overview: DashboardOverview?
     @Published var isLoading = true
+    /// 是否完成过首次全量刷新。用于区分「首次加载中（还没拿到任何网络数据）」与
+    /// 「确实没有数据」——前者不应展示「凭证过期/没有账号」这类吓人的空态。
+    @Published private(set) var hasCompletedInitialLoad = false
     @Published var errorMessage: String?
     @Published var lastRefreshTime: Date?
     @Published var isRefreshingAllProviders = false
@@ -230,6 +233,7 @@ final class ProviderRefreshCoordinator: ObservableObject {
                 generatedAt: SharedFormatters.iso8601String(from: Date())
             )))
             isLoading = false
+            hasCompletedInitialLoad = true
             return .emptySuccess()
         }
 
@@ -243,6 +247,7 @@ final class ProviderRefreshCoordinator: ObservableObject {
         completeGlobalRefresh(result)
         errorMessage = result.userMessage
         isLoading = false
+        hasCompletedInitialLoad = true
         return result
     }
 

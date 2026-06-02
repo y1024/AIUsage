@@ -243,6 +243,8 @@ struct ProviderData: Identifiable, Codable, Sendable {
     let models: [ModelInfo]?
     let costSummary: CostSummary?
     let sourceFilePath: String?
+    /// 机器可读错误码（仅错误态非空），用于区分「未连接」与「真实抓取失败」。
+    let errorCode: String?
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -273,9 +275,10 @@ struct ProviderData: Identifiable, Codable, Sendable {
         models = try container.decodeIfPresent([ModelInfo].self, forKey: .models)
         costSummary = try container.decodeIfPresent(CostSummary.self, forKey: .costSummary)
         sourceFilePath = try container.decodeIfPresent(String.self, forKey: .sourceFilePath)
+        errorCode = try container.decodeIfPresent(String.self, forKey: .errorCode)
     }
 
-    init(id: String, providerId: String, accountId: String?, name: String, label: String, description: String, category: String, channel: String?, status: ProviderStatus, statusLabel: String, theme: ProviderTheme, sourceLabel: String, sourceType: String, fetchedAt: String?, accountLabel: String?, membershipLabel: String?, workspaceLabel: String? = nil, headline: Headline, metrics: [Metric], windows: [QuotaWindow], remainingPercent: Double?, nextResetAt: String?, nextResetLabel: String?, spotlight: String?, models: [ModelInfo]?, costSummary: CostSummary?, sourceFilePath: String? = nil) {
+    init(id: String, providerId: String, accountId: String?, name: String, label: String, description: String, category: String, channel: String?, status: ProviderStatus, statusLabel: String, theme: ProviderTheme, sourceLabel: String, sourceType: String, fetchedAt: String?, accountLabel: String?, membershipLabel: String?, workspaceLabel: String? = nil, headline: Headline, metrics: [Metric], windows: [QuotaWindow], remainingPercent: Double?, nextResetAt: String?, nextResetLabel: String?, spotlight: String?, models: [ModelInfo]?, costSummary: CostSummary?, sourceFilePath: String? = nil, errorCode: String? = nil) {
         self.id = id
         self.providerId = providerId
         self.accountId = accountId
@@ -303,11 +306,20 @@ struct ProviderData: Identifiable, Codable, Sendable {
         self.models = models
         self.costSummary = costSummary
         self.sourceFilePath = sourceFilePath
+        self.errorCode = errorCode
     }
     
     var remainingPercentValue: Double {
         remainingPercent ?? 100.0
     }
+
+    /// 是否为「尚未连接凭证」型错误（缺 Key / 未登录），而非真实抓取失败。
+    /// 这类状态应引导用户去添加凭证，而不是展示吓人的「采集失败」。
+    var needsCredentialConnection: Bool {
+        status == .error && Self.needsConnectionErrorCodes.contains(errorCode ?? "")
+    }
+
+    private static let needsConnectionErrorCodes: Set<String> = ["not_logged_in", "missing_token"]
     
     var statusColor: Color {
         switch status {

@@ -16,6 +16,7 @@ struct MultiWindowQuotaView: View {
         case "5h Window":      return "5小时剩余"
         case "Weekly Window":  return "7天剩余"
         case "Code Review":    return "代码审查"
+        case "Rate Limit":     return "频限明细"
         default:               return label
         }
     }

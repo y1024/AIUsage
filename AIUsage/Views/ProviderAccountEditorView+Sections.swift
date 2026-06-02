@@ -136,6 +136,51 @@ extension ProviderAccountEditorView {
         }
     }
 
+    // MARK: - Kimi Code API Key Entry
+
+    var kimiKeyEntrySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("Kimi Code API Key", "Kimi Code API Key"))
+                .font(.subheadline.weight(.semibold))
+
+            SecureField("sk-…", text: $kimiAPIKey)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isWorking)
+                .onSubmit { connectKimiAPIKey() }
+
+            Text(L(
+                "Create an API key in the Kimi Code Console and paste it here. AIUsage uses it to read your weekly usage and rate-limit windows. The key is stored in Keychain.",
+                "在 Kimi Code 控制台创建一个 API Key 粘贴到这里。AIUsage 用它读取本周用量与频控窗口。Key 会存入钥匙串。"
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button {
+                    connectKimiAPIKey()
+                } label: {
+                    Label(L("Connect", "连接"), systemImage: "link")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(isWorking || kimiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button {
+                    if let url = URL(string: "https://www.kimi.com/code/console") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Label(L("Get API Key", "获取 API Key"), systemImage: "safari")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(isWorking)
+            }
+        }
+    }
+
     // MARK: - Batch Import
 
     var batchImportButton: some View {
