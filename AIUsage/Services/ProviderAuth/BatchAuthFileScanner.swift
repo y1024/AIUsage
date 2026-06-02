@@ -80,7 +80,7 @@ enum BatchAuthFileScanner {
         }
     }
 
-    static let authFileProviderIds: Set<String> = ["codex", "kiro", "gemini", "antigravity", "droid"]
+    static let authFileProviderIds: Set<String> = ["codex", "kiro", "gemini", "antigravity"]
 
     // MARK: - Quick Parse
 

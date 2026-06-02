@@ -18,10 +18,13 @@ public struct DroidProvider: ProviderFetcher, CredentialAcceptingProvider {
     let homeDirectory: String
     let timeoutSeconds: Double
 
+    // 数据接口托管在 app.factory.ai / api.factory.ai（两者都返回 401 需要鉴权）。
+    // auth.factory.ai 只负责 OAuth，对这些路径一律返回 404，放进来只会让每次抓取都先
+    // 白白多打两次无效请求、拖慢甚至触发整体超时——所以这里只保留真正承载数据的两个域名，
+    // 并把最常命中的 app.factory.ai 放在第一位，让正常情况下首个请求即可返回。
     static let baseURLs = [
-        "https://auth.factory.ai",
-        "https://api.factory.ai",
-        "https://app.factory.ai"
+        "https://app.factory.ai",
+        "https://api.factory.ai"
     ]
     static let workOSRefreshURL = "https://api.workos.com/user_management/authenticate"
     static let workOSClientID = "client_01HNM792M5G5G1A2THWPXKFMXB"
@@ -51,7 +54,7 @@ public struct DroidProvider: ProviderFetcher, CredentialAcceptingProvider {
         "__recent_auth"
     ]
 
-    public var supportedAuthMethods: [AuthMethod] { [.cookie, .token, .authFile, .auto] }
+    public var supportedAuthMethods: [AuthMethod] { [.apiKey, .cookie, .token, .authFile, .auto] }
 
     public init(
         homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path,

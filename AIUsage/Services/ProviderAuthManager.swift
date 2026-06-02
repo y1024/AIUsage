@@ -158,18 +158,9 @@ enum ProviderAuthManager {
             return ProviderAuthPlan(
                 titleEn: "Connect a Droid account",
                 titleZh: "连接 Droid 账号",
-                summaryEn: "Open Factory if you need to switch accounts first. AIUsage reads Factory's current local login, imports it as its own managed Droid account, and keeps it refreshable after restart.",
-                summaryZh: "如果需要切换账号，先打开 Factory 完成登录。AIUsage 会读取当前本地登录态，把它导入成自己管理的 Droid 账号，并在重启后继续正常刷新。",
-                launchActions: [
-                    ProviderAuthLaunchAction(
-                        id: "droid-site",
-                        titleEn: "Open Factory",
-                        titleZh: "打开 Factory",
-                        subtitleEn: "Open the official Droid website to switch or complete the browser login first.",
-                        subtitleZh: "打开 Droid 官方网站，先在浏览器里切换或完成登录。",
-                        kind: .openURL(URL(string: "https://app.factory.ai")!)
-                    )
-                ],
+                summaryEn: "Paste a Factory API key (fk-…) below. It is the most stable way to read your usage and avoids the browser-login and refresh-token issues. Get one in the Factory dashboard under Settings → API Keys.",
+                summaryZh: "在下方粘贴 Factory API Key（fk-…）。这是最稳定的方式，可读取用量并避开浏览器登录与刷新令牌的问题。在 Factory 后台「Settings → API Keys」生成即可。",
+                launchActions: [],
                 supportsEmbeddedWebLogin: false
             )
         case "warp":

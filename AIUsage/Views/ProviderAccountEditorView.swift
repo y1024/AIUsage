@@ -16,6 +16,7 @@ struct ProviderAccountEditorView: View {
     @State var statusMessage: String?
     @State var errorMessage: String?
     @State var kimiAPIKey: String = ""
+    @State var droidAPIKey: String = ""
     @State var showWebLogin = false
     @State var showCodexBrowser = false
     @State var candidates: [ProviderAuthCandidate] = []
@@ -75,6 +76,9 @@ struct ProviderAccountEditorView: View {
         if providerId == "kimi" {
             return min(620, 400 + detectedSessionExtra)
         }
+        if providerId == "droid" {
+            return min(660, 440 + detectedSessionExtra)
+        }
         let batchImportExtra: CGFloat = supportsBatchImport ? 44 : 0
         let baseHeight: CGFloat = (visibleCandidateCount == 0 ? 300 : 360) + batchImportExtra
         return min(600, baseHeight + detectedSessionExtra)
@@ -108,16 +112,16 @@ struct ProviderAccountEditorView: View {
                     kimiKeyEntrySection
                 }
 
+                if providerId == "droid" {
+                    droidKeyEntrySection
+                }
+
                 if !candidates.isEmpty {
                     detectedCandidatesSection
                 }
 
                 if supportsBatchImport {
                     batchImportButton
-                }
-
-                if providerId == "droid", !authPlan.supportsEmbeddedWebLogin {
-                    fallbackLaunchSection
                 }
 
                 // Codex embedded browser (only when active)

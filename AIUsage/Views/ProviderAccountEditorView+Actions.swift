@@ -382,6 +382,33 @@ extension ProviderAccountEditorView {
         }
     }
 
+    func connectDroidAPIKey() {
+        let key = droidAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            errorMessage = L("Enter your Factory API key first.", "请先填写 Factory API Key。")
+            return
+        }
+        sessionMonitorTask?.cancel()
+        Task {
+            await withWorkingState {
+                let (credential, usage) = try await ProviderAuthManager.authenticateManualCredential(
+                    providerId: "droid",
+                    authMethod: .apiKey,
+                    value: key,
+                    suggestedLabel: nil
+                )
+                try await MainActor.run {
+                    try appState.registerAuthenticatedCredential(credential, usage: usage, note: nil)
+                    statusMessage = L("Account connected.", "账号已连接。")
+                    droidAPIKey = ""
+                    refreshCandidates()
+                }
+                _ = await refreshCoordinator.fetchSingleProvider("droid")
+                await MainActor.run { dismiss() }
+            }
+        }
+    }
+
     func importEmbeddedWebSession(cookie: String) async {
         let authMethod: AuthMethod = providerId == "cursor" ? .webSession : .cookie
         sessionMonitorTask?.cancel()
@@ -432,6 +459,11 @@ extension ProviderAccountEditorView {
                 let discovered = ProviderAuthManager.discoverCandidates(for: providerId)
                     .filter { !isAlreadyConnected($0) }
                 if let candidate = preferredFreshCandidate(from: discovered, baseline: baseline) {
+                    // 此处正运行在 sessionMonitorTask 内部，而 importCandidate 第一行会调用
+                    // sessionMonitorTask?.cancel()——直接调用会取消「本任务」，导致随后的校验请求
+                    // 在已取消的任务里执行并抛出 URLError.cancelled（界面表现为「已取消」）。
+                    // 先清空对自身任务的引用，让那次 cancel() 变成空操作，校验请求才不会被自我取消。
+                    await MainActor.run { sessionMonitorTask = nil }
                     await importCandidate(candidate)
                     return
                 }

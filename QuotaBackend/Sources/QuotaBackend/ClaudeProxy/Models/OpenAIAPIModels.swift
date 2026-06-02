@@ -627,16 +627,31 @@ public struct OpenAIStreamChoice: Codable, Sendable {
     public let index: Int
     public let delta: OpenAIDelta
     public let finishReason: String?
+    /// 兼容 Moonshot/Kimi：他们的官方 SDK 文档显示 streaming 用法把 usage 嵌在 choice
+    /// 里（而非 OpenAI 标准的顶层 chunk.usage）。这里同时解码，使用方需要从两处都尝试。
+    /// 参考: https://platform.kimi.com/docs/guide/utilize-the-streaming-output-feature-of-kimi-api
+    public let usage: OpenAIUsage?
 
     enum CodingKeys: String, CodingKey {
-        case index, delta
+        case index, delta, usage
         case finishReason = "finish_reason"
     }
 
-    public init(index: Int, delta: OpenAIDelta, finishReason: String?) {
+    public init(index: Int, delta: OpenAIDelta, finishReason: String?, usage: OpenAIUsage? = nil) {
         self.index = index
         self.delta = delta
         self.finishReason = finishReason
+        self.usage = usage
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        index = try container.decode(Int.self, forKey: .index)
+        delta = try container.decode(OpenAIDelta.self, forKey: .delta)
+        finishReason = try container.decodeIfPresent(String.self, forKey: .finishReason)
+        // 上游有时会发 "usage": {} 的占位空对象（DeepSeek 中间块、部分代理），
+        // 这里像顶层那样宽容处理，避免把整条 choice 都丢掉。
+        usage = try? container.decode(OpenAIUsage.self, forKey: .usage)
     }
 }
 

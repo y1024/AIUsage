@@ -68,19 +68,36 @@ extension DroidProvider {
                 source: SourceInfo(mode: "manual", type: "browser-cookie")
             )
 
+        case .apiKey:
+            // 官方 FACTORY_API_KEY（fk-…）。它不是 JWT，没有 org/sub claims，也没有 cookie，
+            // 直接当作 Bearer token 打公开 API 即可，无需走 cookie 变体扩展与 WorkOS 刷新。
+            let key = credential.credential.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else {
+                throw ProviderError("missing_token", "Droid API key is empty.")
+            }
+            return DroidAuth(
+                cookieHeader: nil,
+                bearerToken: key,
+                refreshToken: nil,
+                organizationId: nil,
+                userId: nil,
+                source: SourceInfo(mode: "manual", type: "api-key")
+            )
+
         case .token:
             let token = credential.credential.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !token.isEmpty else {
                 throw ProviderError("missing_token", "Droid bearer token is empty.")
             }
-            let claims = parseJWTClaims(token)
+            // fk- 开头的官方 API Key 不是 JWT，跳过 claim 解析，避免把它当成 JWT 误判。
+            let claims: [String: Any] = token.hasPrefix("fk-") ? [:] : parseJWTClaims(token)
             return DroidAuth(
                 cookieHeader: nil,
                 bearerToken: token,
                 refreshToken: nil,
                 organizationId: claims["org_id"] as? String,
                 userId: claims["sub"] as? String,
-                source: SourceInfo(mode: "manual", type: "bearer-token")
+                source: SourceInfo(mode: "manual", type: token.hasPrefix("fk-") ? "api-key" : "bearer-token")
             )
 
         case .authFile:

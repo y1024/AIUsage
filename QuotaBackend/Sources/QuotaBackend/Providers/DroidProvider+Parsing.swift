@@ -6,7 +6,8 @@ extension DroidProvider {
     func parseResponse(authInfo: [String: Any], usageInfo: [String: Any], auth: DroidAuth) -> ProviderUsage {
         let claims = parseJWTClaims(auth.bearerToken ?? "")
         let usageData = usageInfo["usage"] as? [String: Any] ?? [:]
-        let userInfo = authInfo["user"] as? [String: Any]
+        // /api/app/auth/me 现版返回的是 `userProfile`（旧版/部分场景为 `user`），两者都兜住。
+        let userInfo = (authInfo["user"] as? [String: Any]) ?? (authInfo["userProfile"] as? [String: Any])
 
         let periodStart = parseFactoryDate(usageData["startDate"])
         let periodEnd = parseFactoryDate(usageData["endDate"])
@@ -20,6 +21,7 @@ extension DroidProvider {
             ?? (userInfo?["email"] as? String)
         usage.usageAccountId = (claims["sub"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? (userInfo?["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? (usageInfo["userId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             ?? usage.accountEmail?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         usage.source = auth.source
 
@@ -29,10 +31,14 @@ extension DroidProvider {
         let org = authInfo["organization"] as? [String: Any]
         let subscription = org?["subscription"] as? [String: Any]
         let orbSub = subscription?["orbSubscription"] as? [String: Any]
-        let planName = subscription?["planName"] as? String
-            ?? orbSub?["planName"] as? String
-            ?? orbSub?["name"] as? String
-            ?? orbSub?["plan"] as? String
+        // orbSubscription.plan 现为对象（plan.name 形如 "Factory Pro Annual Plan"），旧代码把它
+        // 当字符串读会落空；这里补上对象取名，并以 factoryTier（如 team_annual）兜底。
+        let orbPlan = orbSub?["plan"] as? [String: Any]
+        let planName = (subscription?["planName"] as? String)
+            ?? (orbPlan?["name"] as? String)
+            ?? (orbSub?["planName"] as? String)
+            ?? (orbSub?["name"] as? String)
+            ?? (subscription?["factoryTier"] as? String)
             ?? ""
 
         usage.extra["planName"] = AnyCodable(planName)

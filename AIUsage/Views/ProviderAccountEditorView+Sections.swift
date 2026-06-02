@@ -3,38 +3,6 @@ import QuotaBackend
 
 extension ProviderAccountEditorView {
 
-    @ViewBuilder
-    var fallbackLaunchSection: some View {
-        if let action = primaryLaunchAction {
-            VStack(alignment: .leading, spacing: 8) {
-                if providerId == "droid" {
-                    Text(L(
-                        "If the current Droid login is not the account you want, switch it in your browser first, then click connect again.",
-                        "如果当前 Droid 登录的不是你要的账号，先在浏览器里切换好，再回来重新连接。"
-                    ))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                } else {
-                    Text(L(
-                        "Need to switch accounts or refresh the local login?",
-                        "如果需要切换账号，或刷新本地登录状态："
-                    ))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                Button {
-                    performLaunch(action)
-                } label: {
-                    Label(action.title(for: appState.language), systemImage: iconName(for: action))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(isWorking)
-            }
-        }
-    }
-
     // MARK: - Login Button
 
     @ViewBuilder
@@ -169,6 +137,51 @@ extension ProviderAccountEditorView {
 
                 Button {
                     if let url = URL(string: "https://www.kimi.com/code/console") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Label(L("Get API Key", "获取 API Key"), systemImage: "safari")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(isWorking)
+            }
+        }
+    }
+
+    // MARK: - Droid API Key Entry
+
+    var droidKeyEntrySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("Factory API Key", "Factory API Key"))
+                .font(.subheadline.weight(.semibold))
+
+            SecureField("fk-…", text: $droidAPIKey)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isWorking)
+                .onSubmit { connectDroidAPIKey() }
+
+            Text(L(
+                "How to get a key: click “Get API Key” → sign in to Factory → Settings → API Keys → create a key starting with fk-… → paste it above. This is the most stable way and avoids browser-cookie / refresh-token issues. The key is stored in Keychain.",
+                "如何获取：点击「获取 API Key」→ 登录 Factory → Settings → API Keys → 新建一个 fk- 开头的 Key → 粘贴到上方。这是最稳定的方式，可避开浏览器 Cookie / 刷新令牌的脆弱问题。Key 会存入钥匙串。"
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button {
+                    connectDroidAPIKey()
+                } label: {
+                    Label(L("Connect", "连接"), systemImage: "link")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(isWorking || droidAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button {
+                    if let url = URL(string: "https://app.factory.ai/settings/api-keys") {
                         NSWorkspace.shared.open(url)
                     }
                 } label: {

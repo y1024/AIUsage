@@ -295,6 +295,14 @@ public actor OpenAICompatibleClient {
             if let usage = chunk.usage {
                 capturedUsage = usage
             }
+            // Moonshot/Kimi 把 usage 嵌在 choice 里（非 OpenAI 标准位置），这里兜底捞起来，
+            // 否则代理日志里 Kimi 上游的 input/output/cache token 全是 0。
+            // 顶层 chunk.usage 优先（OpenAI 标准、字段更完整含 prompt_tokens_details），
+            // 仅在顶层缺失时才用 choice.usage 兜底（Kimi/Moonshot 路径）。
+            if capturedUsage == nil,
+               let choiceUsage = chunk.choices.first(where: { $0.usage != nil })?.usage {
+                capturedUsage = choiceUsage
+            }
 
             guard let choice = chunk.choices.first else { return }
 
@@ -852,6 +860,7 @@ public actor OpenAICompatibleClient {
         var created = 0
         var toolCalls: [OpenAIToolCall] = []
         var pendingToolCalls: [Int: (id: String, name: String, args: String)] = [:]
+        var capturedUsage: OpenAIUsage?
 
         for line in body.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -860,8 +869,17 @@ public actor OpenAICompatibleClient {
             if payload == "[DONE]" { break }
 
             guard let chunkData = payload.data(using: .utf8),
-                  let chunk = try? decoder.decode(OpenAIStreamChunk.self, from: chunkData),
-                  let choice = chunk.choices.first else { continue }
+                  let chunk = try? decoder.decode(OpenAIStreamChunk.self, from: chunkData) else { continue }
+
+            // Capture usage from either OpenAI-standard top-level or Kimi/Moonshot-style choice-embedded.
+            if let usage = chunk.usage {
+                capturedUsage = usage
+            } else if capturedUsage == nil,
+                      let choiceUsage = chunk.choices.first(where: { $0.usage != nil })?.usage {
+                capturedUsage = choiceUsage
+            }
+
+            guard let choice = chunk.choices.first else { continue }
 
             if responseId.isEmpty { responseId = chunk.id }
             if model.isEmpty { model = chunk.model }
@@ -898,6 +916,13 @@ public actor OpenAICompatibleClient {
         }
 
         let estimatedTokens = max(1, assembledContent.count / 4)
+        // 真实 usage 优先：上游真的发了 usage（顶层或嵌在 choice 里）就用它，
+        // 否则才退回到字符数估算，避免把真实数据覆盖成估算值。
+        let finalUsage = capturedUsage ?? OpenAIUsage(
+            promptTokens: 0,
+            completionTokens: estimatedTokens,
+            totalTokens: estimatedTokens
+        )
 
         return OpenAIChatCompletionResponse(
             id: responseId,
@@ -916,11 +941,7 @@ public actor OpenAICompatibleClient {
                     finishReason: finishReason
                 )
             ],
-            usage: OpenAIUsage(
-                promptTokens: 0,
-                completionTokens: estimatedTokens,
-                totalTokens: estimatedTokens
-            )
+            usage: finalUsage
         )
     }
 

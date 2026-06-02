@@ -291,75 +291,69 @@ extension ProviderAuthManager {
         ]
     }
 
+    /// Droid 仅保留官方 API Key（fk-…）方式：浏览器 Cookie / auth.v2.file 刷新令牌那套
+    /// 既脆弱（频繁「不可用」）、浏览器登录又常失效（Login state invalid/expired），所以这里
+    /// 只发现 FACTORY_API_KEY 候选，连接面板也只暴露粘贴 Key 一条路径——最稳、最安全。
+    /// 注意：后端仍保留 authFile/cookie 的处理，以兼容历史已存凭证，只是不再主动发现。
     internal static func droidCandidates() -> [ProviderAuthCandidate] {
-        let candidatePaths = [
-            "~/.factory/auth.v2.file",
-            "~/.factory/auth.v2.keyring",
-            "~/.factory/auth.encrypted",
-            "~/.config/factory/auth.json",
-            "~/.factory/auth.json",
-            "~/.config/droid/auth.json"
-        ]
+        deduplicated(factoryAPIKeyCandidates())
+    }
 
-        var candidates = candidatePaths.compactMap { rawPath -> ProviderAuthCandidate? in
-            let path = expand(rawPath)
-            let url = URL(fileURLWithPath: path)
-            guard FileManager.default.fileExists(atPath: url.path),
-                  let snapshot = DroidProvider.loadStoredSessionSnapshot(at: url.path) else {
-                return nil
-            }
+    /// 发现官方 FACTORY_API_KEY（fk-…）。CLI 文档建议把它写进 shell profile（~/.zshrc 等）或
+    /// 作为环境变量，因此这里扫描环境变量与常见 profile 文件，作为 .apiKey 候选呈现。
+    /// 注意：GUI 应用通常不继承交互式 shell 的环境变量，所以多数情况下要靠 profile 扫描或手动粘贴。
+    internal static func factoryAPIKeyCandidates() -> [ProviderAuthCandidate] {
+        var found: [(key: String, source: String)] = []
 
-            let accessToken = snapshot.accessToken
-            let email = jwtEmail(from: accessToken)
-            let subject = jwtClaim("sub", from: accessToken)
-            let title = email ?? subject ?? "Current Droid login"
-            let fingerprint = normalizedHandle(email ?? subject)
-                ?? sessionFingerprint(
-                    from: [
-                        "access_token": accessToken as Any,
-                        "refresh_token": snapshot.refreshToken as Any
-                    ],
-                    preferredKeys: ["access_token", "refresh_token"]
-                )
-
-            return ProviderAuthCandidate(
-                id: "droid:\(canonicalPath(url.path))",
-                providerId: "droid",
-                sourceIdentifier: "file:\(canonicalPath(url.path))",
-                sessionFingerprint: fingerprint,
-                title: title,
-                subtitle: "Local Factory login",
-                detail: compactDetail(parts: [displayPath(url.path), formattedDate(modificationDate(for: url))]),
-                modifiedAt: modificationDate(for: url),
-                authMethod: .authFile,
-                credentialValue: url.path,
-                sourcePath: url.path,
-                shouldCopyFile: true,
-                identityScope: .sharedSource
-            )
+        if let envKey = ProcessInfo.processInfo.environment["FACTORY_API_KEY"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !envKey.isEmpty {
+            found.append((envKey, "FACTORY_API_KEY (env)"))
         }
 
-        candidates.append(contentsOf: DroidProvider.discoverBrowserSessions().map { session in
-            let profileLabel = "\(session.browserName) \(session.profileName)"
-            let sourceIdentifier = "browser-profile:droid:\(session.browserName.lowercased()):\(session.profileName.lowercased())"
+        let profiles = ["~/.zshrc", "~/.zprofile", "~/.bashrc", "~/.bash_profile", "~/.profile"]
+        for rawPath in profiles {
+            let path = expand(rawPath)
+            guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
+            for key in factoryAPIKeys(inShellProfile: contents) {
+                found.append((key, displayPath(path)))
+            }
+        }
+
+        var seen = Set<String>()
+        return found.compactMap { entry -> ProviderAuthCandidate? in
+            let fingerprint = tokenFingerprint(entry.key)
+            guard seen.insert(fingerprint).inserted else { return nil }
             return ProviderAuthCandidate(
-                id: "droid:\(sourceIdentifier)",
+                id: "droid:apikey:\(fingerprint)",
                 providerId: "droid",
-                sourceIdentifier: sourceIdentifier,
-                sessionFingerprint: tokenFingerprint(session.cookieHeader),
-                title: session.accountHint ?? profileLabel,
-                subtitle: "Browser session",
-                detail: compactDetail(parts: [profileLabel, "factory.ai"]),
+                sourceIdentifier: "factory-api-key:\(fingerprint)",
+                sessionFingerprint: fingerprint,
+                title: "Factory API Key",
+                subtitle: entry.source,
+                detail: compactDetail(parts: [maskedSecret(entry.key), entry.source]),
                 modifiedAt: nil,
-                authMethod: .cookie,
-                credentialValue: session.cookieHeader,
+                authMethod: .apiKey,
+                credentialValue: entry.key,
                 sourcePath: nil,
                 shouldCopyFile: false,
-                identityScope: .sharedSource
+                identityScope: .accountScoped
             )
-        })
+        }
+    }
 
-        return deduplicated(candidates)
+    private static let factoryAPIKeyRegex = try? NSRegularExpression(
+        pattern: #"FACTORY_API_KEY\s*=\s*["']?(fk-[A-Za-z0-9._-]+)["']?"#
+    )
+
+    /// 从 shell profile 文本里抽取 `FACTORY_API_KEY=fk-…` 形式的赋值（兼容 export 与引号）。
+    private static func factoryAPIKeys(inShellProfile contents: String) -> [String] {
+        guard let regex = factoryAPIKeyRegex else { return [] }
+        let range = NSRange(contents.startIndex..., in: contents)
+        return regex.matches(in: contents, range: range).compactMap { match in
+            guard match.numberOfRanges >= 2,
+                  let valueRange = Range(match.range(at: 1), in: contents) else { return nil }
+            return String(contents[valueRange])
+        }
     }
 
     internal static func ampCandidates() -> [ProviderAuthCandidate] {

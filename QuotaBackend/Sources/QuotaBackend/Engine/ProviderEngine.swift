@@ -10,6 +10,10 @@ private let engineLog = Logger(subsystem: "com.aiusage.desktop", category: "Prov
 public actor ProviderEngine {
     static let timeoutSeconds: Double = 15
     static let codexCostTimeoutSeconds: Double = 300
+    // Droid 抓取需要按序探测多个域名（必要时还要 WorkOS 刷新后重试一轮），单个 15s 预算
+    // 经常不够用、被整体超时打断后表现为「不可用」。给它一个更宽裕但仍有上限的预算，
+    // 正常情况首个请求即返回、远用不到这个上限，只在网络退化时作为兜底天花板。
+    static let droidTimeoutSeconds: Double = 45
 
     public init() {}
 
@@ -147,7 +151,11 @@ public actor ProviderEngine {
     }
 
     private static func timeoutSeconds(for provider: any ProviderFetcher) -> Double {
-        provider.id == "codex-cost" ? codexCostTimeoutSeconds : timeoutSeconds
+        switch provider.id {
+        case "codex-cost": return codexCostTimeoutSeconds
+        case "droid": return droidTimeoutSeconds
+        default: return timeoutSeconds
+        }
     }
 
     // MARK: - Internal: Multi-Account Fetch
@@ -224,7 +232,7 @@ public actor ProviderEngine {
         label: String?,
         fallbackAccountId: String
     ) async throws -> ProviderUsage {
-        var usage = try await withTimeout(seconds: Self.timeoutSeconds) {
+        var usage = try await withTimeout(seconds: Self.timeoutSeconds(for: credentialProvider)) {
             try await credentialProvider.fetchUsage(with: credential)
         }
         if usage.accountEmail?.nilIfBlank == nil { usage.accountEmail = label }
