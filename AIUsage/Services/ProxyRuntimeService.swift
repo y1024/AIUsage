@@ -107,7 +107,6 @@ final class ProxyRuntimeService {
 
         do {
             try settingsManager.writeFullSettings(settings)
-            try writePricingOverrides(config)
         } catch {
             if config.needsProxyProcess {
                 stopProxy(config)
@@ -116,11 +115,6 @@ final class ProxyRuntimeService {
                 try settingsManager.restoreFromBackup()
             } catch {
                 proxyRuntimeLog.error("Failed to restore settings while rolling back node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
-            }
-            do {
-                try clearPricingOverrides()
-            } catch {
-                proxyRuntimeLog.error("Failed to clear pricing overrides while rolling back node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
             }
             throw error
         }
@@ -137,7 +131,6 @@ final class ProxyRuntimeService {
 
         do {
             try settingsManager.restoreFromBackup()
-            try clearPricingOverrides()
         } catch {
             do {
                 try await activateRuntime(for: config, settings: settings)
@@ -159,7 +152,6 @@ final class ProxyRuntimeService {
 
         do {
             try settingsManager.writeEnv(envConfig)
-            try writePricingOverrides(config)
         } catch {
             if config.needsProxyProcess {
                 stopProxy(config)
@@ -168,11 +160,6 @@ final class ProxyRuntimeService {
                 try settingsManager.clearEnv()
             } catch {
                 proxyRuntimeLog.error("Failed to clear Claude runtime env while rolling back node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
-            }
-            do {
-                try clearPricingOverrides()
-            } catch {
-                proxyRuntimeLog.error("Failed to clear pricing overrides while rolling back node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
             }
             throw error
         }
@@ -189,7 +176,6 @@ final class ProxyRuntimeService {
 
         do {
             try settingsManager.clearEnv()
-            try clearPricingOverrides()
         } catch {
             do {
                 try await activateRuntime(for: config, envConfig: envConfig)
@@ -202,21 +188,20 @@ final class ProxyRuntimeService {
 
     func clearRuntime() throws {
         try settingsManager.restoreFromBackup()
-        try clearPricingOverrides()
     }
 
-    // MARK: - CodeX Runtime
-    // CodeX 节点与 Claude 节点写不同文件（~/.codex/config.toml vs ~/.claude/settings.json），
+    // MARK: - Codex Runtime
+    // Codex 节点与 Claude 节点写不同文件（~/.codex/config.toml vs ~/.claude/settings.json），
     // 因此可与 Claude 节点并存。代理成本由 App 端按节点重算，故不写共享的 proxy-pricing.json。
 
     private let codexConfigManager = CodexConfigManager.shared
 
-    /// CodeX 节点是否已注入受管理的 config.toml。
+    /// Codex 节点是否已注入受管理的 config.toml。
     func isCodexConfigManaged() -> Bool {
         codexConfigManager.isManaged
     }
 
-    /// 激活 CodeX 节点：启动本地 QuotaServer(PROXY_TARGET=codex)，再外科式注入 config.toml。
+    /// 激活 Codex 节点：启动本地 QuotaServer(PROXY_TARGET=codex)，再外科式注入 config.toml。
     /// - Parameters:
     ///   - globalTOML: 全局通用配置基底（启用时由 ViewModel 传入）。
     ///   - nodeTOML: 该节点的额外 TOML（覆盖全局同名顶层键 / 表）。
@@ -240,7 +225,7 @@ final class ProxyRuntimeService {
             do {
                 try codexConfigManager.restore()
             } catch {
-                proxyRuntimeLog.error("Failed to restore config.toml while rolling back CodeX node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
+                proxyRuntimeLog.error("Failed to restore config.toml while rolling back Codex node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
             }
             throw error
         }
@@ -257,7 +242,7 @@ final class ProxyRuntimeService {
         }
     }
 
-    /// 停用 CodeX 节点：停止进程并从备份还原 config.toml。
+    /// 停用 Codex 节点：停止进程并从备份还原 config.toml。
     func deactivateCodexRuntime(for config: ProxyConfiguration) async throws {
         stopProxy(config)
 
@@ -270,19 +255,19 @@ final class ProxyRuntimeService {
             do {
                 try await activateCodexRuntime(for: config)
             } catch {
-                proxyRuntimeLog.error("Failed to re-activate CodeX runtime for node \(config.name, privacy: .public) after deactivation rollback: \(String(describing: error), privacy: .public)")
+                proxyRuntimeLog.error("Failed to re-activate Codex runtime for node \(config.name, privacy: .public) after deactivation rollback: \(String(describing: error), privacy: .public)")
             }
             throw error
         }
     }
 
-    /// 还原 CodeX config.toml（启动时清理残留激活态用）。
+    /// 还原 Codex config.toml（启动时清理残留激活态用）。
     func clearCodexRuntime() throws {
         try? CodexNoProxyFixer.remove()
         try codexConfigManager.restore()
     }
 
-    /// CodeX 的 base_url 需包含 /v1，CodeX 会在其后拼接 /responses。
+    /// Codex 的 base_url 需包含 /v1，Codex 会在其后拼接 /responses。
     private func codexProxyBaseURL(for config: ProxyConfiguration) -> String {
         let scheme: String
         let portValue: Int
@@ -355,11 +340,11 @@ final class ProxyRuntimeService {
         var environment = ProcessInfo.processInfo.environment
 
         if config.nodeType == .codexProxy {
-            // CodeX 节点: QuotaServer 以 PROXY_TARGET=codex 启动 Responses 入站，转换到 OpenAI 兼容上游。
+            // Codex 节点: QuotaServer 以 PROXY_TARGET=codex 启动 Responses 入站，转换到 OpenAI 兼容上游。
             environment["PROXY_TARGET"] = "codex"
             environment["OPENAI_API_KEY"] = config.upstreamAPIKey
             environment["OPENAI_BASE_URL"] = config.normalizedUpstreamBaseURL
-            // CodeX 的 wire_api 恒为 responses：强制 Responses 忠实透传，避免误用 Chat Completions 造成有损转换。
+            // Codex 的 wire_api 恒为 responses：强制 Responses 忠实透传，避免误用 Chat Completions 造成有损转换。
             environment["OPENAI_API_MODE"] = OpenAIUpstreamAPI.responses.rawValue
             let codexModel = config.codexModel
             if !codexModel.isEmpty {
@@ -488,55 +473,6 @@ final class ProxyRuntimeService {
         process.terminate()
         runningProcesses.removeValue(forKey: config.id)
         proxyRuntimeLog.info("Proxy stopped for node \(config.name, privacy: .public)")
-    }
-
-    private var pricingOverridePath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return (home as NSString).appendingPathComponent(".config/aiusage/proxy-pricing.json")
-    }
-
-    private func writePricingOverrides(_ config: ProxyConfiguration) throws {
-        let mapping = config.modelMapping
-        var pricing: [String: [String: Double]] = [:]
-
-        let models: [ProxyConfiguration.MappedModel] = [mapping.bigModel, mapping.middleModel, mapping.smallModel]
-        for model in models where !model.name.isEmpty {
-            pricing[model.name] = [
-                "input_per_million": model.pricing.inputPerMillionUSD,
-                "output_per_million": model.pricing.outputPerMillionUSD,
-                "cache_creation_per_million": model.pricing.cacheCreatePerMillionUSD,
-                "cache_read_per_million": model.pricing.cacheReadPerMillionUSD,
-                // Emit legacy key too for older QuotaServer binaries that predate split pricing.
-                "cache_per_million": model.pricing.cacheReadPerMillionUSD,
-            ]
-        }
-
-        let result: [String: Any] = ["pricing": pricing]
-
-        do {
-            let url = URL(fileURLWithPath: pricingOverridePath)
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true,
-                attributes: nil
-            )
-            let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: url)
-        } catch {
-            proxyPersistenceLog.error("Failed to write proxy pricing overrides: \(String(describing: error), privacy: .public)")
-            throw ProxyRuntimeError.pricingOverridesWriteFailed
-        }
-    }
-
-    private func clearPricingOverrides() throws {
-        do {
-            try FileManager.default.removeItem(atPath: pricingOverridePath)
-        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
-            return
-        } catch {
-            proxyPersistenceLog.error("Failed to clear proxy pricing overrides: \(String(describing: error), privacy: .public)")
-            throw ProxyRuntimeError.pricingOverridesClearFailed
-        }
     }
 
     private func findQuotaServerExecutable() async -> String? {

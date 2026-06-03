@@ -57,7 +57,8 @@ extension CodexCostProvider {
                 extractJSONStringField("model", from: data),
                 extractJSONStringField("model_name", from: data)
             )
-            let model = normalizeModel(modelFromInfo ?? currentModel ?? "gpt-5")
+            let baseModel = normalizeModel(modelFromInfo ?? currentModel ?? "gpt-5")
+            let model = sourceTaggedModel(baseModel, provider: metadata?.modelProvider)
 
             var delta = CodexTotals(input: 0, cached: 0, output: 0)
 
@@ -95,7 +96,7 @@ extension CodexCostProvider {
             guard delta.input > 0 || delta.cached > 0 || delta.output > 0 else { return }
             let cached = min(delta.cached, delta.input)
             let nonCachedInput = max(0, delta.input - cached)
-            let cost = estimateCost(model: model, input: nonCachedInput, cacheRead: cached, output: delta.output)
+            let cost = estimateCost(model: baseModel, input: nonCachedInput, cacheRead: cached, output: delta.output)
 
             let row = CodexRow(
                 dayKey: dayKey(timestamp),
@@ -378,6 +379,9 @@ extension CodexCostProvider {
         let bucket: String
         let label: String
         let estimatedCostUsd: Double
+        var inputTokens: Int = 0
+        var outputTokens: Int = 0
+        var cacheReadTokens: Int = 0
         let totalTokens: Int
     }
 }

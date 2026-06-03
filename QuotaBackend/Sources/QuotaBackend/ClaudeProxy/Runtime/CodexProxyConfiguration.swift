@@ -1,10 +1,10 @@
 import Foundation
 
-// MARK: - CodeX Proxy Configuration
-// CodeX 代理把 OpenAI Responses 入站请求转换到「OpenAI 兼容上游」(Phase B)。
+// MARK: - Codex Proxy Configuration
+// Codex 代理把 OpenAI Responses 入站请求转换到「OpenAI 兼容上游」(Phase B)。
 // 与 ClaudeProxyConfiguration 平行，但入站协议是 Responses，模型映射为单一覆盖。
 //
-// 进程模型: 每个 CodeX 节点启动独立的 QuotaServer 进程，通过环境变量 PROXY_TARGET=codex 区分。
+// 进程模型: 每个 Codex 节点启动独立的 QuotaServer 进程，通过环境变量 PROXY_TARGET=codex 区分。
 
 public struct CodexProxyConfiguration: Sendable {
     public let enabled: Bool
@@ -15,7 +15,7 @@ public struct CodexProxyConfiguration: Sendable {
     public let openAIUpstreamAPI: OpenAIUpstreamAPI
     public let upstreamAPIKey: String
     public let expectedClientKey: String?
-    /// 上游模型覆盖；为空时透传 CodeX 请求里的模型名。
+    /// 上游模型覆盖；为空时透传 Codex 请求里的模型名。
     public let upstreamModel: String?
     public let maxOutputTokens: Int?
     public let requestTimeout: TimeInterval

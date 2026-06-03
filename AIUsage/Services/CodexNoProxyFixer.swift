@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 import os.log
 
-// MARK: - CodeX No-Proxy Fixer
+// MARK: - Codex No-Proxy Fixer
 // 解决「系统代理拦截本地回环导致 codex 报 502」：把 no_proxy / NO_PROXY 写入 codex 自己的
 // 环境文件 ~/.codex/.env，让 codex(reqwest) 跳过对 127.0.0.1 / localhost 的代理。
 //

@@ -1019,7 +1019,7 @@ public actor OpenAICompatibleClient {
     }
 
     // MARK: - Raw Responses Passthrough
-    // 忠实透传：直接转发原始 Responses 请求体（不经过 Canonical 改写），最大化兼容 CodeX 原生语义。
+    // 忠实透传：直接转发原始 Responses 请求体（不经过 Canonical 改写），最大化兼容 Codex 原生语义。
     // 仅在出站时附加上游鉴权头（由 makeUpstreamRequest 注入），并允许转发入站客户端的关键头。
 
     /// 上游瞬时故障（网关 5xx）可重试——很多第三方中转/Cloudflare 会偶发 500/502/503/504。

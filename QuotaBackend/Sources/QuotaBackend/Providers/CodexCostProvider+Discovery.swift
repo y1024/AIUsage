@@ -11,15 +11,6 @@ extension CodexCostProvider {
         ]
     }
 
-    func archiveScopeID() -> String {
-        let defaultHome = FileManager.default.homeDirectoryForCurrentUser.path
-        let explicitCodexHome = explicitCodexHome()
-        if homeDirectory == defaultHome, explicitCodexHome == nil {
-            return Self.defaultArchiveScopeID
-        }
-        return explicitCodexHome ?? "\(homeDirectory)/.codex"
-    }
-
     func explicitCodexHome() -> String? {
         let value = environment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let value, !value.isEmpty else { return nil }

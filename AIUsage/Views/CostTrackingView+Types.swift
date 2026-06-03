@@ -56,6 +56,15 @@ enum CostMetric: String, CaseIterable, Identifiable {
 enum DistributionPeriod: String, CaseIterable, Identifiable {
     case today, week, month, overall
     var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .today:   return L("Today", "今日")
+        case .week:    return L("Week", "本周")
+        case .month:   return L("Month", "本月")
+        case .overall: return L("All", "全部")
+        }
+    }
 }
 
 enum ChartTimeRange: String, CaseIterable, Identifiable {

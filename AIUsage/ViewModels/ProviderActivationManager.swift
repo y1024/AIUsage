@@ -6,7 +6,7 @@ import os.log
 private let providerActivationLog = Logger(subsystem: "com.aiusage.desktop", category: "ProviderActivation")
 
 extension Notification.Name {
-    /// CodeX 订阅账号即将激活（写 ~/.codex/auth.json）。CodeX 代理监听此通知后自动停用，
+    /// Codex 订阅账号即将激活（写 ~/.codex/auth.json）。Codex 代理监听此通知后自动停用，
     /// 还原 config.toml，避免 ~/.codex 下的 auth.json 与 config.toml 冲突、用量统计串台。
     static let codexSubscriptionAccountActivating = Notification.Name("com.aiusage.codexSubscriptionAccountActivating")
 }
@@ -88,13 +88,13 @@ final class ProviderActivationManager: ObservableObject {
         Self.activatableProviders.contains(providerId)
     }
 
-    /// 互斥：CodeX 代理接管 ~/.codex/config.toml 时调用，把当前 CodeX 订阅账号标记为未激活，
+    /// 互斥：Codex 代理接管 ~/.codex/config.toml 时调用，把当前 Codex 订阅账号标记为未激活，
     /// 保证账号轨道与代理轨道在 UI 与用量统计上互斥（不改动 auth.json 内容）。
     func markCodexSubscriptionInactiveForProxy() {
         guard activeProviderAccountIds["codex"] != nil else { return }
         activeProviderAccountIds["codex"] = nil
         persistActiveIds()
-        providerActivationLog.info("CodeX subscription account marked inactive due to proxy activation")
+        providerActivationLog.info("Codex subscription account marked inactive due to proxy activation")
     }
 
     func activateAccount(entry: ProviderAccountEntry) throws {
@@ -142,7 +142,7 @@ final class ProviderActivationManager: ObservableObject {
     // MARK: Codex activation
 
     func activateCodexAccount(entry: ProviderAccountEntry) throws {
-        // 互斥：激活订阅账号前，先让正在运行的 CodeX 代理停用并还原 config.toml，
+        // 互斥：激活订阅账号前，先让正在运行的 Codex 代理停用并还原 config.toml，
         // 否则 config.toml 里的 model_provider=aiusage-proxy 会让 CLI 忽略新写入的 auth.json。
         NotificationCenter.default.post(name: .codexSubscriptionAccountActivating, object: nil)
 

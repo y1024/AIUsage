@@ -17,7 +17,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     static let refreshURL = "https://auth.openai.com/oauth/token"
     static let oauthClientId = "app_EMoamEEZ73f0CkXaXp7hrann"
     static let defaultBaseURL = "https://chatgpt.com/backend-api/"
-    /// Provider id of the AIUsage-managed CodeX proxy block in `config.toml`.
+    /// Provider id of the AIUsage-managed Codex proxy block in `config.toml`.
     /// Must mirror `CodexConfigManager.providerId` in the app target.
     static let proxyProviderId = "aiusage-proxy"
 
@@ -468,7 +468,7 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         let configPath = "\(homeDirectory)/.codex/config.toml"
         var baseURL = Self.defaultBaseURL
         if let content = try? String(contentsOfFile: configPath, encoding: .utf8) {
-            // The AIUsage CodeX proxy injects `[model_providers.aiusage-proxy]`
+            // The AIUsage Codex proxy injects `[model_providers.aiusage-proxy]`
             // with `base_url = http://127.0.0.1:4319/v1`. That is the local proxy
             // host, NOT the ChatGPT usage host — picking it up here would point the
             // account usage request at the proxy (or its upstream) and 404. Skip

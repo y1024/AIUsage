@@ -231,7 +231,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             httpLog.info("  POST /v1/messages (Anthropic Passthrough)")
         }
         if self.codexProxyService != nil {
-            httpLog.info("  POST /v1/responses (CodeX Proxy - OpenAI Convert)")
+            httpLog.info("  POST /v1/responses (Codex Proxy - OpenAI Convert)")
         }
     }
 
@@ -314,7 +314,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         case ("POST", "/v1/messages"):
             return await handleMessagesEndpoint(request: request, headers: corsHeaders)
 
-        // MARK: - CodeX Proxy Endpoint
+        // MARK: - Codex Proxy Endpoint
 
         case ("POST", "/v1/responses"):
             return await handleCodexResponsesEndpoint(request: request, headers: corsHeaders)

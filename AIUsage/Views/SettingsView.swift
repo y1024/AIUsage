@@ -202,27 +202,13 @@ struct SettingsView: View {
 
             Spacer()
 
-            HStack(spacing: 10) {
-                Label(L("Version", "版本") + " " + appVersion, systemImage: "tag")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.primary.opacity(0.06)))
-
-                Button {
-                    sparkle.checkForUpdates()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath.circle")
-                        Text(L("Check for Updates", "检查更新"))
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(!sparkle.canCheckForUpdates)
-            }
+            // 「检查更新」入口统一收敛到「软件更新」设置卡片（含自动更新开关），此处只留版本标签。
+            Label(L("Version", "版本") + " " + appVersion, systemImage: "tag")
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)

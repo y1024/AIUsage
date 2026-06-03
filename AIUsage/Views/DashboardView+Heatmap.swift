@@ -4,63 +4,104 @@ import SwiftUI
 
 struct LocalTokenUsageHeatmap: View {
     let providers: [ProviderData]
+    /// 品牌口径：按工具（Claude Code / Codex）拆分展示时传入品牌名 + 图标 asset + 强调色。
+    /// 强调色用于色阶与图例，让两块热力图各自带上自家品牌特色；为 nil 时回退到通用绿色。
+    var brandLabel: String? = nil
+    var brandAsset: String? = nil
+    var accent: Color = .green
+    /// 用量轨道：合计用 timeline.daily 合计口径；API/订阅按模型名后缀从 modelTimelines 过滤汇总。
+    var track: UsageTrack = .combined
+
+    /// 展示的周数：仪表盘传 26（半年），统计页用默认 52（全年）。
+    var weeks: Int = 52
 
     @EnvironmentObject private var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var hoveredCell: HeatmapCellID?
+    /// tooltip 卡片实测高度，用于「靠底行向上翻转」时精确定位（避免被页面底部遮挡）。
+    @State private var tooltipHeight: CGFloat = 0
 
-    private let weeks = 52
     private static let tooltipWidth: CGFloat = 280
 
     // MARK: - Data
 
-    /// Single-pass aggregation over every provider's daily timeline. Returned
-    /// as a tuple so `snapshot` doesn't have to traverse the (potentially
-    /// large) timeline twice. The previous design called `dailyTokens` and
-    /// `dailyUsd` as separate computed properties, each O(n).
-    private var dailyTotals: (tokens: [Date: Int], usd: [Date: Double]) {
+    /// 每日 Token 量聚合。以 JSONL 本地日志为唯一数据源；代理日志仅用于 tooltip 补充模型名，
+    /// 不参与总量计算（代理统计的是每次 API 调用的 token，含重试/中间请求，会虚高）。
+    private var dailyTotals: [Date: Int] {
         let calendar = Calendar.current
-        var tokenMap: [Date: Int] = [:]
-        var usdMap: [Date: Double] = [:]
+        var result: [Date: Int] = [:]
+
+        // 单轨：合计口径无分轨数据，改从带后缀的 modelTimelines 过滤汇总。
+        if track != .combined {
+            for provider in providers {
+                guard let timelines = provider.costSummary?.modelTimelines else { continue }
+                for series in timelines where track.matches(series.model) {
+                    for point in series.daily {
+                        guard let pointDate = point.resolvedDate, point.tokens > 0 else { continue }
+                        let day = calendar.startOfDay(for: pointDate)
+                        result[day, default: 0] += point.tokens
+                    }
+                }
+            }
+            return result
+        }
+
         for provider in providers {
             guard let daily = provider.costSummary?.timeline?.daily else { continue }
             for point in daily {
-                guard let pointDate = point.resolvedDate else { continue }
+                guard let pointDate = point.resolvedDate, point.tokens > 0 else { continue }
                 let day = calendar.startOfDay(for: pointDate)
-                if point.tokens > 0 {
-                    tokenMap[day, default: 0] += point.tokens
-                }
-                usdMap[day, default: 0] += point.usd
+                result[day, default: 0] += point.tokens
             }
         }
-        return (tokenMap, usdMap)
+        return result
     }
 
-    private func modelBreakdown(for targetDate: Date) -> [(model: String, tokens: Int, usd: Double)] {
+    struct ModelDetail {
+        let model: String
+        var tokens: Int = 0
+        var inputTokens: Int = 0
+        var outputTokens: Int = 0
+        var cacheReadTokens: Int = 0
+        var cacheCreateTokens: Int = 0
+    }
+
+    private func modelBreakdown(for targetDate: Date) -> [ModelDetail] {
         let calendar = Calendar.current
         let targetDay = calendar.startOfDay(for: targetDate)
-        var result: [(String, Int, Double)] = []
+
+        var detailMap: [String: ModelDetail] = [:]
+
         for provider in providers {
             guard let timelines = provider.costSummary?.modelTimelines else { continue }
-            for series in timelines {
+            for series in timelines where track.matches(series.model) {
+                let modelName = track == .combined ? series.model : UsageTrack.stripSuffix(series.model)
                 for point in series.daily {
                     guard let pointDate = point.resolvedDate, point.tokens > 0 else { continue }
                     if calendar.startOfDay(for: pointDate) == targetDay {
-                        result.append((series.model, point.tokens, point.usd))
+                        var detail = detailMap[modelName] ?? ModelDetail(model: modelName)
+                        detail.tokens += point.tokens
+                        detail.inputTokens += point.inputTokens ?? 0
+                        detail.outputTokens += point.outputTokens ?? 0
+                        detail.cacheReadTokens += point.cacheReadTokens ?? 0
+                        detail.cacheCreateTokens += point.cacheCreateTokens ?? 0
+                        detailMap[modelName] = detail
                     }
                 }
             }
         }
-        return result.sorted { $0.1 > $1.1 }
+
+        return detailMap.values.sorted { $0.tokens > $1.tokens }
     }
 
     private var startDate: Date {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
+        // 周一作为每列（每周）的第一行：weekday 1=周日…7=周六 → 距本周一的天数。
         let weekday = calendar.component(.weekday, from: today)
-        let daysFromSunday = weekday - 1
-        let currentWeekStart = calendar.date(byAdding: .day, value: -daysFromSunday, to: today) ?? today
+        let daysFromMonday = (weekday + 5) % 7
+        let currentWeekStart = calendar.date(byAdding: .day, value: -daysFromMonday, to: today) ?? today
         return calendar.date(byAdding: .day, value: -(weeks - 1) * 7, to: currentWeekStart) ?? today
     }
 
@@ -77,11 +118,8 @@ struct LocalTokenUsageHeatmap: View {
         return 4
     }
 
-    private static let heatmapAccent = Color.green
-
     private func color(for bin: Int, active: Bool) -> Color {
         guard active else { return Color.primary.opacity(colorScheme == .dark ? 0.04 : 0.03) }
-        let accent = Self.heatmapAccent
         switch bin {
         case 0: return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.07)
         case 1: return accent.opacity(colorScheme == .dark ? 0.32 : 0.26)
@@ -96,17 +134,37 @@ struct LocalTokenUsageHeatmap: View {
 
     private struct HeatmapSnapshot {
         let tokens: [Date: Int]
-        let usd: [Date: Double]
         let thresholds: [Int]
         let totalTokens: Int
         let activeDayCount: Int
         let maxDayTokens: (date: Date, tokens: Int)?
     }
 
+    // snapshot/dailyTotals 仅依赖 providers + track，但 body 会因 hover（hoveredCell 变化）频繁重算。
+    // 用静态缓存按「日 + 轨道 + provider 指纹(id@fetchedAt)」记忆：移动鼠标 / 切换轨道时直接命中，
+    // 不再每次都重聚合全年数据。指纹含 fetchedAt（刷新即变）和日桶（跨午夜即变），保证不取到陈旧网格。
+    private static var snapshotCache: [String: HeatmapSnapshot] = [:]
+
+    private var snapshotSignature: String {
+        let dayBucket = Int(Date().timeIntervalSince1970 / 86_400)
+        let fingerprint = providers
+            .map { "\($0.id)@\($0.fetchedAt ?? "-")" }
+            .sorted()
+            .joined(separator: ",")
+        return "\(dayBucket)|\(track.rawValue)|\(fingerprint)"
+    }
+
     private var snapshot: HeatmapSnapshot {
-        let totals = dailyTotals
-        let tokens = totals.tokens
-        let usd = totals.usd
+        let key = snapshotSignature
+        if let cached = Self.snapshotCache[key] { return cached }
+        let snap = computeSnapshot()
+        if Self.snapshotCache.count > 16 { Self.snapshotCache.removeAll() }
+        Self.snapshotCache[key] = snap
+        return snap
+    }
+
+    private func computeSnapshot() -> HeatmapSnapshot {
+        let tokens = dailyTotals
         let values = tokens.values.filter { $0 > 0 }.sorted()
         let computedThresholds: [Int]
         if values.count < 2 {
@@ -120,7 +178,6 @@ struct LocalTokenUsageHeatmap: View {
         }
         return HeatmapSnapshot(
             tokens: tokens,
-            usd: usd,
             thresholds: computedThresholds,
             totalTokens: tokens.values.reduce(0, +),
             activeDayCount: values.count,
@@ -132,7 +189,7 @@ struct LocalTokenUsageHeatmap: View {
 
     var body: some View {
         let snap = snapshot
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 4) {
             header
             if snap.tokens.isEmpty {
                 emptyState
@@ -148,14 +205,16 @@ struct LocalTokenUsageHeatmap: View {
     }
 
     // MARK: - Header
+    // 极简品牌标签：小图标 + 品牌名（品牌色），不再放「活动热力图」大标题与灰色副标题。
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(L("Local Token Usage Heatmap", "本地 Token 使用热力图"))
-                .font(.headline.weight(.bold))
-            Text(L("Daily tokens from local logs · excludes proxy stats", "每日本地日志 Token 总量 · 不含代理实测"))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            if let brandAsset {
+                ProviderIconView(brandAsset, size: 15)
+            }
+            Text(brandLabel ?? L("Local Token Usage", "本地 Token 用量"))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(accent)
         }
     }
 
@@ -197,7 +256,9 @@ struct LocalTokenUsageHeatmap: View {
                 }
             }
         }
-        .frame(height: 170)
+        // 贴合最大格子（16pt）时的网格实际高度：月份行 14 + 间距 4 + 7 行格子 130 ≈ 148。
+        // 之前固定 170 比内容高出一截，导致网格与下方「合计/活跃」间出现明显空隙。
+        .frame(height: 148)
     }
 
     private static let monthFormatterZh: DateFormatter = {
@@ -243,15 +304,16 @@ struct LocalTokenUsageHeatmap: View {
     }
 
     private func weekdayLabels(cellSide: CGFloat, spacing: CGFloat) -> some View {
-        let visibleRows: Set<Int> = [1, 3, 5]
+        // 周一起始：行 0=周一…行 6=周日；显示一、三、五（行 0/2/4）。
+        let visibleRows: Set<Int> = [0, 2, 4]
         let names: [String] = [
-            L("Sun", "日"),
             L("Mon", "一"),
             L("Tue", "二"),
             L("Wed", "三"),
             L("Thu", "四"),
             L("Fri", "五"),
-            L("Sat", "六")
+            L("Sat", "六"),
+            L("Sun", "日")
         ]
         return VStack(spacing: spacing) {
             ForEach(0..<7, id: \.self) { row in
@@ -271,7 +333,6 @@ struct LocalTokenUsageHeatmap: View {
         let tokens = snap.tokens
         let computedThresholds = snap.thresholds
         let today = Calendar.current.startOfDay(for: Date())
-        let accent = Self.heatmapAccent
 
         return HStack(alignment: .top, spacing: spacing) {
             ForEach(0..<weeks, id: \.self) { week in
@@ -325,42 +386,51 @@ struct LocalTokenUsageHeatmap: View {
         let today = Calendar.current.startOfDay(for: Date())
         let isActive = cellDate <= today
         let tokens = isActive ? (snap.tokens[cellDate] ?? 0) : 0
-        let usd = isActive ? (snap.usd[cellDate] ?? 0) : 0
         let models = (isActive && tokens > 0) ? modelBreakdown(for: cellDate) : []
 
         let cellCenterX = weekdayLabelWidth + CGFloat(cell.week) * columnPitch + cellSide / 2
         let gridTopY = monthLabelHeight + 4
-        let cellBottomY = gridTopY + CGFloat(cell.day) * (cellSide + spacing) + cellSide
+        let cellTopY = gridTopY + CGFloat(cell.day) * (cellSide + spacing)
+        let cellBottomY = cellTopY + cellSide
 
         let tw = Self.tooltipWidth
         let xClamped = max(4, min(containerWidth - tw - 4, cellCenterX - tw / 2))
+
+        // 靠底部三行（周五/六/日）向上翻转，避免 tooltip 被页面底部裁掉；其余行仍朝下。
+        let flipUp = cell.day >= 4
+        let measuredHeight = tooltipHeight > 0 ? tooltipHeight : 160
+        let yPos = flipUp ? (cellTopY - 8 - measuredHeight) : (cellBottomY + 8)
 
         heatmapTooltipCard(
             date: cellDate,
             isActive: isActive,
             tokens: tokens,
-            usd: usd,
             models: models
         )
         .fixedSize(horizontal: false, vertical: true)
         .frame(width: tw, alignment: .topLeading)
-        .offset(x: xClamped, y: cellBottomY + 8)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: TooltipHeightKey.self, value: proxy.size.height)
+            }
+        )
+        .offset(x: xClamped, y: yPos)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(false)
+        .onPreferenceChange(TooltipHeightKey.self) { tooltipHeight = $0 }
     }
 
     private func heatmapTooltipCard(
         date: Date,
         isActive: Bool,
         tokens: Int,
-        usd: Double,
-        models: [(model: String, tokens: Int, usd: Double)]
+        models: [ModelDetail]
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             tooltipDateHeader(date: date, isActive: isActive)
 
             if isActive {
-                tooltipMetrics(tokens: tokens, usd: usd)
+                tooltipMetrics(tokens: tokens)
 
                 if !models.isEmpty {
                     Divider()
@@ -413,7 +483,7 @@ struct LocalTokenUsageHeatmap: View {
         .padding(.bottom, isActive ? 6 : 0)
     }
 
-    private func tooltipMetrics(tokens: Int, usd: Double) -> some View {
+    private func tooltipMetrics(tokens: Int) -> some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(L("Tokens", "Tokens"))
@@ -422,44 +492,49 @@ struct LocalTokenUsageHeatmap: View {
                 Text(formatNumber(tokens))
                     .font(.caption.weight(.medium).monospacedDigit())
             }
-
             Spacer()
-
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(L("Cost", "费用"))
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                Text(formatCurrency(usd))
-                    .font(.caption.weight(.medium).monospacedDigit())
-            }
         }
     }
 
-    private func tooltipModelList(models: [(model: String, tokens: Int, usd: Double)]) -> some View {
+    private func tooltipModelList(models: [ModelDetail]) -> some View {
         let palette: [Color] = [.green, .blue, .orange, .purple, .pink, .teal, .yellow, .red]
+        let detailFont = Font.system(size: 9).monospacedDigit()
+        let detailLabelFont = Font.system(size: 8)
 
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 6) {
             Text(L("Models", "模型"))
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
 
             ForEach(Array(models.prefix(5).enumerated()), id: \.offset) { idx, entry in
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(palette[idx % palette.count].opacity(0.8))
-                        .frame(width: 5, height: 5)
-                    Text(entry.model)
-                        .font(.system(size: 10))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 4)
-                    HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(palette[idx % palette.count].opacity(0.8))
+                            .frame(width: 5, height: 5)
+                        Text(entry.model)
+                            .font(.system(size: 10))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 4)
                         Text(formatCompactNumber(Double(entry.tokens)))
-                        Text(formatCurrency(entry.usd))
+                            .font(.system(size: 10).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
                     }
-                    .font(.system(size: 10).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
+
+                    if entry.cacheReadTokens > 0 || entry.inputTokens > 0 || entry.outputTokens > 0 {
+                        HStack(spacing: 0) {
+                            Spacer().frame(width: 10)
+                            tokenDetailCell(L("Cache", "缓存"), entry.cacheReadTokens, detailFont, detailLabelFont)
+                            tokenDetailCell(L("Input", "输入"), entry.inputTokens, detailFont, detailLabelFont)
+                            tokenDetailCell(L("Output", "输出"), entry.outputTokens, detailFont, detailLabelFont)
+                            if entry.cacheCreateTokens > 0 {
+                                tokenDetailCell(L("Write", "写入"), entry.cacheCreateTokens, detailFont, detailLabelFont)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
                 }
             }
 
@@ -471,36 +546,34 @@ struct LocalTokenUsageHeatmap: View {
         }
     }
 
+    private func tokenDetailCell(_ label: String, _ value: Int, _ valFont: Font, _ lblFont: Font) -> some View {
+        HStack(spacing: 2) {
+            Text(label)
+                .font(lblFont)
+                .foregroundStyle(.quaternary)
+            Text(formatCompactNumber(Double(value)))
+                .font(valFont)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(minWidth: 52, alignment: .leading)
+    }
+
     // MARK: - Footer
 
     private func footerView(snap: HeatmapSnapshot) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L("Total \(formatCompactNumber(Double(snap.totalTokens))) tokens",
-                       "合计 \(formatCompactNumber(Double(snap.totalTokens))) tokens"))
-                    .font(.caption.weight(.semibold))
-                if let peak = snap.maxDayTokens {
-                    Text(peakSummaryText(for: peak, activeDays: snap.activeDayCount))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+        HStack(alignment: .center, spacing: 6) {
+            Text(L("Total \(formatCompactNumber(Double(snap.totalTokens))) tokens",
+                   "合计 \(formatCompactNumber(Double(snap.totalTokens))) tokens"))
+                .font(.caption.weight(.semibold))
+            if let peak = snap.maxDayTokens {
+                Text("·")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text(peakSummaryText(for: peak, activeDays: snap.activeDayCount))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-
             Spacer()
-
-            HStack(spacing: 4) {
-                Text(L("Less", "少"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                ForEach(0..<5, id: \.self) { level in
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(color(for: level, active: true))
-                        .frame(width: 10, height: 10)
-                }
-                Text(L("More", "多"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -557,4 +630,11 @@ struct LocalTokenUsageHeatmap: View {
 private struct HeatmapCellID: Equatable {
     let week: Int
     let day: Int
+}
+
+private struct TooltipHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - CodeX Proxy Service
+// MARK: - Codex Proxy Service
 // 入站: OpenAI Responses 请求 → Canonical → OpenAI 兼容上游 → Canonical → Responses 响应/SSE。
 // 复用 ClaudeProxy 的 Canonical 中间层与 OpenAICompatibleClient，仅出站构建器为新增。
 
@@ -79,10 +79,10 @@ public actor CodexProxyService {
     }
 
     // MARK: - Faithful Passthrough (Responses → Responses)
-    // CodeX 恒走 Responses 忠实透传：不经过 Canonical 改写，直接转发原始请求体，
+    // Codex 恒走 Responses 忠实透传：不经过 Canonical 改写，直接转发原始请求体，
     // 仅把 model 映射到上游模型、附加上游鉴权与入站关键头；旁路解析 usage 用于统计。
-    // 这样代理对 CodeX 完全透明（= 直连），最大化兼容原生 instructions/reasoning/工具语义。
-    // 备注: chat-completions 上游 / Anthropic 上游接入 CodeX 属 Phase 2，届时再引入 Canonical 转换层。
+    // 这样代理对 Codex 完全透明（= 直连），最大化兼容原生 instructions/reasoning/工具语义。
+    // 备注: chat-completions 上游 / Anthropic 上游接入 Codex 属 Phase 2，届时再引入 Canonical 转换层。
 
     public struct PassthroughUsage: Sendable {
         public let inputTokens: Int
@@ -118,7 +118,7 @@ public actor CodexProxyService {
         )
     }
 
-    /// 模型列表透传：CodeX 启动时会 GET /v1/models 刷新可用模型，原样转发上游结果。
+    /// 模型列表透传：Codex 启动时会 GET /v1/models 刷新可用模型，原样转发上游结果。
     public func passthroughModels(inboundHeaders: [String: String]) async throws -> RawResponsesResult {
         try await upstreamClient.fetchRawModels(
             extraHeaders: Self.forwardableHeaders(from: inboundHeaders)
@@ -152,7 +152,7 @@ public actor CodexProxyService {
         return (try? JSONSerialization.data(withJSONObject: mutated)) ?? rawBody
     }
 
-    /// 转发 CodeX 客户端的关键头（剔除会与上游连接/鉴权冲突的头，鉴权由 makeUpstreamRequest 注入）。
+    /// 转发 Codex 客户端的关键头（剔除会与上游连接/鉴权冲突的头，鉴权由 makeUpstreamRequest 注入）。
     private static let forwardableHeaderMap: [String: String] = [
         "openai-beta": "OpenAI-Beta",
         "originator": "originator",

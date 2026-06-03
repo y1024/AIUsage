@@ -800,7 +800,7 @@ struct ProxyConfigEditorView: View {
                 !proxy.modelMapping.middleModel.name.isEmpty &&
                 !proxy.modelMapping.smallModel.name.isEmpty
         case .codexProxy:
-            // CodeX 单模型：仅校验 bigModel（middle/small 留空）。
+            // Codex 单模型：仅校验 bigModel（middle/small 留空）。
             return nameValid &&
                 !proxy.host.isEmpty &&
                 proxy.port > 0 && proxy.port < 65536 &&

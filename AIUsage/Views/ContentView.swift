@@ -60,7 +60,7 @@ struct ContentView: View {
                 .tag(AppSection.proxyManagement)
 
                 Label {
-                    Text(L("CodeX Proxy", "CodeX 代理", key: "nav.codex_proxy_management"))
+                    Text(L("Codex Proxy", "Codex 代理", key: "nav.codex_proxy_management"))
                 } icon: {
                     ProviderIconView("codex", size: 18)
                 }
@@ -84,23 +84,29 @@ struct ContentView: View {
                 SidebarFooterView()
             }
         } detail: {
-            // 主内容区
             ZStack {
                 switch appState.selectedSection {
                 case .dashboard:
                     DashboardView()
+                        .navigationTitle(L("Dashboard", "仪表盘"))
                 case .providers:
                     ProvidersView()
+                        .navigationTitle(L("Providers", "服务商"))
                 case .costTracking:
                     StatsHubView()
+                        .navigationTitle(L("Usage Stats", "用量统计"))
                 case .proxyManagement:
                     ProxyManagementView()
+                        .navigationTitle(L("Claude Code Proxy", "Claude Code 代理"))
                 case .codexProxyManagement:
                     CodexProxyManagementView()
+                        .navigationTitle(L("Codex Proxy", "Codex 代理"))
                 case .inbox:
                     InboxView()
+                        .navigationTitle(L("Inbox", "消息"))
                 case .settings:
                     SettingsView()
+                        .navigationTitle(L("Settings", "设置"))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -125,23 +131,6 @@ struct ContentView: View {
             ProviderPickerView(mode: mode)
                 .environmentObject(appState)
                 .interactiveDismissDisabled(mode == .initialSetup)
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
-                Button(action: { refreshCoordinator.refreshAllProviders() }) {
-                    HStack(spacing: 5) {
-                        if refreshCoordinator.isAnyRefreshInProgress {
-                            SmallProgressView().frame(width: 14, height: 14)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        Text(L("Refresh All", "全部刷新", key: "actions.refresh_all"))
-                            .font(.subheadline)
-                    }
-                }
-                .help(L("Refresh every app and every account", "刷新所有应用和所有账号", key: "help.refresh_all"))
-                .disabled(refreshCoordinator.isAnyRefreshInProgress)
-            }
         }
     }
 }

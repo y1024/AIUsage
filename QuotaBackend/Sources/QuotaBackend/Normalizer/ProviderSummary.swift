@@ -132,6 +132,10 @@ public struct CostTimelinePoint: Codable, Sendable {
     public let label: String
     public let usd: Double
     public let tokens: Int
+    public var inputTokens: Int?
+    public var outputTokens: Int?
+    public var cacheReadTokens: Int?
+    public var cacheCreateTokens: Int?
 }
 
 public struct ModelInfo: Codable, Sendable {

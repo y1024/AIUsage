@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - System Proxy Notice Banner
-// 在「CodeX 代理」菜单顶部的轻量信息提示：检测到系统代理时，说明接入 CodeX 代理后会自动往
+// 在「Codex 代理」菜单顶部的轻量信息提示：检测到系统代理时，说明接入 Codex 代理后会自动往
 // ~/.codex/.env 写入 no_proxy，让 codex 跳过本地回环（系统代理会拦截本地连接并回 502）。
 // 此处仅作信息说明——实际写入在节点激活时由 ProxyRuntimeService 自动完成。
 //
@@ -73,8 +73,8 @@ struct SystemProxyWarningBanner: View {
     private var explanation: some View {
         let detail = snapshot.summary.map { " (\($0))" } ?? ""
         return Text(L(
-            "Your system proxy\(detail) would make CodeX route requests to the local proxy through it and get 502. When you connect a CodeX node, AIUsage writes no_proxy to \(CodexNoProxyFixer.displayEnvPath) so CodeX bypasses the proxy for local addresses (CodeX-only; external traffic still uses the proxy). If CodeX is already running, restart it.",
-            "你的系统代理\(detail) 会让 CodeX 把发往本地代理的请求误走系统代理而报 502。接入 CodeX 节点时，AIUsage 会自动往 \(CodexNoProxyFixer.displayEnvPath) 写入 no_proxy，让 CodeX 对本地地址跳过代理（仅对 CodeX 生效；访问外网仍走代理）。若 CodeX 已在运行，请重启它。"
+            "Your system proxy\(detail) would make Codex route requests to the local proxy through it and get 502. When you connect a Codex node, AIUsage writes no_proxy to \(CodexNoProxyFixer.displayEnvPath) so Codex bypasses the proxy for local addresses (Codex-only; external traffic still uses the proxy). If Codex is already running, restart it.",
+            "你的系统代理\(detail) 会让 Codex 把发往本地代理的请求误走系统代理而报 502。接入 Codex 节点时，AIUsage 会自动往 \(CodexNoProxyFixer.displayEnvPath) 写入 no_proxy，让 Codex 对本地地址跳过代理（仅对 Codex 生效；访问外网仍走代理）。若 Codex 已在运行，请重启它。"
         ))
         .font(.caption)
         .foregroundStyle(.secondary)

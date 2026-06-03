@@ -9,13 +9,13 @@ enum NodeType: String, Codable, CaseIterable {
     case openaiProxy
     case codexProxy
 
-    /// CodeX 节点：把 OpenAI 兼容上游接入 CodeX（写 ~/.codex/config.toml，本地起 QuotaServer）。
+    /// Codex 节点：把 OpenAI 兼容上游接入 Codex（写 ~/.codex/config.toml，本地起 QuotaServer）。
     var isCodex: Bool { self == .codexProxy }
 }
 
 // MARK: - Node Family
 // 节点家族决定它们在 UI / 激活轨道上的归属：
-// Claude 家族写 ~/.claude/settings.json，CodeX 家族写 ~/.codex/config.toml，二者互不影响。
+// Claude 家族写 ~/.claude/settings.json，Codex 家族写 ~/.codex/config.toml，二者互不影响。
 
 enum ProxyNodeFamily: Hashable {
     case claude   // anthropicDirect + openaiProxy
@@ -195,7 +195,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             )
         }
 
-        /// CodeX 节点只有一个有效模型（存 bigModel），middle/small 留空不参与定价/统计。
+        /// Codex 节点只有一个有效模型（存 bigModel），middle/small 留空不参与定价/统计。
         static var codexDefault: ModelMapping {
             ModelMapping(
                 bigModel: MappedModel(name: "gpt-5.5"),
@@ -319,7 +319,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             || (nodeType == .anthropicDirect && usePassthroughProxy)
     }
 
-    /// CodeX 节点：单一模型 + 价格存放在 `modelMapping.bigModel`。
+    /// Codex 节点：单一模型 + 价格存放在 `modelMapping.bigModel`。
     /// 该模型同时作为写入 `config.toml` 的 `model`、上游模型名与定价键。
     var codexModel: String {
         modelMapping.bigModel.name.trimmingCharacters(in: .whitespacesAndNewlines)

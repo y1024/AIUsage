@@ -12,7 +12,7 @@ extension ProxyViewModel {
         }
     }
 
-    /// 启动时恢复 CodeX 代理激活态（独立于 Claude 轨道）。
+    /// 启动时恢复 Codex 代理激活态（独立于 Claude 轨道）。
     private func restoreActivatedCodexNodeAsync() async {
         let shouldAutoRestore = AppSettings.shared.proxyAutoRestoreOnLaunch
         let savedId = shouldAutoRestore
@@ -29,24 +29,24 @@ extension ProxyViewModel {
                 do {
                     try runtimeService.clearCodexRuntime()
                 } catch {
-                    proxyRuntimeLog.error("Failed to clear CodeX runtime while restoring empty activation state: \(String(describing: error), privacy: .public)")
+                    proxyRuntimeLog.error("Failed to clear Codex runtime while restoring empty activation state: \(String(describing: error), privacy: .public)")
                 }
             }
             return
         }
 
-        proxyRuntimeLog.info("Restoring CodeX node \(config.name, privacy: .public)")
+        proxyRuntimeLog.info("Restoring Codex node \(config.name, privacy: .public)")
         do {
             try await activateRuntime(for: config)
             try persistActivationSelection(config.id, touchLastUsedAt: false, isCodex: true)
         } catch {
-            proxyRuntimeLog.error("Failed to restore CodeX node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
+            proxyRuntimeLog.error("Failed to restore Codex node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
             activatedCodexConfigId = nil
             saveActivatedCodexId()
             do {
                 try runtimeService.clearCodexRuntime()
             } catch {
-                proxyRuntimeLog.error("Failed to clear CodeX runtime after restore failure: \(String(describing: error), privacy: .public)")
+                proxyRuntimeLog.error("Failed to clear Codex runtime after restore failure: \(String(describing: error), privacy: .public)")
             }
         }
     }

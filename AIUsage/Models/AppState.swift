@@ -213,7 +213,7 @@ class AppState: ObservableObject {
 
     /// Single source of truth for "is this provider a local token / cost tracking source?".
     /// Treats normalized `category == ProviderCategory.localCost` and catalog
-    /// `kind == .costTracking` as equivalent so DashboardView, CostTrackingView and
+    /// `kind == .costTracking` as equivalent so DashboardView, StatsHubView and
     /// MenuBarView can never drift apart.
     func isLocalCostProvider(_ provider: ProviderData) -> Bool {
         if provider.category == ProviderCategory.localCost { return true }

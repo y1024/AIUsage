@@ -1,0 +1,175 @@
+import SwiftUI
+import QuotaBackend
+
+// MARK: - ProxyManagementView Node List & Drag Reorder
+// 节点卡片列表（展开时内联统计/最近请求）与手势驱动的「拖拽实时让位」重排逻辑。
+// 拆出以控制单文件规模；与主视图共享 family-scoped 的 @State 拖拽状态。
+
+extension ProxyManagementView {
+
+    // MARK: - Configurations List
+
+    var configurationsList: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(L("Node List", "节点列表"))
+                    .font(.headline.weight(.bold))
+                Spacer()
+            }
+
+            LazyVStack(spacing: 0) {
+                let ids = displayConfigs.map(\.id)
+                let srcIdx = draggingConfigId.flatMap { id in ids.firstIndex(of: id) }
+                let target = srcIdx.map { nodeTarget(ids: ids, srcIdx: $0) }
+                ForEach(Array(displayConfigs.enumerated()), id: \.element.id) { index, config in
+                    let stats = viewModel.statistics[config.id] ?? .empty
+                    let isSelected = selectedConfigId == config.id
+                    let isDragging = draggingConfigId == config.id
+                    VStack(spacing: 0) {
+                        ConfigurationCardView(
+                            config: config,
+                            isActive: viewModel.isNodeActivated(config.id),
+                            isProxyOnlyRunning: viewModel.proxyOnlyRunningIds.contains(config.id),
+                            isBusy: viewModel.isOperationInProgress(config.id),
+                            isSelected: isSelected,
+                            statsRequests: stats.totalRequests,
+                            statsSuccessRate: stats.successRate,
+                            lastRequestAt: stats.lastRequestAt,
+                            onDragChanged: { t in
+                                if draggingConfigId != config.id {
+                                    draggingConfigId = config.id
+                                    if selectedConfigId != nil { selectedConfigId = nil }
+                                }
+                                dragTranslation = t
+                            },
+                            onDragEnded: { commitNodeDrag() },
+                            onToggleActivation: { Task { await viewModel.toggleActivation(config.id) } },
+                            onToggleProxyOnly: { Task { await viewModel.toggleProxyOnly(config.id) } },
+                            onCopyLaunchCommand: { viewModel.copyLaunchCommand(for: config.id) },
+                            onEdit: {
+                                if let profile = viewModel.profileStore.profile(for: config.id) {
+                                    editingProfile = profile
+                                } else {
+                                    editingConfig = config
+                                }
+                            },
+                            onDelete: { pendingDeletionConfig = config },
+                            onDuplicate: { duplicateConfig(config) },
+                            onToggleSelection: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    selectedConfigId = selectedConfigId == config.id ? nil : config.id
+                                }
+                            }
+                        )
+                        .equatable()
+                        .background(nodeRowHeightReader(for: config.id))
+                        .padding(.vertical, 4)
+
+                        if isSelected && config.needsProxyProcess {
+                            statisticsSection(for: config)
+                                .padding(.top, 8)
+                                .padding(.bottom, 4)
+                            recentRequestsSection(for: config)
+                                .padding(.bottom, 4)
+                        }
+                    }
+                    .offset(y: nodeRowOffset(index: index, id: config.id, srcIdx: srcIdx, target: target))
+                    .scaleEffect(isDragging ? 1.02 : 1, anchor: .center)
+                    .shadow(color: .black.opacity(isDragging ? 0.22 : 0),
+                            radius: isDragging ? 9 : 0, x: 0, y: isDragging ? 5 : 0)
+                    .zIndex(isDragging ? 1 : 0)
+                    .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.82), value: target)
+                    .animation(.interactiveSpring(response: 0.30, dampingFraction: 0.85), value: draggingConfigId)
+                }
+            }
+            .onPreferenceChange(NodeRowHeightKey.self) { nodeRowHeights = $0 }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Drag & Drop Helpers (手势驱动「拖拽实时让位」，与订阅账号列表同一套手感)
+
+    // 节点卡片在 LazyVStack(spacing:0) 中各带 .padding(.vertical,4)，上下合计 8 作为行间距。
+    private static let nodeRowSpacing: CGFloat = 8
+    private static let nodeFallbackHeight: CGFloat = 96
+
+    private func nodeRowHeightReader(for id: String) -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(key: NodeRowHeightKey.self, value: [id: geo.size.height])
+        }
+    }
+
+    /// 被拖行的步幅（实测卡片高度 + 行间距），即让位时其余行平移的距离。
+    private func nodeStride(_ id: String) -> CGFloat {
+        (nodeRowHeights[id] ?? Self.nodeFallbackHeight) + Self.nodeRowSpacing
+    }
+
+    /// 各行在基础布局中的中心 Y（被拖行仍按原槽位计入），用于阈值判断。
+    private func nodeBaseCenters(_ ids: [String]) -> [CGFloat] {
+        var centers: [CGFloat] = []
+        var top: CGFloat = 0
+        for id in ids {
+            let h = nodeRowHeights[id] ?? Self.nodeFallbackHeight
+            centers.append(top + h / 2)
+            top += h + Self.nodeRowSpacing
+        }
+        return centers
+    }
+
+    /// 由跟手位移推出被拖行应落入的目标「条目下标」（与相邻行中心比较，支持变高行）。
+    private func nodeTarget(ids: [String], srcIdx: Int) -> Int {
+        guard !ids.isEmpty, srcIdx < ids.count else { return srcIdx }
+        let centers = nodeBaseCenters(ids)
+        let draggedCenter = centers[srcIdx] + dragTranslation
+        var t = srcIdx
+        while t < ids.count - 1 && draggedCenter > centers[t + 1] { t += 1 }
+        while t > 0 && draggedCenter < centers[t - 1] { t -= 1 }
+        return t
+    }
+
+    /// 单行的 y 位移：被拖行跟手；其余行按「让位」规则平移一个被拖行步幅。
+    private func nodeRowOffset(index: Int, id: String, srcIdx: Int?, target: Int?) -> CGFloat {
+        if id == draggingConfigId { return dragTranslation }
+        guard let srcIdx, let target, let dragId = draggingConfigId else { return 0 }
+        let step = nodeStride(dragId)
+        if target > srcIdx, index > srcIdx, index <= target { return -step }
+        if target < srcIdx, index >= target, index < srcIdx { return step }
+        return 0
+    }
+
+    /// 松手时把被拖卡片落到目标条目下标（换算为全局插入下标），并清空拖拽状态。
+    private func commitNodeDrag() {
+        let ids = displayConfigs.map(\.id)
+        defer {
+            draggingConfigId = nil
+            dragTranslation = 0
+        }
+        guard let id = draggingConfigId, let srcIdx = ids.firstIndex(of: id) else { return }
+        let target = nodeTarget(ids: ids, srcIdx: srcIdx)
+        guard target != srcIdx else { return }
+        // 目标「条目下标」→ 当前展示列表的插入间隙 → 全局插入下标（moveConfiguration 用间隙语义）。
+        let displayedGap = target > srcIdx ? target + 1 : target
+        let globalTo = globalSlotIndex(forDisplayedIndex: displayedGap)
+        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) {
+            viewModel.moveConfiguration(fromId: id, toIndex: globalTo)
+        }
+    }
+}
+
+// MARK: - Node Row Height Preference
+
+/// 收集每张节点卡片的实测高度，供手势拖拽计算落点/让位偏移。
+private struct NodeRowHeightKey: PreferenceKey {
+    static var defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}

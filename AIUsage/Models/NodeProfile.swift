@@ -256,7 +256,7 @@ struct ProxySettings: Codable, Equatable {
     var enableHTTPS: Bool?
     var httpsPort: Int?
 
-    /// CodeX 专用：该节点的额外 TOML 顶层键（如 model_reasoning_effort、request_max_retries）。
+    /// Codex 专用：该节点的额外 TOML 顶层键（如 model_reasoning_effort、request_max_retries）。
     /// 激活时与全局通用配置按顶层键合并（节点键覆盖全局），注入受管理 BASE 块。可选以兼容旧档。
     var extraTOML: String?
 
@@ -292,8 +292,8 @@ struct ProxySettings: Codable, Equatable {
         )
     }
 
-    /// CodeX 节点默认：端口 4319（避开 Claude 默认 8080），单模型存 modelMapping.bigModel，
-    /// 上游走 Responses（CodeX 的 wire_api），不启用 HTTPS（本地 http 即可，CodeX 不信任自签证书）。
+    /// Codex 节点默认：端口 4319（避开 Claude 默认 8080），单模型存 modelMapping.bigModel，
+    /// 上游走 Responses（Codex 的 wire_api），不启用 HTTPS（本地 http 即可，Codex 不信任自签证书）。
     static var defaultCodex: ProxySettings {
         ProxySettings(
             host: "127.0.0.1", port: 4319, allowLAN: false,
@@ -402,8 +402,8 @@ struct ProxySettings: Codable, Equatable {
             return .init(baseURL: displayURL, authToken: proxyKey,
                          defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
         case .codexProxy:
-            // CodeX 节点不写 ~/.claude/settings.json（改写 ~/.codex/config.toml），
-            // 故此处返回空 env，profile 的 settings 内容对 CodeX 运行时无影响。
+            // Codex 节点不写 ~/.claude/settings.json（改写 ~/.codex/config.toml），
+            // 故此处返回空 env，profile 的 settings 内容对 Codex 运行时无影响。
             return .init(baseURL: nil, authToken: nil,
                          defaultModel: nil, opusModel: nil, sonnetModel: nil, haikuModel: nil,
                          nodeExtraCACerts: nil)

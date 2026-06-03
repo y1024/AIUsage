@@ -4,9 +4,9 @@ import QuotaBackend
 extension ProxyViewModel {
 
     // MARK: - Family Scoping
-    // 代理实测统计支持按家族（Claude 代理 / CodeX 代理）聚合；nil 表示全部家族。
+    // 代理实测统计支持按家族（Claude 代理 / Codex 代理）聚合；nil 表示全部家族。
 
-    /// 属于 CodeX 家族的节点 id 集合，用于按家族过滤日志。configurations 数量很小，
+    /// 属于 Codex 家族的节点 id 集合，用于按家族过滤日志。configurations 数量很小，
     /// 每次聚合调用现算一次即可，避免维护额外的可变缓存。
     private var codexConfigIdSet: Set<String> {
         Set(configurations.filter { $0.nodeType.isCodex }.map(\.id))

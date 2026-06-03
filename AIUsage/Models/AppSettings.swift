@@ -65,11 +65,6 @@ struct MenuBarCostSourceConfig: Codable, Equatable {
     static let `default` = MenuBarCostSourceConfig(period: .month, metric: .cost)
 }
 
-enum MenuBarStatsSource: String, CaseIterable, Codable {
-    case proxy
-    case claudeCode
-}
-
 extension MenuBarCostPeriod {
     /// Lower bound for filtering timestamped data, or nil for "all time".
     func sinceDate(calendar: Calendar = .current, now: Date = Date()) -> Date? {
@@ -97,13 +92,6 @@ enum DefaultsKey {
     static let appLanguage = "appLanguage"
     static let autoRefreshInterval = "autoRefreshInterval"
     static let backendMode = "backendMode"
-    static let ccStatsChartRange = "ccStatsChartRange"
-    static let ccStatsDistMetric = "ccStatsDistMetric"
-    static let ccStatsDistPeriod = "ccStatsDistPeriod"
-    static let ccStatsDidDefaultToTodayForCodexArchive = "ccStatsDidDefaultToTodayForCodexArchive"
-    static let ccStatsGranularity = "ccStatsGranularity"
-    static let ccStatsMetric = "ccStatsMetric"
-    static let ccStatsSelectedProviderId = "ccStatsSelectedProviderId"
     static let claudeCodeDailyThreshold = "claudeCodeDailyThreshold"
     static let claudeCodeLastNotifiedDate = "claudeCodeLastNotifiedDate"
     static let claudeCodeRefreshInterval = "claudeCodeRefreshInterval"
@@ -115,7 +103,6 @@ enum DefaultsKey {
     static let menuBarPinnedQuotaAccountIds = "menuBarPinnedQuotaAccountIds"
     static let menuBarPinnedCostSourceIds = "menuBarPinnedCostSourceIds"
     static let menuBarCostSourceConfigs = "menuBarCostSourceConfigs"
-    static let menuBarSummaryStatsSource = "menuBarSummaryStatsSource"
     static let proxyActivatedConfigId = "proxyActivatedConfigId"
     static let proxyActivatedCodexConfigId = "proxyActivatedCodexConfigId"
     static let proxyAutoRestoreOnLaunch = "proxyAutoRestoreOnLaunch"
@@ -125,14 +112,10 @@ enum DefaultsKey {
     static let proxyLogs = "proxyLogs"
     static let proxyStatistics = "proxyStatistics"
     static let proxyStatsChartRange = "proxyStatsChartRange"
-    static let proxyStatsGranularity = "proxyStatsGranularity"
-    static let proxyStatsDistributionMetric = "proxyStatsDistributionMetric"
     static let proxyStatsMetric = "proxyStatsMetric"
-    static let proxyStatsModel = "proxyStatsModel"
-    static let proxyStatsNodeId = "proxyStatsNodeId"
+    static let proxyStatsPeriod = "proxyStatsPeriod"
     static let proxyStatsFamily = "proxyStatsFamily"
-    /// Token 统计页一级数据域：本地日志(local) / 代理实测(proxy)。
-    static let statsDomain = "statsDomain"
+    static let proxyStatsTrack = "proxyStatsTrack"
     static let quotaIndicatorMetric = "quotaIndicatorMetric"
     static let quotaIndicatorStyle = "quotaIndicatorStyle"
     static let readAlertIds = "readAlertIds"
@@ -217,8 +200,6 @@ final class AppSettings: ObservableObject {
         return decoded
     }()
 
-    @Published var menuBarSummaryStatsSource: MenuBarStatsSource = MenuBarStatsSource(rawValue: UserDefaults.standard.string(forKey: DefaultsKey.menuBarSummaryStatsSource) ?? "") ?? .proxy
-
     func costSourceConfig(for id: String) -> MenuBarCostSourceConfig {
         menuBarCostSourceConfigs[id] ?? .default
     }
@@ -274,7 +255,6 @@ final class AppSettings: ObservableObject {
             guard let data = try? JSONEncoder().encode(configs) else { return }
             defaults.set(data, forKey: DefaultsKey.menuBarCostSourceConfigs)
         }.store(in: &cancellables)
-        $menuBarSummaryStatsSource.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.menuBarSummaryStatsSource) }.store(in: &cancellables)
         $backendMode.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.backendMode) }.store(in: &cancellables)
         $autoRefreshInterval.dropFirst().sink { [weak self] val in
             let normalized = Self.normalizedAutoRefreshInterval(val)

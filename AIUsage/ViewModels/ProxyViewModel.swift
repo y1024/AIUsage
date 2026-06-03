@@ -15,8 +15,6 @@ enum ProxyRuntimeError: LocalizedError {
     case proxyStartFailed(String)
     case activationStatePersistFailed
     case deactivationStatePersistFailed
-    case pricingOverridesWriteFailed
-    case pricingOverridesClearFailed
 
     var errorDescription: String? {
         switch self {
@@ -33,10 +31,6 @@ enum ProxyRuntimeError: LocalizedError {
             return AppSettings.shared.t("The node started, but AIUsage could not persist the activated state.", "节点已启动，但 AIUsage 无法保存激活状态。")
         case .deactivationStatePersistFailed:
             return AppSettings.shared.t("The node stopped, but AIUsage could not persist the deactivated state.", "节点已停止，但 AIUsage 无法保存停用状态。")
-        case .pricingOverridesWriteFailed:
-            return AppSettings.shared.t("Failed to write proxy pricing overrides.", "写入代理计费覆盖失败。")
-        case .pricingOverridesClearFailed:
-            return AppSettings.shared.t("Failed to clear proxy pricing overrides.", "清理代理计费覆盖失败。")
         }
     }
 }
@@ -47,7 +41,7 @@ class ProxyViewModel: ObservableObject {
 
     @Published var configurations: [ProxyConfiguration] = []
     @Published var activatedConfigId: String?
-    /// CodeX 节点独立的激活轨道。CodeX 写 ~/.codex/config.toml，与 Claude 节点（~/.claude/settings.json）
+    /// Codex 节点独立的激活轨道。Codex 写 ~/.codex/config.toml，与 Claude 节点（~/.claude/settings.json）
     /// 写不同文件，故二者可同时激活，分别用 `activatedConfigId` / `activatedCodexConfigId` 跟踪。
     @Published var activatedCodexConfigId: String?
     @Published var proxyOnlyRunningIds: Set<String> = []
@@ -105,8 +99,16 @@ class ProxyViewModel: ObservableObject {
 
     var persistenceWorkItem: DispatchWorkItem?
     static let persistenceDebounceInterval: TimeInterval = 2.0
+    var logsDirtyDays: Set<String> = []
 
     let runtimeService: ProxyRuntimeService
+
+    private static let shardDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = .current
+        return f
+    }()
 
     var logRetentionDays: Int {
         let days = UserDefaults.standard.integer(forKey: DefaultsKey.proxyLogRetentionDays)
@@ -116,6 +118,15 @@ class ProxyViewModel: ObservableObject {
     var logsFilePath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return (home as NSString).appendingPathComponent(".config/aiusage/proxy-logs.json")
+    }
+
+    var logsShardDirPath: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent(".config/aiusage/proxy-logs")
+    }
+
+    func shardDayKey(_ date: Date) -> String {
+        Self.shardDateFormatter.string(from: date)
     }
 
     init() {
@@ -135,8 +146,8 @@ class ProxyViewModel: ObservableObject {
         observeCodexAccountActivation()
     }
 
-    /// 互斥：监听 CodeX 订阅账号激活通知。账号写 ~/.codex/auth.json 前，先停用正在运行的
-    /// CodeX 代理并还原 config.toml，避免两条轨道同时改 ~/.codex 造成冲突与统计串台。
+    /// 互斥：监听 Codex 订阅账号激活通知。账号写 ~/.codex/auth.json 前，先停用正在运行的
+    /// Codex 代理并还原 config.toml，避免两条轨道同时改 ~/.codex 造成冲突与统计串台。
     private func observeCodexAccountActivation() {
         NotificationCenter.default.addObserver(
             forName: .codexSubscriptionAccountActivating,
@@ -197,7 +208,7 @@ class ProxyViewModel: ObservableObject {
     /// Persist a single profile to its JSON file via the store.
     @discardableResult
     func saveProfile(_ profile: NodeProfile) -> Bool {
-        profileStore.save(profile)
+        return profileStore.save(profile)
     }
 
     func saveActivatedId() {
@@ -225,7 +236,7 @@ class ProxyViewModel: ObservableObject {
         activatedConfigId == id || activatedCodexConfigId == id
     }
 
-    /// 取指定家族当前激活的节点 id（CodeX 走独立轨道）。
+    /// 取指定家族当前激活的节点 id（Codex 走独立轨道）。
     func activatedId(isCodex: Bool) -> String? {
         isCodex ? activatedCodexConfigId : activatedConfigId
     }
@@ -292,6 +303,8 @@ class ProxyViewModel: ObservableObject {
                 proxyOnlyRunningIds.remove(profile.id)
             }
             configurations[index] = config
+            // 节点定价可能在本次保存中被新增/修改，回填历史 $0 日志的费用。
+            recalculateCosts(for: profile.id)
             if wasActivated {
                 do {
                     try await performActivationTransaction(profile.id)
@@ -331,6 +344,8 @@ class ProxyViewModel: ObservableObject {
             configurations[index] = config
             let profile = NodeProfile.fromLegacyConfiguration(config)
             profileStore.save(profile)
+            // 节点定价可能在本次保存中被新增/修改，回填历史 $0 日志的费用。
+            recalculateCosts(for: config.id)
             if wasActivated {
                 do {
                     try await performActivationTransaction(config.id)
@@ -406,7 +421,7 @@ class ProxyViewModel: ObservableObject {
             return .init(baseURL: config.anthropicBaseURL, authToken: config.anthropicAPIKey,
                          defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
         case .openaiProxy, .codexProxy:
-            // CodeX 节点通过 activateCodexRuntime 走 config.toml，不会调用本方法；
+            // Codex 节点通过 activateCodexRuntime 走 config.toml，不会调用本方法；
             // 这里仅为满足 switch 穷尽性，返回与 openaiProxy 同形的配置，实际不会写入 settings.json。
             let proxyKey = config.expectedClientKey.isEmpty ? "proxy-key" : config.expectedClientKey
             let baseURL: String
@@ -422,7 +437,7 @@ class ProxyViewModel: ObservableObject {
     }
 
     func activateConfiguration(_ id: String) async {
-        // 仅与同家族当前激活节点互斥（CodeX 与 Claude 各自独立轨道）。
+        // 仅与同家族当前激活节点互斥（Codex 与 Claude 各自独立轨道）。
         let currentActive = activatedId(isCodex: nodeIsCodex(id))
         let busyIds = Set([id, currentActive].compactMap { $0 })
         guard !busyIds.contains(where: { operationInProgressConfigIds.contains($0) }) else { return }
@@ -523,7 +538,7 @@ class ProxyViewModel: ObservableObject {
             throw error
         }
 
-        // 互斥（代理→账号方向）：CodeX 代理接管 config.toml 后，把订阅账号标记为未激活。
+        // 互斥（代理→账号方向）：Codex 代理接管 config.toml 后，把订阅账号标记为未激活。
         if isCodex {
             ProviderActivationManager.shared.markCodexSubscriptionInactiveForProxy()
         }
@@ -566,7 +581,7 @@ class ProxyViewModel: ObservableObject {
             activatedConfigId = activeId
         }
 
-        // isEnabled 反映「任一轨道处于激活」，兼顾 CodeX 与 Claude 同时激活。
+        // isEnabled 反映「任一轨道处于激活」，兼顾 Codex 与 Claude 同时激活。
         let activeSet = Set([activatedConfigId, activatedCodexConfigId].compactMap { $0 })
         for index in configurations.indices {
             let isActive = activeSet.contains(configurations[index].id)

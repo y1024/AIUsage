@@ -89,5 +89,17 @@ extension CodexCostProvider {
         return model
     }
 
+    // MARK: - Source Tagging
+
+    /// 根据 model_provider 为模型名追加来源标签，方便热力图区分订阅 / API
+    /// nil / 空值视为订阅（旧会话无此字段，均为直连 OpenAI）
+    func sourceTaggedModel(_ baseModel: String, provider: String?) -> String {
+        if let provider, !provider.isEmpty,
+           provider.lowercased().contains("proxy") {
+            return "\(baseModel) (API)"
+        }
+        return "\(baseModel) (Sub)"
+    }
+
     // MARK: - Date and misc helpers
 }

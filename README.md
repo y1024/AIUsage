@@ -57,7 +57,7 @@
 | **Multi-account** | Multiple accounts per provider, independent refresh, one-click CLI switching |
 | **Usage Stats** | Unified cost & token breakdown across **Local Logs** (Claude Code / Codex sessions) and **Proxy Logs** — per-model trends, time-period analysis, source-aware "All Sources" aggregation |
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
-| **CodeX Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
+| **Codex Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
 | **Menu Bar** | Multi-account status bar icons, quota/cost metrics, quick-glance popover, colored progress bars |
 | **Credential Vault** | macOS Keychain storage for all managed credentials |
 
@@ -81,11 +81,11 @@
     <td align="center"><strong>Claude Code Proxy · Configuration</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/Codex-Proxy-stats_en.png" alt="CodeX proxy"></td>
+    <td width="50%"><img src="docs/images/Codex-Proxy-stats_en.png" alt="Codex proxy"></td>
     <td width="50%"><img src="docs/images/proxy-stats_en.png" alt="Usage stats"></td>
   </tr>
   <tr>
-    <td align="center"><strong>CodeX Proxy · Nodes &amp; Subscriptions</strong></td>
+    <td align="center"><strong>Codex Proxy · Nodes &amp; Subscriptions</strong></td>
     <td align="center"><strong>Usage Stats (Claude &amp; Codex)</strong></td>
   </tr>
   <tr>
@@ -102,7 +102,7 @@ Download `.dmg` or `.zip` from the [Releases](https://github.com/sylearn/AIUsage
 
 ## Proxies
 
-AIUsage ships two independent proxies — one for **Claude Code**, one for **CodeX (Codex CLI)** — each with node management, usage logging and a unified switcher.
+AIUsage ships two independent proxies — one for **Claude Code**, one for **Codex (Codex CLI)** — each with node management, usage logging and a unified switcher.
 
 ### Claude Code Proxy
 
@@ -115,7 +115,7 @@ Use Claude Code CLI with any OpenAI-compatible model, or transparently log Anthr
 
 **Quick start:** Open AIUsage → Claude Code Proxy → New Node → Configure → Activate. Settings are written to `~/.claude/settings.json` automatically.
 
-### CodeX Proxy
+### Codex Proxy
 
 Point the Codex CLI at any OpenAI-compatible upstream (Responses API), and switch between **subscription accounts** and **API nodes** from one place — they are mutually exclusive, so only one identity is ever active.
 
@@ -125,7 +125,7 @@ Point the Codex CLI at any OpenAI-compatible upstream (Responses API), and switc
 | **Unified switcher** | One toggle across subscription accounts (`~/.codex/auth.json`) and API nodes (`config.toml`) |
 | **Surgical config merge** | Injects managed blocks into `~/.codex/config.toml` while preserving your own settings; global fragment + per-node TOML override |
 
-**Quick start:** Open AIUsage → CodeX Proxy → New Node (or pick a subscription account) → Configure → Activate. `~/.codex/config.toml` is merged automatically.
+**Quick start:** Open AIUsage → Codex Proxy → New Node (or pick a subscription account) → Configure → Activate. `~/.codex/config.toml` is merged automatically.
 
 ---
 

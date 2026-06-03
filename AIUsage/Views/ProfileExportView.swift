@@ -74,13 +74,13 @@ struct ProfileExportView: View {
                 .padding(20)
             }
 
-            if !viewModel.profileStore.globalConfig.settings.isEmpty {
+            if hasCommonConfigToExport {
                 HStack(spacing: 6) {
                     Image(systemName: "gearshape.2.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
-                    Text(L("Global config will be included in export.",
-                           "通用配置将一并导出。"))
+                    Text(L("Common config is included for each selected family.",
+                           "每个所选家族的通用配置将一并导出。"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -112,6 +112,15 @@ struct ProfileExportView: View {
             .padding(20)
         }
         .frame(width: 450, height: 500)
+    }
+
+    /// 是否存在可随导出携带的通用配置（任一家族非空）。
+    private var hasCommonConfigToExport: Bool {
+        let store = viewModel.profileStore
+        let claude = !store.globalConfig.settings.isEmpty
+        let codex = !store.codexGlobalConfig.tomlText
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return claude || codex
     }
 
     private func performExport() {

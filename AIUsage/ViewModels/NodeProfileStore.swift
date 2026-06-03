@@ -190,10 +190,15 @@ class NodeProfileStore: ObservableObject {
         var failed: Int = 0
         var skipped: Int = 0
         var importedGlobalConfig = false
+        var importedCodexGlobalConfig = false
         var errors: [String] = []
     }
 
-    private static let globalConfigFileName = "global-config.json"
+    // 导出/导入用的「通用配置」文件名（家族区分、语义直白）。
+    // 与磁盘内部存储路径（global-config.json / codex-global-config.json）解耦——
+    // 导出包里只用这两个名字，导入也只认这两个名字。
+    static let claudeCommonConfigExportName = "claude-common-config.json"
+    static let codexCommonConfigExportName = "codex-common-config.json"
 
     func importProfiles(from urls: [URL]) -> ImportResult {
         var result = ImportResult()
@@ -213,12 +218,22 @@ class NodeProfileStore: ObservableObject {
         }
 
         for fileURL in filesToImport {
-            if fileURL.lastPathComponent == Self.globalConfigFileName {
+            if fileURL.lastPathComponent == Self.claudeCommonConfigExportName {
                 if let data = try? Data(contentsOf: fileURL),
                    let imported = try? GlobalConfig.fromFileData(data) {
                     globalConfig = imported
                     saveGlobalConfig()
                     result.importedGlobalConfig = true
+                }
+                continue
+            }
+
+            if fileURL.lastPathComponent == Self.codexCommonConfigExportName {
+                if let data = try? Data(contentsOf: fileURL),
+                   let imported = try? CodexGlobalConfig.fromFileData(data) {
+                    codexGlobalConfig = imported
+                    saveCodexGlobalConfig()
+                    result.importedCodexGlobalConfig = true
                 }
                 continue
             }
@@ -230,9 +245,12 @@ class NodeProfileStore: ObservableObject {
             }
 
             do {
-                var profile = try NodeProfile.fromFileData(data)
+                let profile = try NodeProfile.fromFileData(data)
+                // 去重：同 id 视为同一节点（导出文件内嵌的 id 稳定，跨设备保持一致），
+                // 已存在则跳过，避免重复导入同一份导出文件生成多份重复节点。
                 if profiles.contains(where: { $0.id == profile.id }) {
-                    profile.metadata.id = UUID().uuidString
+                    result.skipped += 1
+                    continue
                 }
                 if save(profile) {
                     result.succeeded += 1
@@ -254,22 +272,38 @@ class NodeProfileStore: ObservableObject {
     @discardableResult
     func exportProfiles(ids: [String], to directory: URL) throws -> Int {
         var exported = 0
+        var hasClaudeNode = false
+        var hasCodexNode = false
+
         for id in ids {
             guard let profile = profile(for: id) else { continue }
+            let isCodex = profile.metadata.nodeType.isCodex
+            if isCodex { hasCodexNode = true } else { hasClaudeNode = true }
+
             let data = try profile.toFileData()
             let sanitizedName = profile.metadata.name
                 .replacingOccurrences(of: "/", with: "-")
                 .replacingOccurrences(of: ":", with: "-")
-            let fileName = "\(sanitizedName)_\(profile.id.prefix(8)).json"
+            // 家族前缀让文件夹里一眼区分 Claude / Codex 节点。
+            let familyPrefix = isCodex ? "codex" : "claude"
+            let fileName = "\(familyPrefix)_\(sanitizedName)_\(profile.id.prefix(8)).json"
             let fileURL = directory.appendingPathComponent(fileName)
             try data.write(to: fileURL, options: .atomic)
             exported += 1
         }
 
-        if !globalConfig.settings.isEmpty {
-            let gcData = try globalConfig.toFileData()
-            let gcURL = directory.appendingPathComponent(Self.globalConfigFileName)
-            try gcData.write(to: gcURL, options: .atomic)
+        // 按家族携带对应「通用配置」：导出集合含 Claude 节点才带 Claude 通用配置，
+        // 含 Codex 节点才带 Codex 通用配置（不再无条件混入 Claude 配置）。
+        if hasClaudeNode, !globalConfig.settings.isEmpty {
+            let data = try globalConfig.toFileData()
+            let url = directory.appendingPathComponent(Self.claudeCommonConfigExportName)
+            try data.write(to: url, options: .atomic)
+        }
+        if hasCodexNode,
+           !codexGlobalConfig.tomlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let data = try codexGlobalConfig.toFileData()
+            let url = directory.appendingPathComponent(Self.codexCommonConfigExportName)
+            try data.write(to: url, options: .atomic)
         }
 
         return exported
@@ -332,7 +366,7 @@ class NodeProfileStore: ObservableObject {
         }
     }
 
-    // MARK: - CodeX Global Config
+    // MARK: - Codex Global Config
 
     func loadCodexGlobalConfig() {
         let path = Self.codexGlobalConfigPath
@@ -343,7 +377,7 @@ class NodeProfileStore: ObservableObject {
         do {
             codexGlobalConfig = try CodexGlobalConfig.fromFileData(data)
         } catch {
-            storeLog.error("Failed to load CodeX global config: \(String(describing: error), privacy: .public)")
+            storeLog.error("Failed to load Codex global config: \(String(describing: error), privacy: .public)")
             codexGlobalConfig = .empty
         }
     }
@@ -359,7 +393,7 @@ class NodeProfileStore: ObservableObject {
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
             return true
         } catch {
-            storeLog.error("Failed to save CodeX global config: \(String(describing: error), privacy: .public)")
+            storeLog.error("Failed to save Codex global config: \(String(describing: error), privacy: .public)")
             return false
         }
     }

@@ -21,7 +21,7 @@ struct GlobalConfigSection: View {
                 .foregroundStyle(.orange)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(L("Global Config", "通用配置"))
+                Text(L("Common Config", "通用配置"))
                     .font(.subheadline.weight(.semibold))
                 Text(keyCount > 0
                      ? L("\(keyCount) top-level keys", "\(keyCount) 个顶层字段")
@@ -114,7 +114,7 @@ private struct GlobalConfigEditorView: View {
                 .font(.system(size: 14))
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 1) {
-                Text(L("Global Config", "通用配置"))
+                Text(L("Common Config", "通用配置"))
                     .font(.system(size: 13, weight: .semibold))
                 Text(L(
                     "Shared fragment merged into settings.json on activation. Node values override.",

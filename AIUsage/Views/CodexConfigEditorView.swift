@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 import os.log
 
-// MARK: - CodeX config.toml Editor
+// MARK: - Codex config.toml Editor
 // 直接查看/编辑 live ~/.codex/config.toml。提供 TOML 语法高亮（NSTextView 着色）+ 轻量语法检查
 // （行级 lint，非完整 TOML 解析）+ 纯文本保存（0600 权限）。检测到 AIUsage 受管理代理块时给出
 // 明确提示，避免误改 sentinel 之间的内容。
@@ -64,7 +64,7 @@ struct CodexConfigEditorView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("~/.codex/config.toml")
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                Text(L("Live configuration file for CodeX", "CodeX 当前生效的配置文件"))
+                Text(L("Live configuration file for Codex", "Codex 当前生效的配置文件"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -218,7 +218,7 @@ struct CodexConfigEditorView: View {
     }
 }
 
-// MARK: - CodeX Global Config Editor (fragment)
+// MARK: - Codex Global Config Editor (fragment)
 // 编辑 CodexGlobalConfig.tomlText —— 激活节点/订阅时按顶层键合并注入 config.toml 的「通用配置基底」。
 // 与 live config.toml 编辑器复用同一套 TOML 高亮 + 轻量检查；保存进 NodeProfileStore（JSON 容器）。
 
@@ -256,7 +256,7 @@ struct CodexGlobalConfigEditorView: View {
                 .font(.system(size: 14))
                 .foregroundStyle(.indigo)
             VStack(alignment: .leading, spacing: 1) {
-                Text(L("Global Config", "通用配置"))
+                Text(L("Common Config", "通用配置"))
                     .font(.system(size: 13, weight: .semibold))
                 Text(L(
                     "Base TOML fragment merged into config.toml on activation. Node values override.",
@@ -357,7 +357,7 @@ struct CodexGlobalConfigEditorView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
             withAnimation(.easeOut(duration: 0.3)) { showSaveSuccess = false }
         }
-        codexConfigEditorLog.info("CodeX global config fragment saved")
+        codexConfigEditorLog.info("Codex global config fragment saved")
     }
 }
 

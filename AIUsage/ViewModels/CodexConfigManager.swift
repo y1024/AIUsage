@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-// MARK: - CodeX Config Manager
+// MARK: - Codex Config Manager
 // 管理 ~/.codex/config.toml：以「外科式合并」方式注入受管理的 [model_providers.aiusage-proxy]
 // 块，并把顶层 model / model_provider 指向本地代理；停用时从备份完整还原原文。
 //
@@ -21,13 +21,13 @@ enum CodexConfigError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unreadableConfig:
-            return AppSettings.shared.t("CodeX config.toml is unreadable.", "CodeX config.toml 无法读取。")
+            return AppSettings.shared.t("Codex config.toml is unreadable.", "Codex config.toml 无法读取。")
         case .failedToCreateDirectory:
-            return AppSettings.shared.t("Failed to create the CodeX config directory.", "创建 CodeX 配置目录失败。")
+            return AppSettings.shared.t("Failed to create the Codex config directory.", "创建 Codex 配置目录失败。")
         case .failedToWriteFile:
-            return AppSettings.shared.t("Failed to write CodeX config.toml.", "写入 CodeX config.toml 失败。")
+            return AppSettings.shared.t("Failed to write Codex config.toml.", "写入 Codex config.toml 失败。")
         case .failedToRestore:
-            return AppSettings.shared.t("Failed to restore CodeX config.toml from backup.", "从备份还原 CodeX config.toml 失败。")
+            return AppSettings.shared.t("Failed to restore Codex config.toml from backup.", "从备份还原 Codex config.toml 失败。")
         }
     }
 }
@@ -35,7 +35,7 @@ enum CodexConfigError: LocalizedError {
 final class CodexConfigManager {
     static let shared = CodexConfigManager()
 
-    /// 受管理的 provider id。CodeX 保留 openai/ollama/lmstudio，aiusage-proxy 不冲突。
+    /// 受管理的 provider id。Codex 保留 openai/ollama/lmstudio，aiusage-proxy 不冲突。
     static let providerId = "aiusage-proxy"
 
     private let fileManager = FileManager.default
@@ -77,8 +77,8 @@ final class CodexConfigManager {
 
     /// 注入受管理的代理配置：把顶层 model/model_provider 指向 aiusage-proxy，并追加 provider 块。
     /// - Parameters:
-    ///   - baseURL: 本地代理地址（含 /v1，CodeX 会在其后拼 /responses）。
-    ///   - bearerToken: 通过 experimental_bearer_token 直接下发，CodeX 以 Bearer 头发给本地代理。
+    ///   - baseURL: 本地代理地址（含 /v1，Codex 会在其后拼 /responses）。
+    ///   - bearerToken: 通过 experimental_bearer_token 直接下发，Codex 以 Bearer 头发给本地代理。
     ///   - model: 写入顶层 model 的模型名（同时作为上游模型 / 定价键）。
     ///   - globalTOML: 全局通用配置基底（启用时传入；否则 nil）。
     ///   - nodeTOML: 当前节点的额外 TOML（覆盖全局同名顶层键 / 同名表）。
@@ -113,7 +113,7 @@ final class CodexConfigManager {
             baseTables: merged.tables
         )
         try writeConfig(injected)
-        codexConfigLog.info("CodeX config.toml proxy block injected (provider=\(Self.providerId, privacy: .public), baseKeys=\(merged.topLevel.count), baseTables=\(merged.tables.count))")
+        codexConfigLog.info("Codex config.toml proxy block injected (provider=\(Self.providerId, privacy: .public), baseKeys=\(merged.topLevel.count), baseTables=\(merged.tables.count))")
     }
 
     // MARK: - Deactivation
@@ -126,9 +126,9 @@ final class CodexConfigManager {
                 try data.write(to: URL(fileURLWithPath: configPath), options: .atomic)
                 applyRestrictivePermissions()
                 try? fileManager.removeItem(atPath: backupPath)
-                codexConfigLog.info("CodeX config.toml restored from backup")
+                codexConfigLog.info("Codex config.toml restored from backup")
             } catch {
-                codexConfigLog.error("Failed to restore CodeX config.toml from backup: \(String(describing: error), privacy: .public)")
+                codexConfigLog.error("Failed to restore Codex config.toml from backup: \(String(describing: error), privacy: .public)")
                 throw CodexConfigError.failedToRestore
             }
             return
@@ -139,10 +139,10 @@ final class CodexConfigManager {
         let stripped = stripManagedBlocks(from: current)
         if stripped.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             try? fileManager.removeItem(atPath: configPath)
-            codexConfigLog.info("CodeX config.toml removed (was managed-only, no backup)")
+            codexConfigLog.info("Codex config.toml removed (was managed-only, no backup)")
         } else {
             try writeConfig(stripped)
-            codexConfigLog.info("CodeX config.toml managed blocks stripped (no backup)")
+            codexConfigLog.info("Codex config.toml managed blocks stripped (no backup)")
         }
     }
 
@@ -362,7 +362,7 @@ final class CodexConfigManager {
         do {
             return try String(contentsOfFile: configPath, encoding: .utf8)
         } catch {
-            codexConfigLog.error("Failed to read CodeX config.toml: \(String(describing: error), privacy: .public)")
+            codexConfigLog.error("Failed to read Codex config.toml: \(String(describing: error), privacy: .public)")
             throw CodexConfigError.unreadableConfig
         }
     }
@@ -371,7 +371,7 @@ final class CodexConfigManager {
         do {
             try content.data(using: .utf8)?.write(to: URL(fileURLWithPath: backupPath), options: .atomic)
         } catch {
-            codexConfigLog.error("Failed to write CodeX config backup: \(String(describing: error), privacy: .public)")
+            codexConfigLog.error("Failed to write Codex config backup: \(String(describing: error), privacy: .public)")
             throw CodexConfigError.failedToWriteFile
         }
     }
@@ -381,14 +381,14 @@ final class CodexConfigManager {
         do {
             try fileManager.createDirectory(atPath: dir, withIntermediateDirectories: true)
         } catch {
-            codexConfigLog.error("Failed to create CodeX config directory: \(String(describing: error), privacy: .public)")
+            codexConfigLog.error("Failed to create Codex config directory: \(String(describing: error), privacy: .public)")
             throw CodexConfigError.failedToCreateDirectory
         }
         do {
             try content.data(using: .utf8)?.write(to: URL(fileURLWithPath: configPath), options: .atomic)
             applyRestrictivePermissions()
         } catch {
-            codexConfigLog.error("Failed to write CodeX config.toml: \(String(describing: error), privacy: .public)")
+            codexConfigLog.error("Failed to write Codex config.toml: \(String(describing: error), privacy: .public)")
             throw CodexConfigError.failedToWriteFile
         }
     }

@@ -1,0 +1,137 @@
+import Foundation
+import os.log
+
+// MARK: - Proxy Usage Archive
+// 代理日志的「永久每日用量归档」：按 家族(claude / codex) → 日 → 上游模型 聚合。
+// 成本逐条冻结——直接累加 ProxyRequestLog.estimatedCostUSD（该值在请求发生时已用当时节点定价算好），
+// 因此同一模型在不同节点不同价不会冲突，改价也不影响已入档的历史。
+//
+// 设计要点：
+// - 原始代理日志（~/.config/aiusage/proxy-logs/）可按保留期裁剪以省空间，
+//   但本归档的每日聚合永不丢失，是热力图 / 用量统计的真相源。
+// - 折叠语义为「整日替换」：保留期窗口内的日期每个持久化周期都用 recentLogs 重算覆盖（幂等，
+//   因为冻结成本是确定性求和），窗口外的旧日期保持上次冻结值不动——杜绝刷新时线性膨胀。
+//
+// 数据来源: ProxyViewModel.recentLogs（经 ProxyViewModel+UsageArchive 折叠写入）
+// 持久化:   ~/.config/aiusage/usage-archive/proxy-usage-<family>-v<version>.json
+
+private let proxyUsageArchiveLog = Logger(subsystem: "com.aiusage.desktop", category: "ProxyUsageArchive")
+
+enum ProxyUsageFamily: String, CaseIterable, Sendable {
+    case claude
+    case codex
+}
+
+struct ProxyUsageModelAgg: Codable, Sendable {
+    var inputTokens: Int = 0
+    var outputTokens: Int = 0
+    var cacheReadTokens: Int = 0
+    var cacheCreateTokens: Int = 0
+    var costUSD: Double = 0
+    var requests: Int = 0
+
+    var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheCreateTokens }
+
+    mutating func add(_ log: ProxyRequestLog) {
+        inputTokens += log.tokensInput
+        outputTokens += log.tokensOutput
+        cacheReadTokens += log.tokensCacheRead
+        cacheCreateTokens += log.tokensCacheCreation
+        costUSD += log.estimatedCostUSD
+        requests += 1
+    }
+}
+
+struct ProxyUsageDay: Codable, Sendable {
+    var models: [String: ProxyUsageModelAgg] = [:]
+
+    var isEmpty: Bool { models.isEmpty }
+}
+
+struct ProxyUsageArchive: Codable, Sendable {
+    var version: Int
+    var updatedAt: String
+    var days: [String: ProxyUsageDay]
+}
+
+// MARK: - Store
+
+@MainActor
+final class ProxyUsageArchiveStore {
+    static let shared = ProxyUsageArchiveStore()
+
+    static let artifactVersion = 1
+
+    private var archives: [ProxyUsageFamily: ProxyUsageArchive] = [:]
+    private var loaded: Set<ProxyUsageFamily> = []
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    // MARK: Read
+
+    /// 某家族的每日聚合（永久），供 Claude / Codex API 轨构建 costSummary。
+    func days(_ family: ProxyUsageFamily) -> [String: ProxyUsageDay] {
+        loadIfNeeded(family).days
+    }
+
+    // MARK: Write
+
+    /// 用重算后的每日桶「整日替换」归档中对应日期并持久化。
+    /// 仅替换传入的（非空）日期；未传入的旧日期保持冻结值不动。
+    func replaceDays(_ family: ProxyUsageFamily, days: [String: ProxyUsageDay]) {
+        var archive = loadIfNeeded(family)
+        var changed = false
+        for (day, bucket) in days where !bucket.isEmpty {
+            archive.days[day] = bucket
+            changed = true
+        }
+        guard changed else { return }
+        archive.updatedAt = Self.iso8601.string(from: Date())
+        archives[family] = archive
+        save(family, archive: archive)
+    }
+
+    // MARK: Disk
+
+    private func loadIfNeeded(_ family: ProxyUsageFamily) -> ProxyUsageArchive {
+        if let archive = archives[family], loaded.contains(family) { return archive }
+        loaded.insert(family)
+
+        let url = Self.fileURL(family)
+        guard let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(ProxyUsageArchive.self, from: data),
+              decoded.version == Self.artifactVersion else {
+            let fresh = ProxyUsageArchive(version: Self.artifactVersion, updatedAt: "", days: [:])
+            archives[family] = fresh
+            return fresh
+        }
+        archives[family] = decoded
+        return decoded
+    }
+
+    private func save(_ family: ProxyUsageFamily, archive: ProxyUsageArchive) {
+        let url = Self.fileURL(family)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try JSONEncoder().encode(archive)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            proxyUsageArchiveLog.warning("Failed to save proxy usage archive (\(family.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// 永久归档存放在 ~/.config/aiusage（而非 Caches，避免被系统在磁盘紧张时清理）。
+    private static func fileURL(_ family: ProxyUsageFamily) -> URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let dir = (home as NSString).appendingPathComponent(".config/aiusage/usage-archive")
+        return URL(fileURLWithPath: dir, isDirectory: true)
+            .appendingPathComponent("proxy-usage-\(family.rawValue)-v\(artifactVersion).json")
+    }
+}

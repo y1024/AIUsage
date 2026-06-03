@@ -3,7 +3,7 @@ import Network
 import os.log
 import QuotaBackend
 
-// MARK: - CodeX Proxy HTTP Handlers
+// MARK: - Codex Proxy HTTP Handlers
 // 服务 OpenAI Responses 入站端点 `/v1/responses`（流式与非流式），转发到 OpenAI 兼容上游。
 // 与 Claude 的 `/v1/messages` 处理逻辑保持一致的结构与日志格式。
 
@@ -26,7 +26,7 @@ extension QuotaHTTPServer {
     func handleCodexResponsesEndpoint(request: HTTPRequest, headers: [String: String]) async -> HTTPResponse {
         guard let proxy = codexProxyService else {
             return codexErrorResponse(
-                message: "CodeX proxy is not enabled",
+                message: "Codex proxy is not enabled",
                 type: "api_error",
                 status: 503,
                 headers: headers
@@ -42,17 +42,17 @@ extension QuotaHTTPServer {
             )
         }
 
-        // CodeX 恒走忠实透传（代理对 CodeX 透明 = 直连）。
+        // Codex 恒走忠实透传（代理对 Codex 透明 = 直连）。
         return await handleCodexResponsesPassthrough(proxy: proxy, request: request, headers: headers)
     }
 
     // MARK: - Models (passthrough)
 
-    /// `GET /v1/models`：CodeX 启动时刷新可用模型列表。忠实透传上游结果，避免 404 报错。
+    /// `GET /v1/models`：Codex 启动时刷新可用模型列表。忠实透传上游结果，避免 404 报错。
     func handleCodexModelsEndpoint(request: HTTPRequest, headers: [String: String]) async -> HTTPResponse {
         guard let proxy = codexProxyService else {
             return codexErrorResponse(
-                message: "CodeX proxy is not enabled",
+                message: "Codex proxy is not enabled",
                 type: "api_error",
                 status: 503,
                 headers: headers
@@ -78,7 +78,7 @@ extension QuotaHTTPServer {
             }
             return HTTPResponse(status: result.statusCode, headers: responseHeaders, bodyData: result.data)
         } catch {
-            httpLog.error("  ✗ CodeX models passthrough error: \(error.localizedDescription)")
+            httpLog.error("  ✗ Codex models passthrough error: \(error.localizedDescription)")
             let errorResult = await proxy.buildErrorResult(error: error)
             return jsonResponse(
                 encodable: errorResult.response,
@@ -93,7 +93,7 @@ extension QuotaHTTPServer {
     func handleCodexStreamingProxy(_ connection: NWConnection, request: HTTPRequest) async {
         guard let proxy = codexProxyService else {
             let response = codexErrorResponse(
-                message: "CodeX proxy is not enabled",
+                message: "Codex proxy is not enabled",
                 type: "api_error",
                 status: 503,
                 headers: [:]
@@ -115,7 +115,7 @@ extension QuotaHTTPServer {
             return
         }
 
-        // CodeX 恒走忠实透传 SSE（逐帧原样回传）。
+        // Codex 恒走忠实透传 SSE（逐帧原样回传）。
         await handleCodexStreamingPassthrough(proxy: proxy, connection: connection, request: request)
     }
 
@@ -178,7 +178,7 @@ extension QuotaHTTPServer {
                 errorType: errorResult.response.error.type,
                 statusCode: errorResult.statusCode
             )
-            httpLog.error("  ✗ CodeX passthrough error: \(error.localizedDescription)")
+            httpLog.error("  ✗ Codex passthrough error: \(error.localizedDescription)")
             var responseHeaders = headers
             if let requestID = errorResult.response.requestID, !requestID.isEmpty {
                 responseHeaders["request-id"] = requestID
@@ -191,7 +191,7 @@ extension QuotaHTTPServer {
         }
     }
 
-    /// 流式忠实透传：把上游 SSE 帧原样回传给 CodeX，旁路解析 usage 做统计。
+    /// 流式忠实透传：把上游 SSE 帧原样回传给 Codex，旁路解析 usage 做统计。
     private func handleCodexStreamingPassthrough(
         proxy: CodexProxyService,
         connection: NWConnection,
@@ -234,7 +234,7 @@ extension QuotaHTTPServer {
                 cacheReadTokens: usage?.cachedTokens ?? 0
             )
         } catch {
-            httpLog.error("  ✗ CodeX streaming passthrough error: \(error.localizedDescription)")
+            httpLog.error("  ✗ Codex streaming passthrough error: \(error.localizedDescription)")
             let errorResult = await proxy.buildErrorResult(error: error)
             let errMsg = """
             {"type":"response.failed","response":{"error":{"type":\(escapeJSON(errorResult.response.error.type)),"message":\(escapeJSON(errorResult.response.error.message))}}}

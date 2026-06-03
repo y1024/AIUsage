@@ -56,6 +56,7 @@ extension ProxyViewModel {
         logs.append(log)
         recentLogs[log.configId] = logs
 
+        logsDirtyDays.insert(shardDayKey(log.timestamp))
         schedulePersistence()
         scheduleLogsRefresh()
     }
@@ -68,6 +69,8 @@ extension ProxyViewModel {
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.persistenceWorkItem = nil
+            // 折叠脏日期进永久归档须早于 saveLogs（后者会清空 logsDirtyDays）。
+            self.foldDaysIntoUsageArchive(self.logsDirtyDays)
             self.saveStatistics()
             self.saveLogs()
         }
@@ -82,6 +85,8 @@ extension ProxyViewModel {
     func flushPersistence() {
         persistenceWorkItem?.cancel()
         persistenceWorkItem = nil
+        // 折叠脏日期进永久归档须早于 saveLogs（后者会清空 logsDirtyDays）。
+        foldDaysIntoUsageArchive(logsDirtyDays)
         saveStatistics()
         saveLogs()
     }
@@ -125,6 +130,7 @@ extension ProxyViewModel {
 
         if changed {
             recentLogs[configId] = updatedLogs
+            logsDirtyDays.formUnion(updatedLogs.map { shardDayKey($0.timestamp) })
             let totalCost = updatedLogs.reduce(0.0) { $0 + $1.estimatedCostUSD }
             if var stats = statistics[configId] {
                 stats.estimatedCostUSD = totalCost
@@ -136,52 +142,87 @@ extension ProxyViewModel {
         }
     }
 
-    // MARK: - Logs Management
+    // MARK: - Logs Management (Daily Sharding)
+    // Logs are stored as per-day shard files under ~/.config/aiusage/proxy-logs/
+    // to avoid rewriting the entire log corpus on every proxied request.
+    // Only days that received new entries are written during each persistence cycle.
 
     func loadLogs() {
-        let url = URL(fileURLWithPath: logsFilePath)
+        let fm = FileManager.default
+        let shardDir = URL(fileURLWithPath: logsShardDirPath, isDirectory: true)
 
-        if FileManager.default.fileExists(atPath: url.path) {
-            do {
-                let data = try Data(contentsOf: url)
-                recentLogs = try JSONDecoder().decode([String: [ProxyRequestLog]].self, from: data)
-            } catch {
-                logPersistenceError("load proxy logs", error: error)
-            }
+        // Phase 1: Migrate legacy single-file format to sharded storage
+        let legacyURL = URL(fileURLWithPath: logsFilePath)
+        if fm.fileExists(atPath: legacyURL.path) {
+            migrateFromSingleFile(legacyURL, to: shardDir)
         } else if let data = UserDefaults.standard.data(forKey: DefaultsKey.proxyLogs) {
             do {
-                recentLogs = try JSONDecoder().decode([String: [ProxyRequestLog]].self, from: data)
+                let legacy = try JSONDecoder().decode([String: [ProxyRequestLog]].self, from: data)
                 UserDefaults.standard.removeObject(forKey: DefaultsKey.proxyLogs)
+                mergeIntoMemory(legacy)
+                logsDirtyDays.formUnion(allDayKeys(from: recentLogs))
                 saveLogs()
             } catch {
-                logPersistenceError("migrate legacy proxy logs", error: error)
+                logPersistenceError("migrate legacy proxy logs from UserDefaults", error: error)
             }
         }
+
+        // Phase 2: Load all shard files within retention window
+        loadShardFiles(from: shardDir)
+        // 裁剪前先把所有已加载日期折叠进永久用量归档，确保即将被裁剪的日期不丢聚合值。
+        foldAllLoadedDaysIntoUsageArchive()
         pruneOldLogs()
         flushLogsRefresh()
     }
 
     @discardableResult
     func saveLogs() -> Bool {
-        let url = URL(fileURLWithPath: logsFilePath)
+        guard !logsDirtyDays.isEmpty else { return true }
+
+        let fm = FileManager.default
+        let shardDir = URL(fileURLWithPath: logsShardDirPath, isDirectory: true)
 
         do {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true,
-                attributes: nil
-            )
-            let data = try JSONEncoder().encode(recentLogs)
-            try data.write(to: url, options: .atomic)
-            return true
+            try fm.createDirectory(at: shardDir, withIntermediateDirectories: true)
         } catch {
-            logPersistenceError("save proxy logs", error: error)
+            logPersistenceError("create proxy logs shard directory", error: error)
             return false
         }
+
+        let encoder = JSONEncoder()
+        var ok = true
+
+        for dayKey in logsDirtyDays {
+            var dayLogs: [String: [ProxyRequestLog]] = [:]
+            for (configId, logs) in recentLogs {
+                let filtered = logs.filter { shardDayKey($0.timestamp) == dayKey }
+                if !filtered.isEmpty {
+                    dayLogs[configId] = filtered
+                }
+            }
+
+            let url = shardDir.appendingPathComponent("proxy-logs-\(dayKey).json")
+            if dayLogs.isEmpty {
+                try? fm.removeItem(at: url)
+            } else {
+                do {
+                    let data = try encoder.encode(dayLogs)
+                    try data.write(to: url, options: .atomic)
+                } catch {
+                    logPersistenceError("save proxy logs shard \(dayKey)", error: error)
+                    ok = false
+                }
+            }
+        }
+
+        logsDirtyDays.removeAll()
+        return ok
     }
 
     func pruneOldLogs() {
         let cutoff = Calendar.current.date(byAdding: .day, value: -logRetentionDays, to: Date()) ?? .distantPast
+        let cutoffKey = shardDayKey(cutoff)
+
         var pruned = false
         for (configId, logs) in recentLogs {
             let filtered = logs.filter { $0.timestamp > cutoff }
@@ -190,13 +231,30 @@ extension ProxyViewModel {
                 pruned = true
             }
         }
+
+        let fm = FileManager.default
+        let shardDir = URL(fileURLWithPath: logsShardDirPath, isDirectory: true)
+        if let items = try? fm.contentsOfDirectory(
+            at: shardDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for item in items {
+                guard let dayKey = extractShardDayKey(from: item.lastPathComponent) else { continue }
+                if dayKey < cutoffKey {
+                    try? fm.removeItem(at: item)
+                }
+            }
+        }
+
         if pruned {
-            saveLogs()
             flushLogsRefresh()
         }
     }
 
     func clearLogs(for configId: String) {
+        guard let logs = recentLogs[configId], !logs.isEmpty else { return }
+        logsDirtyDays.formUnion(logs.map { shardDayKey($0.timestamp) })
         recentLogs[configId] = []
         saveLogs()
         flushLogsRefresh()
@@ -204,7 +262,79 @@ extension ProxyViewModel {
 
     func clearAllLogs() {
         recentLogs.removeAll()
-        saveLogs()
+        logsDirtyDays.removeAll()
+
+        let fm = FileManager.default
+        let shardDir = URL(fileURLWithPath: logsShardDirPath, isDirectory: true)
+        if let items = try? fm.contentsOfDirectory(
+            at: shardDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            for item in items where item.lastPathComponent.hasPrefix("proxy-logs-") {
+                try? fm.removeItem(at: item)
+            }
+        }
         flushLogsRefresh()
+    }
+
+    // MARK: - Shard Helpers
+
+    private func loadShardFiles(from shardDir: URL) {
+        guard let items = try? FileManager.default.contentsOfDirectory(
+            at: shardDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let decoder = JSONDecoder()
+        for item in items {
+            guard item.pathExtension == "json",
+                  item.lastPathComponent.hasPrefix("proxy-logs-") else { continue }
+            do {
+                let data = try Data(contentsOf: item)
+                let dayLogs = try decoder.decode([String: [ProxyRequestLog]].self, from: data)
+                mergeIntoMemory(dayLogs)
+            } catch {
+                logPersistenceError("load proxy logs shard \(item.lastPathComponent)", error: error)
+            }
+        }
+    }
+
+    private func migrateFromSingleFile(_ legacyURL: URL, to shardDir: URL) {
+        do {
+            let data = try Data(contentsOf: legacyURL)
+            let legacy = try JSONDecoder().decode([String: [ProxyRequestLog]].self, from: data)
+            mergeIntoMemory(legacy)
+            logsDirtyDays.formUnion(allDayKeys(from: legacy))
+            saveLogs()
+            try FileManager.default.removeItem(at: legacyURL)
+        } catch {
+            logPersistenceError("migrate proxy logs from single file", error: error)
+        }
+    }
+
+    private func mergeIntoMemory(_ logs: [String: [ProxyRequestLog]]) {
+        for (configId, entries) in logs {
+            recentLogs[configId, default: []].append(contentsOf: entries)
+        }
+    }
+
+    private func allDayKeys(from logs: [String: [ProxyRequestLog]]) -> Set<String> {
+        var keys = Set<String>()
+        for entries in logs.values {
+            for entry in entries {
+                keys.insert(shardDayKey(entry.timestamp))
+            }
+        }
+        return keys
+    }
+
+    private func extractShardDayKey(from filename: String) -> String? {
+        guard filename.hasPrefix("proxy-logs-"), filename.hasSuffix(".json") else { return nil }
+        let start = filename.index(filename.startIndex, offsetBy: "proxy-logs-".count)
+        let end = filename.index(filename.endIndex, offsetBy: -".json".count)
+        guard start < end else { return nil }
+        return String(filename[start..<end])
     }
 }

@@ -12,6 +12,9 @@ extension CodexCostProvider {
         return result
     }
 
+    typealias BucketMetrics = (estimatedCostUsd: Double, totalTokens: Int,
+                                inputTokens: Int, outputTokens: Int, cacheReadTokens: Int)
+
     func todayHourlyTimeline(
         snapshot: CodexUsageSnapshot,
         now: Date,
@@ -23,12 +26,15 @@ extension CodexCostProvider {
 
         return (0...currentHour).compactMap { hour -> TimelineBucket? in
             guard let date = calendar.date(byAdding: .hour, value: hour, to: startOfDay) else { return nil }
-            let aggregate = bucketMetrics(snapshot.hours[hourBucketKey(date)], model: model)
+            let m = bucketMetrics(snapshot.hours[hourBucketKey(date)], model: model)
             return TimelineBucket(
                 bucket: hourBucketKey(date),
                 label: hourBucketLabel(date),
-                estimatedCostUsd: roundUsd(aggregate.estimatedCostUsd),
-                totalTokens: aggregate.totalTokens
+                estimatedCostUsd: roundUsd(m.estimatedCostUsd),
+                inputTokens: m.inputTokens,
+                outputTokens: m.outputTokens,
+                cacheReadTokens: m.cacheReadTokens,
+                totalTokens: m.totalTokens
             )
         }
     }
@@ -47,12 +53,15 @@ extension CodexCostProvider {
         return (0..<count).compactMap { offset -> TimelineBucket? in
             guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
             let key = dayKey(day)
-            let aggregate = bucketMetrics(bucketsByDay[key], model: model)
+            let m = bucketMetrics(bucketsByDay[key], model: model)
             return TimelineBucket(
                 bucket: key,
                 label: dayBucketLabel(day),
-                estimatedCostUsd: roundUsd(aggregate.estimatedCostUsd),
-                totalTokens: aggregate.totalTokens
+                estimatedCostUsd: roundUsd(m.estimatedCostUsd),
+                inputTokens: m.inputTokens,
+                outputTokens: m.outputTokens,
+                cacheReadTokens: m.cacheReadTokens,
+                totalTokens: m.totalTokens
             )
         }
     }
@@ -60,23 +69,34 @@ extension CodexCostProvider {
     func bucketMetrics(
         _ bucket: CodexAggregateBucket?,
         model: String?
-    ) -> (estimatedCostUsd: Double, totalTokens: Int) {
-        guard let bucket else { return (0, 0) }
-        guard let model else {
-            return (bucket.estimatedCostUsd, bucket.totalTokens)
+    ) -> BucketMetrics {
+        guard let bucket else { return (0, 0, 0, 0, 0) }
+        if let model {
+            guard let m = bucket.models[model] else { return (0, 0, 0, 0, 0) }
+            return (m.estimatedCostUsd, m.totalTokens,
+                    m.inputTokens, m.outputTokens, m.cacheReadTokens)
         }
-        let modelBucket = bucket.models[model]
-        return (modelBucket?.estimatedCostUsd ?? 0, modelBucket?.totalTokens ?? 0)
+        var inp = 0; var out = 0; var cR = 0
+        for m in bucket.models.values {
+            inp += m.inputTokens; out += m.outputTokens; cR += m.cacheReadTokens
+        }
+        return (bucket.estimatedCostUsd, bucket.totalTokens, inp, out, cR)
     }
 
-    func encodeTimeline(_ buckets: [TimelineBucket]) -> [AnyCodable] {
+    func encodeTimeline(_ buckets: [TimelineBucket], includeDetail: Bool = false) -> [AnyCodable] {
         buckets.map { bucket in
-            AnyCodable([
+            var dict: [String: AnyCodable] = [
                 "bucket": AnyCodable(bucket.bucket),
                 "label": AnyCodable(bucket.label),
                 "usd": AnyCodable(bucket.estimatedCostUsd),
                 "tokens": AnyCodable(bucket.totalTokens)
-            ] as [String: AnyCodable])
+            ]
+            if includeDetail {
+                dict["inputTokens"] = AnyCodable(bucket.inputTokens)
+                dict["outputTokens"] = AnyCodable(bucket.outputTokens)
+                dict["cacheReadTokens"] = AnyCodable(bucket.cacheReadTokens)
+            }
+            return AnyCodable(dict)
         }
     }
 

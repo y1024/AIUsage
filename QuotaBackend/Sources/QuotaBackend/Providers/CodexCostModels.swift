@@ -21,6 +21,7 @@ struct SessionMetadata: Codable, Sendable {
     let sessionId: String?
     let forkedFromId: String?
     let forkTimestamp: String?
+    var modelProvider: String?
 }
 
 struct CodexTotals: Codable, Sendable {
@@ -170,8 +171,4 @@ struct CodexUsageArchive: Codable, Sendable {
     var updatedAt: String
     var days: [String: CodexAggregateBucket]
     var fullHistoryImportedAt: String?
-}
-
-struct CodexUsageArchiveState: Sendable {
-    let days: [String: CodexAggregateBucket]
 }

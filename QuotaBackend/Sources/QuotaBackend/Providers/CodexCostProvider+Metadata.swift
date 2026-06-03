@@ -45,7 +45,11 @@ extension CodexCostProvider {
                 payload?["parent_session_id"] as? String,
                 payload?["parentSessionId"] as? String
             ),
-            forkTimestamp: firstNonEmpty(payload?["timestamp"] as? String, obj["timestamp"] as? String)
+            forkTimestamp: firstNonEmpty(payload?["timestamp"] as? String, obj["timestamp"] as? String),
+            modelProvider: firstNonEmpty(
+                payload?["model_provider"] as? String,
+                payload?["modelProvider"] as? String
+            )
         )
     }
 

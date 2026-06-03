@@ -1,8 +1,8 @@
 import SwiftUI
 import Combine
 
-// MARK: - CodeX Subscription Order Store
-// 持久化 CodeX 订阅账号的自定义展示顺序（账号 id 列表，存 UserDefaults）。
+// MARK: - Codex Subscription Order Store
+// 持久化 Codex 订阅账号的自定义展示顺序（账号 id 列表，存 UserDefaults）。
 // 订阅账号本身由发现/导入生成、无内建排序字段，故单独维护顺序，菜单栏与代理页共用。
 
 @MainActor
@@ -39,11 +39,11 @@ final class CodexSubscriptionOrderStore: ObservableObject {
     }
 }
 
-// MARK: - CodeX Proxy Management View
-// 侧边栏「CodeX 代理」菜单。复用 ProxyManagementView 的卡片/列表/统计 UI，
-// 通过 family = .codex 过滤只展示 CodeX 节点，并走 CodeX 专用编辑器与独立激活轨道。
+// MARK: - Codex Proxy Management View
+// 侧边栏「Codex 代理」菜单。复用 ProxyManagementView 的卡片/列表/统计 UI，
+// 通过 family = .codex 过滤只展示 Codex 节点，并走 Codex 专用编辑器与独立激活轨道。
 //
-// 本文件还承载 CodeX 专属的统一切换 UI 组件：
+// 本文件还承载 Codex 专属的统一切换 UI 组件：
 //   - CodexSubscriptionSection：列出订阅账号（~/.codex/auth.json），与 API 节点单一互斥激活
 //   - CodexGlobalConfigSection：通用配置卡片，入口指向 config.toml 编辑器（见 CodexConfigEditorView.swift）
 
@@ -55,7 +55,7 @@ struct CodexProxyManagementView: View {
 
 // MARK: - Subscription Accounts Section (unified switcher, app side)
 // 与「节点配置」并列的订阅账号区。激活订阅账号会通过 ProviderActivationManager 写
-// ~/.codex/auth.json，并自动停用正在运行的 CodeX 代理节点（互斥），反之亦然。
+// ~/.codex/auth.json，并自动停用正在运行的 Codex 代理节点（互斥），反之亦然。
 
 struct CodexSubscriptionSection: View {
     let entries: [ProviderAccountEntry]
@@ -355,7 +355,7 @@ private struct SubscriptionRowHeightKey: PreferenceKey {
     }
 }
 
-// MARK: - CodeX Global Config Section
+// MARK: - Codex Global Config Section
 // 对齐 Claude 的双层模型：
 //  1) 通用配置基底片段（CodexGlobalConfig）—— 激活节点/订阅时按顶层键合并写入 config.toml，
 //     节点 extraTOML 优先级更高；带 Merge 开关，可编辑原文 TOML（高亮 + 轻量检查）。
@@ -391,7 +391,7 @@ struct CodexGlobalConfigSection: View {
                 .foregroundStyle(.indigo)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(L("Global Config", "通用配置"))
+                Text(L("Common Config", "通用配置"))
                     .font(.subheadline.weight(.semibold))
                 Text(keyCount > 0
                      ? L("\(keyCount) top-level entries · merged on activation", "\(keyCount) 个顶层条目 · 激活时合并")

@@ -1,8 +1,8 @@
 import SwiftUI
 import QuotaBackend
 
-// MARK: - CodeX Proxy Editor
-// CodeX 节点编辑器（单模型）。把 OpenAI 兼容上游接入 CodeX：激活时写 ~/.codex/config.toml
+// MARK: - Codex Proxy Editor
+// Codex 节点编辑器（单模型）。把 OpenAI 兼容上游接入 Codex：激活时写 ~/.codex/config.toml
 // 的 model / model_provider=aiusage-proxy + [model_providers.aiusage-proxy]，本地起 QuotaServer。
 // 单模型 + 价格存进 modelMapping.bigModel（复用现成定价/统计机制），middle/small 留空。
 
@@ -22,7 +22,7 @@ struct CodexProxyEditorView: View {
     init(profile: NodeProfile? = nil) {
         if let profile {
             var p = profile
-            // CodeX 固定使用 Responses（其 wire_api），纠正历史误存的 chat_completions。
+            // Codex 固定使用 Responses（其 wire_api），纠正历史误存的 chat_completions。
             p.metadata.proxy.openAIUpstreamAPI = .responses
             _profile = State(initialValue: p)
             _isNew = State(initialValue: false)
@@ -73,7 +73,7 @@ struct CodexProxyEditorView: View {
     private var headerBar: some View {
         HStack {
             Label {
-                Text(isNew ? L("New CodeX Node", "新建 CodeX 节点") : L("Edit CodeX Node", "编辑 CodeX 节点"))
+                Text(isNew ? L("New Codex Node", "新建 Codex 节点") : L("Edit Codex Node", "编辑 Codex 节点"))
                     .font(.title2.weight(.bold))
             } icon: {
                 Image(systemName: "terminal.fill")
@@ -110,8 +110,8 @@ struct CodexProxyEditorView: View {
         HStack(spacing: 8) {
             Image(systemName: "info.circle.fill").foregroundStyle(Self.codexBrand)
             Text(L(
-                "When activated, AIUsage injects model_provider=aiusage-proxy into ~/.codex/config.toml and starts a local proxy. CodeX then reaches your OpenAI-compatible upstream through it (Responses inbound).",
-                "激活时会向 ~/.codex/config.toml 注入 model_provider=aiusage-proxy 并启动本地代理，CodeX 经由它访问你的 OpenAI 兼容上游（Responses 入站）。"
+                "When activated, AIUsage injects model_provider=aiusage-proxy into ~/.codex/config.toml and starts a local proxy. Codex then reaches your OpenAI-compatible upstream through it (Responses inbound).",
+                "激活时会向 ~/.codex/config.toml 注入 model_provider=aiusage-proxy 并启动本地代理，Codex 经由它访问你的 OpenAI 兼容上游（Responses 入站）。"
             ))
             .font(.caption2).foregroundStyle(.secondary)
         }
@@ -126,7 +126,7 @@ struct CodexProxyEditorView: View {
         sectionCard(title: L("Basic Information", "基本信息")) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(L("Name", "名称")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                TextField(L("e.g., CodeX Proxy", "例如：CodeX 代理"), text: $profile.metadata.name)
+                TextField(L("e.g., Codex Proxy", "例如：Codex 代理"), text: $profile.metadata.name)
                     .textFieldStyle(.roundedBorder)
             }
         }
@@ -194,8 +194,8 @@ struct CodexProxyEditorView: View {
                     Text("Responses (wire_api)").font(.callout.weight(.semibold))
                 }
                 Text(L(
-                    "CodeX always uses the Responses API. AIUsage forwards CodeX requests faithfully (only model + auth are adjusted).",
-                    "CodeX 固定使用 Responses 接口。AIUsage 忠实转发 CodeX 请求（仅调整模型与鉴权），与直连一致。"
+                    "Codex always uses the Responses API. AIUsage forwards Codex requests faithfully (only model + auth are adjusted).",
+                    "Codex 固定使用 Responses 接口。AIUsage 忠实转发 Codex 请求（仅调整模型与鉴权），与直连一致。"
                 ))
                 .font(.caption2).foregroundStyle(.tertiary)
             }
@@ -330,7 +330,7 @@ struct CodexProxyEditorView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "doc.text.fill").foregroundStyle(.indigo)
                     Text(L(
-                        "Extra top-level TOML keys for this node (e.g., model_reasoning_effort = \"high\"). Merged on activation; node keys override Global Config.",
+                        "Extra top-level TOML keys for this node (e.g., model_reasoning_effort = \"high\"). Merged on activation; node keys override Common Config.",
                         "本节点的额外顶层 TOML 键（如 model_reasoning_effort = \"high\"）。激活时合并，节点键覆盖通用配置。"
                     ))
                     .font(.caption2).foregroundStyle(.secondary)

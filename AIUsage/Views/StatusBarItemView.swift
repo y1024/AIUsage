@@ -183,10 +183,8 @@ struct StatusBarItemView: View {
     }
 
     private func formatCostCompact(_ usd: Double) -> String {
-        if usd == 0 { return "$0" }
-        if usd < 1 { return String(format: "$%.2f", usd) }
-        if usd < 100 { return String(format: "$%.1f", usd) }
-        return String(format: "$%.0f", usd)
+        // 跟随「显示货币」（USD/CNY），与菜单栏/仪表盘币种一致。
+        formatCurrencyCompact(usd)
     }
 }
 

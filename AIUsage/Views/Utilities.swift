@@ -168,9 +168,28 @@ func formatCurrency(_ value: Double) -> String {
 
     let displayValue = displayCurrency == "CNY" ? value * CurrencyDisplayConstants.approximateUsdToCnyRate : value
     let symbol = displayCurrency == "CNY" ? "¥" : "$"
-    let fractionDigits = displayValue >= 1 ? 2 : 4
-    let formatter = NumberFormatterCache.currencyFormatter(symbol: symbol, fractionDigits: fractionDigits)
+
+    // 智能精度：精确为 0 → "$0"；极小额（>0 且 <0.01）→ "<$0.01"（不再堆四位 0）；其余统一 2 位。
+    if displayValue < 0.000_000_1 {
+        return "\(symbol)0"
+    }
+    if displayValue < 0.01 {
+        return "<\(symbol)0.01"
+    }
+    let formatter = NumberFormatterCache.currencyFormatter(symbol: symbol, fractionDigits: 2)
     return formatter.string(from: NSNumber(value: displayValue)) ?? "\(symbol)0.00"
+}
+
+/// 紧凑费用格式（菜单栏 / 状态栏图标用）：跟随「显示货币」做 USD→CNY 近似换算并换符号，
+/// 同时保留紧凑档位（<1 两位、<100 一位、其余整数），兼顾省空间与币种一致。
+func formatCurrencyCompact(_ usd: Double) -> String {
+    let isCNY = (UserDefaults.standard.string(forKey: DefaultsKey.displayCurrency) ?? "USD") == "CNY"
+    let symbol = isCNY ? "¥" : "$"
+    let value = isCNY ? usd * CurrencyDisplayConstants.approximateUsdToCnyRate : usd
+    if value <= 0 { return "\(symbol)0" }
+    if value < 1 { return String(format: "\(symbol)%.2f", value) }
+    if value < 100 { return String(format: "\(symbol)%.1f", value) }
+    return String(format: "\(symbol)%.0f", value)
 }
 
 extension Int {

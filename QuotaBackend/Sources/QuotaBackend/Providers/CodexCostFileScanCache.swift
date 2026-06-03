@@ -1,7 +1,7 @@
 import Foundation
 
 actor CodexCostFileScanCache {
-    static let artifactVersion = 2
+    static let artifactVersion = 4
     var entriesByFile: [String: CodexParsedFile] = [:]
     var hasLoadedDiskCache = false
 

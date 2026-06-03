@@ -449,6 +449,10 @@ struct CostTimelinePoint: Codable, Identifiable, Sendable {
     let label: String
     let usd: Double
     let tokens: Int
+    var inputTokens: Int?
+    var outputTokens: Int?
+    var cacheReadTokens: Int?
+    var cacheCreateTokens: Int?
 
     var id: String { bucket }
 }
