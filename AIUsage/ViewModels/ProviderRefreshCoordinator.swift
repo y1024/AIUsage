@@ -292,6 +292,10 @@ final class ProviderRefreshCoordinator: ObservableObject {
 
         let providerData = localizeProviderData(convertSummary(summary))
 
+        // 用户首次连接时，旧的「未连接」占位（`not_logged_in` / `missing_token`）必须随凭证写入立刻清掉。
+        // 否则 fetchSingleProvider 完成前 UI 会渲染「占位 ghost + 真卡片」两张，连接成功后看到「多出一张空卡」。
+        providers.removeAll { $0.baseProviderId == providerId && $0.needsCredentialConnection }
+
         if let index = providers.firstIndex(where: { $0.id == providerData.id }) {
             providers[index] = providerData
         } else {

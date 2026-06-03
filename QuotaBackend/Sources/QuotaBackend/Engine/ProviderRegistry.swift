@@ -17,6 +17,7 @@ public enum ProviderRegistry {
         GeminiProvider(),
         KimiProvider(),
         KiroProvider(),
+        MiniMaxProvider(),
         WarpProvider()
     ]
 

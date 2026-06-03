@@ -58,6 +58,7 @@ public enum UsageNormalizer {
         "gemini":  ThemeInfo(accent: "iris",   glow: "#7f8cff"),
         "kimi":    ThemeInfo(accent: "blue",   glow: "#1783ff"),
         "kiro":    ThemeInfo(accent: "violet", glow: "#9046ff"),
+        "minimax": ThemeInfo(accent: "magenta",glow: "#e2167e"),
         "warp":    ThemeInfo(accent: "rose",   glow: "#ff7eb2")
     ]
 
@@ -112,6 +113,7 @@ public enum UsageNormalizer {
         case "gemini":  return normalizeGemini(base: &base, usage: usage)
         case "kimi":    return normalizeKimi(base: &base, usage: usage)
         case "kiro":    return normalizeKiro(base: &base, usage: usage)
+        case "minimax": return normalizeMiniMax(base: &base, usage: usage)
         case "cursor":  return normalizeCursor(base: &base, usage: usage)
         case "amp":     return normalizeAmp(base: &base, usage: usage)
         case "droid":   return normalizeDroid(base: &base, usage: usage)

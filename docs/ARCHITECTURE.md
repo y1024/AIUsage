@@ -79,6 +79,7 @@ QuotaBackend/Sources/
 │   │   ├── DroidProvider.swift          # Droid (+API, +Auth, +Helpers, +Parsing)
 │   │   ├── KimiProvider.swift           # Kimi Code subscription (/usages: weekly + rate-limit windows)
 │   │   ├── KiroProvider.swift           # Kiro (+Auth, +Parsing)
+│   │   ├── MiniMaxProvider.swift        # MiniMax Token Plan (/token_plan/remains: 5h + weekly)
 │   │   ├── WarpProvider.swift           # Warp
 │   │   └── AntigravityProvider.swift    # Antigravity (multi-workspace)
 │   ├── Normalizer/
@@ -213,6 +214,7 @@ sequenceDiagram
 | warp | Warp | IDE | Auth file |
 | gemini | Gemini CLI | CLI | Google OAuth |
 | kimi | Kimi Code | CLI | API key (`sk-…`, manual paste or `~/.kimi/config.toml`) |
+| minimax | MiniMax Token Plan | CLI | Subscription key (`sk-cp-…`, manual paste) |
 | amp | Amp | CLI | Browser session |
 | droid | Droid | CLI | Browser session / API |
 | claude | Claude Code | Local | JSONL log scan (`~/.config/claude/projects`) |

@@ -128,6 +128,15 @@ enum ProviderAuthManager {
                 launchActions: [],
                 supportsEmbeddedWebLogin: false
             )
+        case "minimax":
+            return ProviderAuthPlan(
+                titleEn: "Connect a MiniMax Token Plan account",
+                titleZh: "连接 MiniMax Token Plan 账号",
+                summaryEn: "Paste your Subscription Key (sk-cp-…) from platform.minimaxi.com → Subscription. AIUsage reads the official `/token_plan/remains` endpoint and tracks both the 5-hour rolling and weekly windows. The pay-as-you-go sk-… keys do not work here.",
+                summaryZh: "在下方粘贴订阅 Key（sk-cp-…）。在「平台 → 订阅管理 / Token Plan」可以查看。AIUsage 调用官方 `/token_plan/remains`，同时追踪 5 小时滚动窗口和周窗口。注意按量付费的 sk-… Key 在这里不可用。",
+                launchActions: [],
+                supportsEmbeddedWebLogin: false
+            )
         case "gemini":
             return ProviderAuthPlan(
                 titleEn: "Connect a Gemini CLI account",
@@ -263,6 +272,7 @@ enum ProviderAuthManager {
         case "droid":
             rawCandidates = droidCandidates()
         default:
+            // minimax 当前仅手动粘贴 sk-cp-… key，没有本地配置可扫描，走 default。
             rawCandidates = []
         }
 

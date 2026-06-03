@@ -382,6 +382,33 @@ extension ProviderAccountEditorView {
         }
     }
 
+    func connectMiniMaxAPIKey() {
+        let key = miniMaxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            errorMessage = L("Enter your MiniMax Subscription Key first.", "请先填写 MiniMax 订阅 Key。")
+            return
+        }
+        sessionMonitorTask?.cancel()
+        Task {
+            await withWorkingState {
+                let (credential, usage) = try await ProviderAuthManager.authenticateManualCredential(
+                    providerId: "minimax",
+                    authMethod: .apiKey,
+                    value: key,
+                    suggestedLabel: nil
+                )
+                try await MainActor.run {
+                    try appState.registerAuthenticatedCredential(credential, usage: usage, note: nil)
+                    statusMessage = L("Account connected.", "账号已连接。")
+                    miniMaxAPIKey = ""
+                    refreshCandidates()
+                }
+                _ = await refreshCoordinator.fetchSingleProvider("minimax")
+                await MainActor.run { dismiss() }
+            }
+        }
+    }
+
     func connectDroidAPIKey() {
         let key = droidAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {

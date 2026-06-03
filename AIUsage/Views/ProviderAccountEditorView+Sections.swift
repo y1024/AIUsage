@@ -149,6 +149,51 @@ extension ProviderAccountEditorView {
         }
     }
 
+    // MARK: - MiniMax Token Plan API Key Entry
+
+    var miniMaxKeyEntrySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("MiniMax Subscription Key", "MiniMax 订阅 Key"))
+                .font(.subheadline.weight(.semibold))
+
+            SecureField("sk-cp-…", text: $miniMaxAPIKey)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isWorking)
+                .onSubmit { connectMiniMaxAPIKey() }
+
+            Text(L(
+                "How to get a key: click “Get Subscription Key” → sign in to MiniMax → Subscription / Token Plan → copy the key starting with sk-cp-… → paste it above. Pay-as-you-go sk-… keys don’t work for Token Plan usage; only sk-cp-… is accepted. The key is stored in Keychain.",
+                "如何获取：点击「获取订阅 Key」→ 登录 MiniMax → 订阅管理 / Token Plan → 复制 sk-cp- 开头的 Key → 粘贴到上方。按量付费的 sk- Key 在 Token Plan 接口里不可用，只有 sk-cp- 才行。Key 会存入钥匙串。"
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button {
+                    connectMiniMaxAPIKey()
+                } label: {
+                    Label(L("Connect", "连接"), systemImage: "link")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(isWorking || miniMaxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button {
+                    if let url = URL(string: "https://platform.minimaxi.com/user-center/basic-information/interface-key") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Label(L("Get Subscription Key", "获取订阅 Key"), systemImage: "safari")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(isWorking)
+            }
+        }
+    }
+
     // MARK: - Droid API Key Entry
 
     var droidKeyEntrySection: some View {

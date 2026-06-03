@@ -316,6 +316,7 @@ struct ProviderCard: View {
         case "kiro": return .purple
         case "codex": return .indigo
         case "droid": return .yellow
+        case "minimax": return Color(red: 0.886, green: 0.087, blue: 0.494)
         case "warp": return .pink
         case "amp": return .teal
         default: return .gray
@@ -362,9 +363,9 @@ struct ProviderCard: View {
             && provider.windows.contains(where: { $0.remainingPercent != nil })
     }
 
-    /// 采用 Codex 式双窗口（多行进度）布局的服务商：除 Codex 外，Kimi Code 也有
-    /// 「5 小时滚动频控 + 7 天/本周」两个窗口，需并排展示而非只显示最紧的那一行。
-    private static let multiWindowProviderIds: Set<String> = ["codex", "kimi"]
+    /// 采用 Codex 式双窗口（多行进度）布局的服务商：Kimi Code 和 MiniMax Token Plan
+    /// 都和 Codex 一样同时提供「5 小时滚动 + 7 天/本周」两个窗口，需并排展示而非只显示最紧的那一行。
+    private static let multiWindowProviderIds: Set<String> = ["codex", "kimi", "minimax"]
 
     private var shouldShowStatusBadge: Bool {
         switch provider.status {

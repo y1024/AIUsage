@@ -18,9 +18,7 @@ struct MenuBarView: View {
         VStack(spacing: 0) {
             menuBarHeader
             Divider()
-            summaryStatsRow
-            Divider()
-            proxyTracksRow
+            controlDeck
             Divider()
             menuBarContent
             costTrackingSection
@@ -29,6 +27,17 @@ struct MenuBarView: View {
         }
         .frame(width: 420)
         .background(VisualEffectBlur())
+    }
+
+    /// 顶部「控制台」：账号 / 费用统计 + Claude Code / CodeX 两条代理切换轨道。
+    /// 旧版用 Divider 把两行强行隔开，视觉拥挤；合并到一个区块、用 12pt 间距和淡背景
+    /// 让两组信息既相邻又有层级（上：只读数据；下：可点击切换）。
+    private var controlDeck: some View {
+        VStack(spacing: 8) {
+            summaryStatsRow
+            proxyTracksRow
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Header
@@ -129,7 +138,6 @@ struct MenuBarView: View {
                 .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
     }
 
     // MARK: - Proxy Tracks Row (Claude Code / CodeX 两条独立轨道)
@@ -137,17 +145,13 @@ struct MenuBarView: View {
     /// 顶部两条互相独立的代理轨道：Claude Code（写 ~/.claude/settings.json）与
     /// CodeX（写 ~/.codex/config.toml）。二者可同时激活，各自显示激活节点并提供停止按钮。
     private var proxyTracksRow: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 8) {
             proxyTrackSwitcher(family: .claude)
                 .frame(maxWidth: .infinity)
-
-            summaryStatDivider
-
             proxyTrackSwitcher(family: .codex)
                 .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
     }
 
     private func proxyTrackSwitcher(family: ProxyNodeFamily) -> some View {
@@ -220,31 +224,44 @@ struct MenuBarView: View {
                 .disabled(activeId == nil)
             }
         } label: {
-            VStack(spacing: 2) {
-                HStack(spacing: 4) {
-                    ProviderIconView(brandAsset, size: 13)
-                        .opacity(isOn ? 1.0 : 0.5)
-                        .overlay(alignment: .bottomTrailing) {
-                            if isOn {
-                                Circle()
-                                    .fill(Color(red: 0.20, green: 0.84, blue: 0.42))
-                                    .frame(width: 5, height: 5)
-                            }
+            HStack(spacing: 8) {
+                ProviderIconView(brandAsset, size: 16)
+                    .opacity(isOn ? 1.0 : 0.55)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(title)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(isOn ? accent : .secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+
+                        if isOn {
+                            Circle()
+                                .fill(Color(red: 0.20, green: 0.84, blue: 0.42))
+                                .frame(width: 5, height: 5)
                         }
-                    Text(title)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(isOn ? accent : .secondary)
+                    }
+                    Text(activeLabel)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(isOn ? .primary : .secondary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .truncationMode(.tail)
+                        .minimumScaleFactor(0.75)
                 }
-                Text(activeLabel)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(isOn ? .primary : .secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .minimumScaleFactor(0.7)
+
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isOn ? accent.opacity(0.10) : Color.primary.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isOn ? accent.opacity(0.30) : Color.clear, lineWidth: 1)
+            )
             .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
@@ -1237,6 +1254,7 @@ enum MenuBarColors {
         case "kiro": return .purple
         case "codex": return .indigo
         case "droid": return .yellow
+        case "minimax": return Color(red: 0.886, green: 0.087, blue: 0.494)
         case "warp": return .pink
         case "amp": return .teal
         default: return .gray

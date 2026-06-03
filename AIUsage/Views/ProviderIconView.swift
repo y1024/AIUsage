@@ -78,6 +78,7 @@ struct ProviderIconView: View {
         case "kiro":    return "cloud.fill"
         case "codex", "codex-cost": return "brain.head.profile"
         case "droid":   return "cpu"
+        case "minimax": return "m.circle.fill"
         case "warp":    return "terminal"
         case "amp":     return "bolt.fill"
         default:        return "cube.fill"
@@ -95,6 +96,7 @@ struct ProviderIconView: View {
         case "kiro":    return .purple
         case "codex", "codex-cost": return .indigo
         case "droid":   return .yellow
+        case "minimax": return Color(red: 0.886, green: 0.087, blue: 0.494)
         case "warp":    return .pink
         case "amp":     return .teal
         default:        return .gray
