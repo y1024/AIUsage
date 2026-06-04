@@ -144,11 +144,15 @@ extension ProxyStatsView {
 
     // MARK: - Model Table
 
+    // 模型名列：自适应但封顶——既不再独吞整行（旧 maxWidth:.infinity 会留大片空白），
+    // 又给到足够宽度完整显示常见模型全称（超长才中间截断）；多余空间交给趋势列。
+    var modelNameColumnMinWidth: CGFloat { 140 }
+    var modelNameColumnMaxWidth: CGFloat { 320 }
+
     func modelTable(layout: InsightsLayout, data: [StatsDataAdapter.ModelAggregate], colorMap: [String: Color], distTotal: Double, sparklineMap: [String: [Double]]) -> some View {
         let costW = showsCost ? tableColumnWidth(.cost, layout: layout) : 0
         let tokensW = tableColumnWidth(.tokens, layout: layout)
         let shareW = tableColumnWidth(.share, layout: layout)
-        let trendW = tableColumnWidth(.trend, layout: layout)
 
         return VStack(alignment: .leading, spacing: 12) {
             Text(L("Model Details", "模型详情"))
@@ -161,13 +165,14 @@ extension ProxyStatsView {
             } else {
                 LazyVStack(spacing: 0) {
                     HStack(spacing: 0) {
-                        Text(L("Model", "模型")).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(L("Model", "模型"))
+                            .frame(minWidth: modelNameColumnMinWidth, maxWidth: modelNameColumnMaxWidth, alignment: .leading)
                         if showsCost {
                             Text(L("Cost", "费用")).frame(width: costW, alignment: .trailing)
                         }
                         Text("Tokens").frame(width: tokensW, alignment: .trailing)
                         Text(L("Share", "占比")).frame(width: shareW, alignment: .trailing)
-                        Text(L("Trend", "趋势")).frame(width: trendW, alignment: .center)
+                        Text(L("Trend", "趋势")).frame(maxWidth: .infinity, alignment: .center)
                     }
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -180,7 +185,7 @@ extension ProxyStatsView {
                         let itemColor = colorForModel(item.model, from: colorMap)
                         modelRow(item, color: itemColor,
                                  costWidth: costW, tokensWidth: tokensW,
-                                 shareWidth: shareW, trendWidth: trendW,
+                                 shareWidth: shareW,
                                  distTotal: distTotal,
                                  sparkValues: sparklineMap[item.model] ?? [])
 
@@ -222,7 +227,7 @@ extension ProxyStatsView {
         _ item: StatsDataAdapter.ModelAggregate,
         color: Color,
         costWidth: CGFloat, tokensWidth: CGFloat,
-        shareWidth: CGFloat, trendWidth: CGFloat,
+        shareWidth: CGFloat,
         distTotal: Double,
         sparkValues: [Double]
     ) -> some View {
@@ -239,8 +244,9 @@ extension ProxyStatsView {
                     .font(.caption.weight(.semibold))
                     .lineLimit(1).truncationMode(.middle)
                     .help(item.model)
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: modelNameColumnMinWidth, maxWidth: modelNameColumnMaxWidth, alignment: .leading)
 
             if showsCost {
                 let isSub = UsageTrack.isSubscription(item.model)
@@ -261,7 +267,7 @@ extension ProxyStatsView {
                 .frame(width: shareWidth, alignment: .trailing)
 
             MiniSparkline(values: sparkValues, color: color)
-                .frame(width: max(52, trendWidth - 8), height: 20)
+                .frame(maxWidth: .infinity, minHeight: 20, maxHeight: 20)
                 .padding(.leading, 8)
         }
         .font(.caption.monospacedDigit())

@@ -86,21 +86,25 @@ final class StatsDataAdapter {
 
         let summaries = items.map(\.summary)
 
+        // 仅「综合」需要家族前缀（如「Codex / gpt-5」）来区分多家族同名模型；
+        // 单选 Claude / Codex 时只有一个家族，模型名不加前缀，更干净。
+        let qualify = family == .all
+
         let timeline = Self.aggregateTimeline(summaries.compactMap(\.timeline))
         let monthBreakdown = Self.aggregateModelBreakdowns(
-            items.flatMap { Self.qualifiedBreakdowns($0.summary.modelBreakdown, provider: $0.provider) }
+            items.flatMap { Self.qualifiedBreakdowns($0.summary.modelBreakdown, provider: $0.provider, qualify: qualify) }
         )
         let todayBreakdown = Self.aggregateModelBreakdowns(
-            items.flatMap { Self.qualifiedBreakdowns($0.summary.modelBreakdownToday, provider: $0.provider) }
+            items.flatMap { Self.qualifiedBreakdowns($0.summary.modelBreakdownToday, provider: $0.provider, qualify: qualify) }
         )
         let weekBreakdown = Self.aggregateModelBreakdowns(
-            items.flatMap { Self.qualifiedBreakdowns($0.summary.modelBreakdownWeek, provider: $0.provider) }
+            items.flatMap { Self.qualifiedBreakdowns($0.summary.modelBreakdownWeek, provider: $0.provider, qualify: qualify) }
         )
         let overallBreakdown = Self.aggregateModelBreakdowns(
-            items.flatMap { Self.qualifiedBreakdowns($0.summary.modelBreakdownOverall, provider: $0.provider) }
+            items.flatMap { Self.qualifiedBreakdowns($0.summary.modelBreakdownOverall, provider: $0.provider, qualify: qualify) }
         )
         let modelTimelines = Self.aggregateModelTimelines(
-            items.flatMap { Self.qualifiedTimelines($0.summary.modelTimelines, provider: $0.provider) }
+            items.flatMap { Self.qualifiedTimelines($0.summary.modelTimelines, provider: $0.provider, qualify: qualify) }
         )
 
         return CostSummary(
@@ -124,6 +128,8 @@ final class StatsDataAdapter {
 
     private var summaryCacheKey: String?
     private var summaryCacheValue: CostSummary?
+    /// 每当 summary 内容真正改变（缓存未命中）就自增，作为下游 timeline 记忆化的廉价版本号。
+    private var summaryVersion: UInt64 = 0
 
     func summary(
         providers: [ProviderData],
@@ -135,6 +141,7 @@ final class StatsDataAdapter {
         let filtered = aggregatedSummary(providers: providers, family: family)?.filtered(by: track)
         summaryCacheKey = key
         summaryCacheValue = filtered
+        summaryVersion &+= 1
         return filtered
     }
 
@@ -185,7 +192,27 @@ final class StatsDataAdapter {
         )
     }
 
+    private var timeSeriesCacheKey: String?
+    private var timeSeriesCacheValue: [ModelTimePoint] = []
+
+    /// 模型时间序列。趋势图虽已移除，详情表的 sparkline/配色仍依赖它；
+    /// 而展开行、勾选对比、改变窗口宽度都会触发整页重渲，若每次都重遍历全量 timeline 会拖慢交互。
+    /// 这里按「summary 版本 + 粒度 + 时间范围」记忆化：数据未变时（仅 UI 状态变化）直接命中。
+    /// 契约：调用前先取过 `summary(...)`（视图 body 即如此），故 `summaryVersion` 与传入 summary 对应。
     func modelTimeSeries(
+        from summary: CostSummary?,
+        granularity: CostGranularity,
+        timeRange: ChartTimeRange
+    ) -> [ModelTimePoint] {
+        let key = "\(summaryVersion)|\(granularity.rawValue)|\(timeRange.rawValue)"
+        if key == timeSeriesCacheKey { return timeSeriesCacheValue }
+        let result = computeModelTimeSeries(from: summary, granularity: granularity, timeRange: timeRange)
+        timeSeriesCacheKey = key
+        timeSeriesCacheValue = result
+        return result
+    }
+
+    private func computeModelTimeSeries(
         from summary: CostSummary?,
         granularity: CostGranularity,
         timeRange: ChartTimeRange
@@ -269,9 +296,12 @@ final class StatsDataAdapter {
 
     private static func qualifiedBreakdowns(
         _ breakdowns: [ModelCostBreakdown]?,
-        provider: ProviderData
+        provider: ProviderData,
+        qualify: Bool
     ) -> [ModelCostBreakdown] {
-        (breakdowns ?? []).map { item in
+        guard let breakdowns else { return [] }
+        guard qualify else { return breakdowns }
+        return breakdowns.map { item in
             ModelCostBreakdown(
                 model: sourceQualifiedModel(item.model, provider: provider),
                 totalTokens: item.totalTokens,
@@ -287,9 +317,12 @@ final class StatsDataAdapter {
 
     private static func qualifiedTimelines(
         _ series: [ModelTimelineSeries]?,
-        provider: ProviderData
+        provider: ProviderData,
+        qualify: Bool
     ) -> [ModelTimelineSeries] {
-        (series ?? []).map { item in
+        guard let series else { return [] }
+        guard qualify else { return series }
+        return series.map { item in
             ModelTimelineSeries(
                 model: sourceQualifiedModel(item.model, provider: provider),
                 hourly: item.hourly,
