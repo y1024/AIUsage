@@ -4,7 +4,7 @@ import QuotaBackend
 // MARK: - StatsDataAdapter
 // 将多个 ProviderData.costSummary 聚合为统计页所需格式，
 // 替代 ProxyViewModel+Aggregation 作为用量统计页的数据源，
-// 统一全应用 JSONL 数据口径。
+// 统一全应用本地 costSummary 口径。
 
 @MainActor
 final class StatsDataAdapter {

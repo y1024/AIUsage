@@ -29,8 +29,49 @@ struct ProxyUsageModelAgg: Codable, Sendable {
     var cacheCreateTokens: Int = 0
     var costUSD: Double = 0
     var requests: Int = 0
+    var pricingResolvedRequests: Int = 0
 
     var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheCreateTokens }
+
+    init(
+        inputTokens: Int = 0,
+        outputTokens: Int = 0,
+        cacheReadTokens: Int = 0,
+        cacheCreateTokens: Int = 0,
+        costUSD: Double = 0,
+        requests: Int = 0,
+        pricingResolvedRequests: Int = 0
+    ) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreateTokens = cacheCreateTokens
+        self.costUSD = costUSD
+        self.requests = requests
+        self.pricingResolvedRequests = pricingResolvedRequests
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case inputTokens
+        case outputTokens
+        case cacheReadTokens
+        case cacheCreateTokens
+        case costUSD
+        case requests
+        case pricingResolvedRequests
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        inputTokens = try c.decodeIfPresent(Int.self, forKey: .inputTokens) ?? 0
+        outputTokens = try c.decodeIfPresent(Int.self, forKey: .outputTokens) ?? 0
+        cacheReadTokens = try c.decodeIfPresent(Int.self, forKey: .cacheReadTokens) ?? 0
+        cacheCreateTokens = try c.decodeIfPresent(Int.self, forKey: .cacheCreateTokens) ?? 0
+        costUSD = try c.decodeIfPresent(Double.self, forKey: .costUSD) ?? 0
+        requests = try c.decodeIfPresent(Int.self, forKey: .requests) ?? 0
+        pricingResolvedRequests = try c.decodeIfPresent(Int.self, forKey: .pricingResolvedRequests)
+            ?? (costUSD > 0 ? requests : 0)
+    }
 
     mutating func add(_ log: ProxyRequestLog) {
         inputTokens += log.tokensInput
@@ -39,6 +80,9 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         cacheCreateTokens += log.tokensCacheCreation
         costUSD += log.estimatedCostUSD
         requests += 1
+        if log.pricingResolved {
+            pricingResolvedRequests += 1
+        }
     }
 }
 
@@ -73,7 +117,7 @@ final class ProxyUsageArchiveStore {
 
     // MARK: Read
 
-    /// 某家族的每日聚合（永久），供 Claude / Codex API 轨构建 costSummary。
+    /// 某家族的每日聚合（永久），供 Claude / Codex 代理轨构建 costSummary。
     func days(_ family: ProxyUsageFamily) -> [String: ProxyUsageDay] {
         loadIfNeeded(family).days
     }

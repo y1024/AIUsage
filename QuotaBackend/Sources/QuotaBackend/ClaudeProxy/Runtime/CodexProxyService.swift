@@ -85,6 +85,9 @@ public actor CodexProxyService {
     // 备注: chat-completions 上游 / Anthropic 上游接入 Codex 属 Phase 2，届时再引入 Canonical 转换层。
 
     public struct PassthroughUsage: Sendable {
+        /// Non-cached input tokens. OpenAI Responses reports cached tokens as a
+        /// subset of `input_tokens`, so normalize before the value reaches
+        /// proxy logs or pricing.
         public let inputTokens: Int
         public let outputTokens: Int
         public let cachedTokens: Int
@@ -197,12 +200,13 @@ public actor CodexProxyService {
     }
 
     private static func makeUsage(_ usage: [String: Any]) -> PassthroughUsage {
-        let input = intValue(usage["input_tokens"])
-        let output = intValue(usage["output_tokens"])
+        let rawInput = max(0, intValue(usage["input_tokens"]))
+        let output = max(0, intValue(usage["output_tokens"]))
         var cached = 0
         if let details = usage["input_tokens_details"] as? [String: Any] {
-            cached = intValue(details["cached_tokens"])
+            cached = min(rawInput, max(0, intValue(details["cached_tokens"])))
         }
+        let input = rawInput - cached
         return PassthroughUsage(inputTokens: input, outputTokens: output, cachedTokens: cached)
     }
 

@@ -1,44 +1,55 @@
 import Foundation
 
 // MARK: - Usage Track (用量轨道)
-// Codex 用量分两轨：API（代理日志，模型名带 " (API)" 后缀）与 订阅（本地 JSONL，带 " (Sub)" 后缀），
-// 合并轨同时含两者。统计页用本类型在「合计 / API / 订阅」间切换，靠模型名后缀过滤、显示时剥后缀。
+// Codex 用量分两轨：代理（代理归档，模型名带 " (Proxy)" 后缀）与 非代理（本地 JSONL，带 " (Non-Proxy)" 后缀），
+// 合并轨同时含两者。统计页用本类型在「合计 / 代理 / 非代理」间切换，靠模型名后缀过滤、显示时剥后缀。
 // Claude 单轨（仅代理），模型名无后缀，故只有 codex 家族需要轨道切换器。
 
 enum UsageTrack: String, CaseIterable, Identifiable {
     case combined
-    case api
-    case subscription
+    case proxy
+    case nonProxy
 
     var id: String { rawValue }
+
+    init(storedRawValue: String) {
+        switch storedRawValue {
+        case "api":
+            self = .proxy
+        case "subscription":
+            self = .nonProxy
+        default:
+            self = UsageTrack(rawValue: storedRawValue) ?? .combined
+        }
+    }
 
     var label: String {
         switch self {
         case .combined:     return L("Combined", "合计")
-        case .api:          return L("API", "API")
-        case .subscription: return L("Subscription", "订阅")
+        case .proxy:        return L("Proxy", "代理")
+        case .nonProxy:     return L("Non-Proxy", "非代理")
         }
     }
 
-    static let apiSuffix = " (API)"
-    static let subSuffix = " (Sub)"
+    static let proxySuffix = " (Proxy)"
+    static let nonProxySuffix = " (Non-Proxy)"
 
-    static func isAPI(_ model: String) -> Bool { model.hasSuffix(apiSuffix) }
-    static func isSubscription(_ model: String) -> Bool { model.hasSuffix(subSuffix) }
+    static func isProxy(_ model: String) -> Bool { model.hasSuffix(proxySuffix) }
+    static func isNonProxy(_ model: String) -> Bool { model.hasSuffix(nonProxySuffix) }
 
     /// 该模型是否属于当前轨（合计恒真）。
     func matches(_ model: String) -> Bool {
         switch self {
         case .combined:     return true
-        case .api:          return UsageTrack.isAPI(model)
-        case .subscription: return UsageTrack.isSubscription(model)
+        case .proxy:        return UsageTrack.isProxy(model)
+        case .nonProxy:     return UsageTrack.isNonProxy(model)
         }
     }
 
     /// 去掉轨道后缀，用于在单轨视图里更干净地展示模型名（合计视图保留后缀以区分来源）。
     static func stripSuffix(_ model: String) -> String {
-        if isAPI(model) { return String(model.dropLast(apiSuffix.count)) }
-        if isSubscription(model) { return String(model.dropLast(subSuffix.count)) }
+        if isProxy(model) { return String(model.dropLast(proxySuffix.count)) }
+        if isNonProxy(model) { return String(model.dropLast(nonProxySuffix.count)) }
         return model
     }
 }
@@ -46,8 +57,8 @@ enum UsageTrack: String, CaseIterable, Identifiable {
 // MARK: - CostSummary track filtering
 
 extension CostSummary {
-    /// 按轨道过滤：合计原样返回；API/订阅仅保留对应后缀的模型行，剥掉后缀，
-    /// 并据过滤后的模型明细重算各周期总额与时间线（与后端 overall.api/sub 一致）。
+    /// 按轨道过滤：合计原样返回；代理/非代理仅保留对应后缀的模型行，剥掉后缀，
+    /// 并据过滤后的模型明细重算各周期总额与时间线（与后端 overall.proxy/nonProxy 一致）。
     func filtered(by track: UsageTrack) -> CostSummary {
         guard track != .combined else { return self }
 
@@ -123,17 +134,32 @@ extension CostSummary {
     private static func timeline(from series: [ModelTimelineSeries]) -> CostTimeline? {
         guard !series.isEmpty else { return nil }
         func merge(_ keyPath: KeyPath<ModelTimelineSeries, [CostTimelinePoint]>) -> [CostTimelinePoint] {
-            var buckets: [String: (label: String, usd: Double, tokens: Int)] = [:]
+            var buckets: [String: (label: String, usd: Double, tokens: Int, input: Int, output: Int, cacheRead: Int, cacheCreate: Int)] = [:]
             for s in series {
                 for p in s[keyPath: keyPath] {
-                    var c = buckets[p.bucket] ?? (p.label, 0, 0)
+                    var c = buckets[p.bucket] ?? (p.label, 0, 0, 0, 0, 0, 0)
                     c.usd += p.usd
                     c.tokens += p.tokens
+                    c.input += p.inputTokens ?? 0
+                    c.output += p.outputTokens ?? 0
+                    c.cacheRead += p.cacheReadTokens ?? 0
+                    c.cacheCreate += p.cacheCreateTokens ?? 0
                     buckets[p.bucket] = c
                 }
             }
             return buckets
-                .map { CostTimelinePoint(bucket: $0.key, label: $0.value.label, usd: $0.value.usd, tokens: $0.value.tokens) }
+                .map { bucket, value in
+                    CostTimelinePoint(
+                        bucket: bucket,
+                        label: value.label,
+                        usd: value.usd,
+                        tokens: value.tokens,
+                        inputTokens: value.input > 0 ? value.input : nil,
+                        outputTokens: value.output > 0 ? value.output : nil,
+                        cacheReadTokens: value.cacheRead > 0 ? value.cacheRead : nil,
+                        cacheCreateTokens: value.cacheCreate > 0 ? value.cacheCreate : nil
+                    )
+                }
                 .sorted { $0.bucket < $1.bucket }
         }
         return CostTimeline(hourly: merge(\.hourly), daily: merge(\.daily))

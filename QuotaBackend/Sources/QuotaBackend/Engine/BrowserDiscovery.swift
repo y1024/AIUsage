@@ -173,7 +173,7 @@ public enum BrowserDiscovery {
             supportedMethods: [.auto],
             cookieDomains: nil,
             cookieNames: nil,
-            instructions: "Scans Claude Code JSONL logs automatically. No credentials needed."
+            instructions: "Reads AIUsage Claude proxy usage archive automatically. No credentials needed."
         ),
         ProviderAuthCapability(
             providerId: "warp",

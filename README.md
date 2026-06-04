@@ -55,7 +55,7 @@
 | --- | --- |
 | **12+ AI Providers** | Codex, Copilot, Cursor, Antigravity, Kiro, Warp, Gemini CLI, Amp, Droid, Claude Code, Kimi, MiniMax — one dashboard |
 | **Multi-account** | Multiple accounts per provider, independent refresh, one-click CLI switching |
-| **Usage Stats** | Unified cost & token breakdown across **Local Logs** (Claude Code / Codex sessions) and **Proxy Logs** — per-model trends, time-period analysis, source-aware "All Sources" aggregation |
+| **Usage Stats** | Unified cost & token breakdown from Claude/Codex proxy archives plus token-only non-proxy Codex sessions — per-model trends, time-period analysis, source-aware aggregation |
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
 | **Codex Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
 | **Menu Bar** | Multi-account status bar icons, quota/cost metrics, quick-glance popover, colored progress bars |
@@ -126,6 +126,8 @@ Point the Codex CLI at any OpenAI-compatible upstream (Responses API), and switc
 | **Surgical config merge** | Injects managed blocks into `~/.codex/config.toml` while preserving your own settings; global fragment + per-node TOML override |
 
 **Quick start:** Open AIUsage → Codex Proxy → New Node (or pick a subscription account) → Configure → Activate. `~/.codex/config.toml` is merged automatically.
+
+Usage and billing details for Claude Code and Codex are documented in [docs/USAGE_AND_BILLING.md](docs/USAGE_AND_BILLING.md).
 
 ---
 

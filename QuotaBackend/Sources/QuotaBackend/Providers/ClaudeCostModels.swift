@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - Claude Cost Models
-// 日级聚合数据模型，供 ClaudeProvider 从「代理日志永久归档」构建 costSummary 使用。
+// 日级聚合数据模型，供 ClaudeProvider 从「代理用量永久归档」构建 costSummary 使用。
 // 成本已在代理侧逐条冻结，这里只做按模型 / 按日的纯加和聚合，不做任何重新定价。
 
 struct ClaudeModelAggregate: Codable, Sendable {

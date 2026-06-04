@@ -219,7 +219,7 @@ struct DashboardView: View {
 
     /// 顶部活动热力图：按工具拆成 Claude Code 与 Codex 两块（仅展示有数据的一块），
     /// 各自带上自家品牌色——Claude Code 橙、Codex 靛蓝，与卡片/图标/菜单栏口径一致。
-    /// 数据源统一为本地 JSONL（已包含真实上游模型名）。
+    /// 数据源统一为本地 costSummary：Claude 来自代理归档，Codex 来自代理归档 + 非代理 token 日志。
     private var dashboardHeatmapWeeks: Int { 26 }
 
     private var claudeHeatmap: some View {

@@ -1088,4 +1088,55 @@ final class OpenAIResponsesTests: XCTestCase {
         XCTAssertEqual(startedToolCalls.first?.2, "get_weather")
         XCTAssertEqual(finishReason, "tool_calls")
     }
+
+    func testCodexPassthroughUsageSubtractsCachedTokensFromInput() throws {
+        let data = Data("""
+        {
+          "id": "resp_cached",
+          "usage": {
+            "input_tokens": 1000,
+            "output_tokens": 120,
+            "input_tokens_details": {
+              "cached_tokens": 800
+            }
+          }
+        }
+        """.utf8)
+
+        let usage = try XCTUnwrap(CodexProxyService.parseUsage(fromResponseBody: data))
+        XCTAssertEqual(usage.inputTokens, 200)
+        XCTAssertEqual(usage.cachedTokens, 800)
+        XCTAssertEqual(usage.outputTokens, 120)
+    }
+
+    func testCodexPassthroughUsageClampsCachedTokensToInput() throws {
+        let data = Data("""
+        {
+          "id": "resp_cached_overflow",
+          "usage": {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "input_tokens_details": {
+              "cached_tokens": 140
+            }
+          }
+        }
+        """.utf8)
+
+        let usage = try XCTUnwrap(CodexProxyService.parseUsage(fromResponseBody: data))
+        XCTAssertEqual(usage.inputTokens, 0)
+        XCTAssertEqual(usage.cachedTokens, 100)
+        XCTAssertEqual(usage.outputTokens, 20)
+    }
+
+    func testCodexPassthroughStreamUsageSubtractsCachedTokensFromInput() throws {
+        let frame = """
+        {"type":"response.completed","response":{"usage":{"input_tokens":1000,"output_tokens":120,"input_tokens_details":{"cached_tokens":800}}}}
+        """
+
+        let usage = try XCTUnwrap(CodexProxyService.parseUsage(fromStreamFrame: frame))
+        XCTAssertEqual(usage.inputTokens, 200)
+        XCTAssertEqual(usage.cachedTokens, 800)
+        XCTAssertEqual(usage.outputTokens, 120)
+    }
 }

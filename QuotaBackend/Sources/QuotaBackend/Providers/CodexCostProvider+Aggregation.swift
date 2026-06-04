@@ -13,7 +13,7 @@ extension CodexCostProvider {
     }
 
     typealias BucketMetrics = (estimatedCostUsd: Double, totalTokens: Int,
-                                inputTokens: Int, outputTokens: Int, cacheReadTokens: Int)
+                                inputTokens: Int, outputTokens: Int, cacheReadTokens: Int, cacheCreateTokens: Int)
 
     func todayHourlyTimeline(
         snapshot: CodexUsageSnapshot,
@@ -34,6 +34,7 @@ extension CodexCostProvider {
                 inputTokens: m.inputTokens,
                 outputTokens: m.outputTokens,
                 cacheReadTokens: m.cacheReadTokens,
+                cacheCreateTokens: m.cacheCreateTokens,
                 totalTokens: m.totalTokens
             )
         }
@@ -61,6 +62,7 @@ extension CodexCostProvider {
                 inputTokens: m.inputTokens,
                 outputTokens: m.outputTokens,
                 cacheReadTokens: m.cacheReadTokens,
+                cacheCreateTokens: m.cacheCreateTokens,
                 totalTokens: m.totalTokens
             )
         }
@@ -70,17 +72,18 @@ extension CodexCostProvider {
         _ bucket: CodexAggregateBucket?,
         model: String?
     ) -> BucketMetrics {
-        guard let bucket else { return (0, 0, 0, 0, 0) }
+        guard let bucket else { return (0, 0, 0, 0, 0, 0) }
         if let model {
-            guard let m = bucket.models[model] else { return (0, 0, 0, 0, 0) }
+            guard let m = bucket.models[model] else { return (0, 0, 0, 0, 0, 0) }
             return (m.estimatedCostUsd, m.totalTokens,
-                    m.inputTokens, m.outputTokens, m.cacheReadTokens)
+                    m.inputTokens, m.outputTokens, m.cacheReadTokens, m.cacheCreateTokens)
         }
-        var inp = 0; var out = 0; var cR = 0
+        var inp = 0; var out = 0; var cR = 0; var cC = 0
         for m in bucket.models.values {
             inp += m.inputTokens; out += m.outputTokens; cR += m.cacheReadTokens
+            cC += m.cacheCreateTokens
         }
-        return (bucket.estimatedCostUsd, bucket.totalTokens, inp, out, cR)
+        return (bucket.estimatedCostUsd, bucket.totalTokens, inp, out, cR, cC)
     }
 
     func encodeTimeline(_ buckets: [TimelineBucket], includeDetail: Bool = false) -> [AnyCodable] {
@@ -95,6 +98,7 @@ extension CodexCostProvider {
                 dict["inputTokens"] = AnyCodable(bucket.inputTokens)
                 dict["outputTokens"] = AnyCodable(bucket.outputTokens)
                 dict["cacheReadTokens"] = AnyCodable(bucket.cacheReadTokens)
+                dict["cacheCreateTokens"] = AnyCodable(bucket.cacheCreateTokens)
             }
             return AnyCodable(dict)
         }

@@ -14,6 +14,7 @@ extension CodexCostProvider {
         }
         var remainingInherited = inherited
         var aggregate = CodexFileAggregate(sessionId: metadata?.sessionId)
+        let provider = metadata?.modelProvider
 
         scanJSONLLines(
             path,
@@ -53,12 +54,13 @@ extension CodexCostProvider {
             guard data.range(of: Self.compactEventMsgTypeNeedle) != nil else { return }
 
             guard data.range(of: Self.tokenCountNeedle) != nil else { return }
+
             let modelFromInfo = firstNonEmpty(
                 extractJSONStringField("model", from: data),
                 extractJSONStringField("model_name", from: data)
             )
             let baseModel = normalizeModel(modelFromInfo ?? currentModel ?? "gpt-5")
-            let model = sourceTaggedModel(baseModel, provider: metadata?.modelProvider)
+            guard let model = sourceTaggedModel(baseModel, provider: provider) else { return }
 
             var delta = CodexTotals(input: 0, cached: 0, output: 0)
 
@@ -96,8 +98,6 @@ extension CodexCostProvider {
             guard delta.input > 0 || delta.cached > 0 || delta.output > 0 else { return }
             let cached = min(delta.cached, delta.input)
             let nonCachedInput = max(0, delta.input - cached)
-            let cost = estimateCost(model: baseModel, input: nonCachedInput, cacheRead: cached, output: delta.output)
-
             let row = CodexRow(
                 dayKey: dayKey(timestamp),
                 model: model,
@@ -105,7 +105,7 @@ extension CodexCostProvider {
                 cacheReadTokens: cached,
                 outputTokens: delta.output,
                 totalTokens: nonCachedInput + cached + delta.output,
-                estimatedCostUsd: cost
+                estimatedCostUsd: 0
             )
             aggregate.record(row: row, hourKey: hourBucketKey(timestamp))
         }
@@ -382,6 +382,7 @@ extension CodexCostProvider {
         var inputTokens: Int = 0
         var outputTokens: Int = 0
         var cacheReadTokens: Int = 0
+        var cacheCreateTokens: Int = 0
         let totalTokens: Int
     }
 }

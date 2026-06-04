@@ -134,7 +134,7 @@ extension CodexCostProvider {
             path: path,
             size: size,
             modifiedAt: modifiedAt,
-            pricingSignature: pricingCacheSignature()
+            scanSignature: scanCacheSignature()
         )
     }
 

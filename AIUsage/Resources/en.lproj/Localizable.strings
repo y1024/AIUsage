@@ -518,7 +518,7 @@
 "AIUsage/Views/ProviderPickerView.swift::Local" = "Local";
 
 /* Views/ProviderPickerView.swift */
-"AIUsage/Views/ProviderPickerView.swift::Local ledgers derived from usage logs" = "Local ledgers derived from usage logs";
+"AIUsage/Views/ProviderPickerView.swift::Usage ledgers from proxy archives and local logs" = "Usage ledgers from proxy archives and local logs";
 
 /* Views/ProviderPickerView.swift */
 "AIUsage/Views/ProviderPickerView.swift::Manage Scan Sources" = "Manage Scan Sources";

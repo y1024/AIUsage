@@ -68,9 +68,9 @@ QuotaBackend/Sources/
 │   │   ├── AccountCredentialStore.swift  # Keychain credential storage
 │   │   └── BrowserDiscovery.swift        # Browser profile helpers
 │   ├── Providers/
-│   │   ├── ClaudeProvider.swift         # Local JSONL log scanner
+│   │   ├── ClaudeProvider.swift         # Claude proxy usage archive reader
 │   │   ├── CodexProvider.swift          # OpenAI Codex API (multi-workspace)
-│   │   ├── CodexCostProvider.swift      # Local Codex session JSONL scanner (+FileScanCache, +ArchiveStore)
+│   │   ├── CodexCostProvider.swift      # Codex proxy archive + non-proxy JSONL token ledger
 │   │   ├── CopilotProvider.swift        # GitHub Copilot
 │   │   ├── CursorProvider.swift         # Cursor IDE
 │   │   ├── GeminiProvider.swift         # Google Gemini CLI
@@ -155,6 +155,7 @@ sequenceDiagram
 ## Proxy Subsystem
 
 详细架构文档见 [PROXY_ARCHITECTURE.md](PROXY_ARCHITECTURE.md)。
+Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_AND_BILLING.md](USAGE_AND_BILLING.md)。
 
 两条相互独立、可同时激活的代理轨道（`ProxyViewModel` 用 `activatedConfigId` / `activatedCodexConfigId` 分别跟踪，互斥仅限同家族 `ProxyNodeFamily`）：
 
@@ -190,14 +191,16 @@ sequenceDiagram
 | `~/.config/aiusage/profiles/*.json` | Node profile files (`_metadata` + full `settings.json` content) |
 | `~/.claude/settings.json` | Claude Code configuration (full replacement on activation) |
 | `~/.claude/settings.backup.json` | Backup of `settings.json` before activation |
-| `~/.config/aiusage/proxy-logs.json` | Proxy request logs (with day-based retention) |
+| `~/.config/aiusage/proxy-logs/proxy-logs-YYYY-MM-DD.json` | Short-retention proxy request log shards |
+| `~/.config/aiusage/usage-archive/proxy-usage-claude-v1.json` | Claude proxy daily usage archive; token/cost fields are frozen when requests are logged |
+| `~/.config/aiusage/usage-archive/proxy-usage-codex-v1.json` | Codex proxy daily usage archive; same frozen-cost semantics |
 | `~/.codex/config.toml` | Codex configuration; managed `model_provider=aiusage-proxy` block injected on activation (chmod 0600) |
 | `~/.codex/config.toml.aiusage.bak` | Backup of `config.toml` before injection (backup-as-source-of-truth; removed on restore) |
 | `~/.codex/.env` | Managed `no_proxy` block (loopback only) written when a system proxy is detected; removed on deactivation |
-| `~/.config/claude/projects/**/*.jsonl` | Claude Code usage logs (read-only by ClaudeProvider) |
-| `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/**/*.jsonl` | Codex session logs (read-only by CodexCostProvider; overridable via `$CODEX_HOME`) |
+| `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/**/*.jsonl` | Codex non-proxy session logs (read-only token source for CodexCostProvider; overridable via `$CODEX_HOME`) |
 | `~/Library/Caches/AIUsage/codex-cost-file-cache-v*.json` | CodexCostFileScanCache — per-file scan results, keyed on size + mtime so reopened sessions skip re-parsing |
-| `~/.config/aiusage/usage-archive/codex-subscription-usage-v*.json` | CodexSubscriptionUsageArchiveStore — frozen per-day subscription-track token/cost totals (re-priced only for today; history immutable) |
+| `~/.config/aiusage/usage-archive/codex-non-proxy-usage-v*.json` | CodexNonProxyUsageArchiveStore — frozen per-day non-proxy token totals; today is recomputed, previous days are immutable |
+| `~/.config/aiusage/usage-archive/codex-subscription-usage-v*.json` | Legacy Codex non-proxy archive path; read once and migrated to `codex-non-proxy-usage-v*.json` |
 
 ## Supported Providers
 
@@ -214,8 +217,8 @@ sequenceDiagram
 | minimax | MiniMax Token Plan | CLI | Subscription key (`sk-cp-…`, manual paste) |
 | amp | Amp | CLI | Browser session |
 | droid | Droid | CLI | Browser session / API |
-| claude | Claude Code | Local | JSONL log scan (`~/.config/claude/projects`) |
-| codex-cost | Codex | Local | JSONL log scan (`~/.codex/sessions` + archived sessions, full-history import on demand) |
+| claude | Claude Code | Local | AIUsage Claude proxy usage archive |
+| codex-cost | Codex | Local | Codex proxy archive + token-only non-proxy session logs |
 
 ## Account Login Flow (v0.7.1+)
 

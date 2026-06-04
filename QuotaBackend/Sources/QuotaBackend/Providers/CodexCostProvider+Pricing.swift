@@ -1,71 +1,34 @@
 import Foundation
 
 extension CodexCostProvider {
-    struct Pricing {
-        let inputPerToken: Double
-        let outputPerToken: Double
-        let cacheReadPerToken: Double
-        let threshold: Int?
-        let inputAbove: Double?
-        let outputAbove: Double?
-        let cacheReadAbove: Double?
-
-        init(
-            _ input: Double,
-            _ output: Double,
-            _ cacheRead: Double,
-            threshold: Int? = nil,
-            inputAbove: Double? = nil,
-            outputAbove: Double? = nil,
-            cacheReadAbove: Double? = nil
-        ) {
-            inputPerToken = input
-            outputPerToken = output
-            cacheReadPerToken = cacheRead
-            self.threshold = threshold
-            self.inputAbove = inputAbove
-            self.outputAbove = outputAbove
-            self.cacheReadAbove = cacheReadAbove
-        }
-    }
-
-    // OpenAI official API prices per token. Source values are published per
-    // million tokens, so each table entry stores the converted per-token rate.
-    static let pricing: [String: Pricing] = [
-        "gpt-5": Pricing(1.25e-6, 1e-5, 1.25e-7),
-        "gpt-5-codex": Pricing(1.25e-6, 1e-5, 1.25e-7),
-        "gpt-5-mini": Pricing(2.5e-7, 2e-6, 2.5e-8),
-        "gpt-5-nano": Pricing(5e-8, 4e-7, 5e-9),
-        "gpt-5-pro": Pricing(1.5e-5, 1.2e-4, 1.5e-5),
-        "gpt-5.1": Pricing(1.25e-6, 1e-5, 1.25e-7),
-        "gpt-5.1-codex": Pricing(1.25e-6, 1e-5, 1.25e-7),
-        "gpt-5.1-codex-max": Pricing(1.25e-6, 1e-5, 1.25e-7),
-        "gpt-5.1-codex-mini": Pricing(2.5e-7, 2e-6, 2.5e-8),
-        "gpt-5.2": Pricing(1.75e-6, 1.4e-5, 1.75e-7),
-        "gpt-5.2-codex": Pricing(1.75e-6, 1.4e-5, 1.75e-7),
-        "gpt-5.2-pro": Pricing(2.1e-5, 1.68e-4, 2.1e-5),
-        "gpt-5.3-codex": Pricing(1.75e-6, 1.4e-5, 1.75e-7),
-        "gpt-5.4": Pricing(2.5e-6, 1.5e-5, 2.5e-7, threshold: 272_000, inputAbove: 5e-6, outputAbove: 2.25e-5, cacheReadAbove: 5e-7),
-        "gpt-5.4-mini": Pricing(7.5e-7, 4.5e-6, 7.5e-8),
-        "gpt-5.4-nano": Pricing(2e-7, 1.25e-6, 2e-8),
-        "gpt-5.4-pro": Pricing(3e-5, 1.8e-4, 3e-5, threshold: 272_000, inputAbove: 6e-5, outputAbove: 2.7e-4, cacheReadAbove: 6e-5),
-        "gpt-5.5": Pricing(5e-6, 3e-5, 5e-7, threshold: 272_000, inputAbove: 1e-5, outputAbove: 4.5e-5, cacheReadAbove: 1e-6),
-        "gpt-5.5-pro": Pricing(3e-5, 1.8e-4, 3e-5),
-        "codex-mini-latest": Pricing(1.5e-6, 6e-6, 3.75e-7)
+    /// Known model names are only used for date-suffix normalization. Backend
+    /// Codex JSONL rows are token-only; priced proxy usage comes from the app
+    /// archive with already-frozen costs.
+    static let knownModels: Set<String> = [
+        "gpt-5",
+        "gpt-5-codex",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "gpt-5-pro",
+        "gpt-5.1",
+        "gpt-5.1-codex",
+        "gpt-5.1-codex-max",
+        "gpt-5.1-codex-mini",
+        "gpt-5.2",
+        "gpt-5.2-codex",
+        "gpt-5.2-pro",
+        "gpt-5.3-codex",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
+        "gpt-5.4-pro",
+        "gpt-5.5",
+        "gpt-5.5-pro",
+        "codex-mini-latest"
     ]
 
-    func estimateCost(model: String, input: Int, cacheRead: Int, output: Int) -> Double? {
-        guard let p = Self.pricing[model] else { return nil }
-        let rawInput = input + cacheRead
-        let usesLongContext = p.threshold.map { rawInput > $0 } ?? false
-        let inputRate = usesLongContext ? (p.inputAbove ?? p.inputPerToken) : p.inputPerToken
-        let cacheRate = usesLongContext ? (p.cacheReadAbove ?? p.cacheReadPerToken) : p.cacheReadPerToken
-        let outputRate = usesLongContext ? (p.outputAbove ?? p.outputPerToken) : p.outputPerToken
-        return roundUsd(Double(input) * inputRate + Double(cacheRead) * cacheRate + Double(output) * outputRate)
-    }
-
-    func pricingCacheSignature() -> String {
-        "\(Self.cacheSchemaVersion):\(Self.pricing.keys.sorted().joined(separator: ","))"
+    func scanCacheSignature() -> String {
+        "\(Self.scanCacheSchemaVersion):\(Self.knownModels.sorted().joined(separator: ","))"
     }
 
     func normalizeModel(_ raw: String) -> String {
@@ -77,28 +40,28 @@ extension CodexCostProvider {
         if model.hasPrefix("openai/") {
             model = String(model.dropFirst("openai/".count))
         }
-        if pricing[model] != nil { return model }
+        if knownModels.contains(model) { return model }
         if let range = model.range(of: #"-\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) {
             let base = String(model[..<range.lowerBound])
-            if pricing[base] != nil { return base }
+            if knownModels.contains(base) { return base }
         }
         if let range = model.range(of: #"-\d{8}$"#, options: .regularExpression) {
             let base = String(model[..<range.lowerBound])
-            if pricing[base] != nil { return base }
+            if knownModels.contains(base) { return base }
         }
         return model
     }
 
     // MARK: - Source Tagging
 
-    /// 根据 model_provider 为模型名追加来源标签，方便热力图区分订阅 / API
-    /// nil / 空值视为订阅（旧会话无此字段，均为直连 OpenAI）
-    func sourceTaggedModel(_ baseModel: String, provider: String?) -> String {
-        if let provider, !provider.isEmpty,
-           provider.lowercased().contains("proxy") {
-            return "\(baseModel) (API)"
+    /// 按来源给模型名打标签，区分代理 / 非代理。
+    ///   - model_provider == "aiusage-proxy": 走代理归档计费，JSONL 行丢弃避免双计。
+    ///   - 其它 Codex JSONL: 归入非代理轨，只统计 token，不估价，也不依赖 rate_limits。
+    func sourceTaggedModel(_ baseModel: String, provider: String?) -> String? {
+        if provider == CodexProvider.proxyProviderId {
+            return nil
         }
-        return "\(baseModel) (Sub)"
+        return "\(baseModel)\(Self.nonProxySourceSuffix)"
     }
 
     // MARK: - Date and misc helpers

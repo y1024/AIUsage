@@ -2,16 +2,16 @@ import XCTest
 import Foundation
 @testable import QuotaBackend
 
-// Codex 两轨用量统计测试（与「代理日志 API 轨 + JSONL 订阅轨」架构对齐）：
-// - 订阅轨：JSONL 非代理行「仅统计 token、成本恒 0」（订阅制不计费），模型名带 " (Sub)" 标签；
+// Codex 两轨用量统计测试（与「代理归档 + JSONL 非代理轨」架构对齐）：
+// - 非代理轨：JSONL 非代理行「仅统计 token、成本恒 0」，模型名带 " (Non-Proxy)" 标签；
 //   token 用量今天之前冻结、今天重算（删本地日志后历史用量不丢）。
-// - API 轨：读 proxy-usage-codex 永久归档，成本逐条冻结，模型名带 " (API)" 标签。
-// - JSONL 里的代理(API)行被丢弃（避免与代理归档双计）。
+// - 代理轨：读 proxy-usage-codex 永久归档，成本逐条冻结，模型名带 " (Proxy)" 标签。
+// - JSONL 里的代理行被丢弃（避免与代理归档双计）。
 final class CodexCostProviderTests: XCTestCase {
 
-    // MARK: - 订阅轨：仅统计 token、成本恒 0 + (Sub) 标签
+    // MARK: - 非代理轨：仅统计 token、成本恒 0 + (Non-Proxy) 标签
 
-    func testSubscriptionTrackCountsTokensOnlyAndTagsSub() async throws {
+    func testNonProxyTrackCountsTokensOnlyAndTagsNonProxy() async throws {
         let tempRoot = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
@@ -34,26 +34,30 @@ final class CodexCostProviderTests: XCTestCase {
 
         // net input = 160 - 50(cached) = 110, cacheRead 50, output 70 → total 230
         XCTAssertEqual(usage.extra["overall.totalTokens"]?.value as? Int, 230)
-        XCTAssertEqual(usage.source?.type, "codex-two-track")
+        XCTAssertEqual(usage.source?.type, "codex-proxy-non-proxy")
         XCTAssertEqual(summary.providerId, "codex-cost")
         XCTAssertEqual(summary.category, "local-cost")
         XCTAssertEqual(summary.costSummary?.overall?.tokens, 230)
 
         let model = try XCTUnwrap(summary.costSummary?.modelBreakdownOverall?.first)
-        XCTAssertEqual(model.model, "gpt-5.4 (Sub)")
+        XCTAssertEqual(model.model, "gpt-5.4 (Non-Proxy)")
         XCTAssertEqual(model.inputTokens, 110)
         XCTAssertEqual(model.cacheReadTokens, 50)
         XCTAssertEqual(model.outputTokens, 70)
+        let timelinePoint = try XCTUnwrap(summary.costSummary?.modelTimelines?.first?.daily.last)
+        XCTAssertEqual(timelinePoint.inputTokens, 110)
+        XCTAssertEqual(timelinePoint.cacheReadTokens, 50)
+        XCTAssertEqual(timelinePoint.outputTokens, 70)
 
-        // 订阅制不计费：成本恒 0，且订阅模型不算「未定价」。
+        // 非代理轨不监控价格：成本恒 0，且非代理模型不算「未定价」。
         XCTAssertEqual(summary.costSummary?.overall?.usd, 0)
         XCTAssertEqual(model.estimatedCostUsd, 0)
-        XCTAssertEqual(extraInt(usage, "overall.sub.totalTokens"), 230)
-        XCTAssertEqual(extraInt(usage, "overall.api.totalTokens"), 0)
+        XCTAssertEqual(extraInt(usage, "overall.nonProxy.totalTokens"), 230)
+        XCTAssertEqual(extraInt(usage, "overall.proxy.totalTokens"), 0)
         XCTAssertNil(summary.unpricedModels)
     }
 
-    func testSubscriptionTrackHasZeroCostAndIsNeverUnpriced() async throws {
+    func testNonProxyTrackHasZeroCostAndIsNeverUnpriced() async throws {
         let tempRoot = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
@@ -71,10 +75,10 @@ final class CodexCostProviderTests: XCTestCase {
         let usage = try await provider.fetchUsage()
         let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
 
-        // 订阅轨从不计费 → 成本 0，且不应进入「未定价」集合。
+        // 非代理轨不监控价格 → 成本 0，且不应进入「未定价」集合。
         XCTAssertEqual(summary.costSummary?.overall?.usd, 0)
         XCTAssertNil(summary.unpricedModels)
-        XCTAssertEqual(summary.costSummary?.modelBreakdownOverall?.first?.model, "gpt-5.4 (Sub)")
+        XCTAssertEqual(summary.costSummary?.modelBreakdownOverall?.first?.model, "gpt-5.4 (Non-Proxy)")
     }
 
     func testSubtractsInheritedTotalsForForkedCodexSessions() async throws {
@@ -110,7 +114,7 @@ final class CodexCostProviderTests: XCTestCase {
 
         XCTAssertEqual(summary.costSummary?.overall?.tokens, 160)
         let breakdown = try XCTUnwrap(summary.costSummary?.modelBreakdownOverall?.first)
-        XCTAssertEqual(breakdown.model, "gpt-5.4 (Sub)")
+        XCTAssertEqual(breakdown.model, "gpt-5.4 (Non-Proxy)")
         XCTAssertEqual(breakdown.inputTokens, 80)
         XCTAssertEqual(breakdown.cacheReadTokens, 50)
         XCTAssertEqual(breakdown.outputTokens, 30)
@@ -146,7 +150,7 @@ final class CodexCostProviderTests: XCTestCase {
         let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
 
         let models = try XCTUnwrap(summary.costSummary?.modelBreakdownOverall)
-        XCTAssertEqual(models.map(\.model), ["gpt-5-mini (Sub)"])
+        XCTAssertEqual(models.map(\.model), ["gpt-5-mini (Non-Proxy)"])
     }
 
     func testParsesLastTokenUsageDeltas() async throws {
@@ -184,9 +188,9 @@ final class CodexCostProviderTests: XCTestCase {
         XCTAssertEqual(breakdown.outputTokens, 7)
     }
 
-    // MARK: - 代理(API)行丢弃，避免双计
+    // MARK: - 代理 JSONL 行丢弃，避免双计
 
-    func testProxyTaggedJSONLRowsAreExcludedFromSubscriptionTrack() async throws {
+    func testProxyTaggedJSONLRowsAreExcludedFromNonProxyTrack() async throws {
         let tempRoot = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
@@ -194,42 +198,70 @@ final class CodexCostProviderTests: XCTestCase {
         let sessionDir = codexSessionDirectory(in: tempRoot, for: now)
         try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
         let ts = SharedFormatters.iso8601String(from: now)
-        // model_provider = aiusage-proxy → 该会话被标为 (API)，应被订阅轨丢弃。
+        // model_provider = aiusage-proxy → 该会话走代理归档，JSONL 行应被非代理轨丢弃。
         try writeJSONLines([
             ["type": "session_meta", "timestamp": ts, "payload": ["id": "proxy-session", "model_provider": "aiusage-proxy"]],
             ["type": "turn_context", "timestamp": ts, "payload": ["model": "gpt-5.4"]],
             tokenCountLine(ts, input: 100, cached: 0, output: 20)
         ], to: sessionDir.appendingPathComponent("proxy-session.jsonl"))
 
-        // 无代理归档文件 → API 轨为空，订阅轨丢弃 (API) 行后也为空 → 无任何用量。
+        // 无代理归档文件 → 代理轨为空，非代理轨丢弃代理 JSONL 行后也为空 → 无任何用量。
         let provider = makeProvider(home: tempRoot)
         do {
             _ = try await provider.fetchUsage()
-            XCTFail("Expected no_usage_data: proxy-tagged JSONL rows must not feed the subscription track")
+            XCTFail("Expected no_usage_data: proxy-tagged JSONL rows must not feed the non-proxy track")
         } catch let error as ProviderError {
             XCTAssertEqual(error.code, "no_usage_data")
         }
     }
 
-    // MARK: - API 轨：读代理归档 + 与订阅轨合并
+    // MARK: - 第三方直连（非代理、无 rate_limits）计入 token
 
-    func testApiTrackFromProxyArchiveMergesWithSubscriptionTrack() async throws {
+    func testThirdPartyDirectUsageCountsAsNonProxyWithoutRateLimits() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let now = Date()
+        let sessionDir = codexSessionDirectory(in: tempRoot, for: now)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let ts = SharedFormatters.iso8601String(from: now)
+        // 第三方直连 / 自定义 base_url：不依赖 rate_limits，只要不是 aiusage-proxy 就归入非代理 token 轨。
+        try writeJSONLines([
+            ["type": "session_meta", "timestamp": ts, "payload": ["id": "third-party", "model_provider": "openai"]],
+            ["type": "turn_context", "timestamp": ts, "payload": ["model": "gpt-5.4"]],
+            tokenCountLine(ts, input: 100, cached: 0, output: 20)
+        ], to: sessionDir.appendingPathComponent("third-party.jsonl"))
+
+        let provider = makeProvider(home: tempRoot)
+        let usage = try await provider.fetchUsage()
+        let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
+
+        XCTAssertEqual(extraInt(usage, "overall.nonProxy.totalTokens"), 120)
+        XCTAssertEqual(extraDouble(usage, "overall.nonProxy.estimatedCostUsd") ?? -1, 0.0, accuracy: 1e-9)
+        XCTAssertEqual(summary.costSummary?.overall?.tokens, 120)
+        XCTAssertEqual(summary.costSummary?.overall?.usd, 0)
+        XCTAssertEqual(summary.costSummary?.modelBreakdownOverall?.first?.model, "gpt-5.4 (Non-Proxy)")
+    }
+
+    // MARK: - 代理轨：读代理归档 + 与非代理轨合并
+
+    func testProxyTrackFromArchiveMergesWithNonProxyTrack() async throws {
         let tempRoot = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
         let now = Date()
         let todayKey = utcDayKey(now)
 
-        // API 轨：代理归档（成本冻结 0.5），模型 gpt-5.4，今天。
+        // 代理轨：代理归档（成本冻结 0.5），模型 gpt-5.4，今天。
         try writeProxyApiArchive(home: tempRoot, days: [
             todayKey: ["gpt-5.4": [
                 "inputTokens": 300, "outputTokens": 100,
-                "cacheReadTokens": 0, "cacheCreateTokens": 0,
+                "cacheReadTokens": 20, "cacheCreateTokens": 10,
                 "costUSD": 0.5, "requests": 2
             ]]
         ])
 
-        // 订阅轨：JSONL 非代理行仅统计 token（订阅不计费，成本恒 0）。
+        // 非代理轨：JSONL 非代理行仅统计 token（不监控价格，成本恒 0）。
         let sessionDir = codexSessionDirectory(in: tempRoot, for: now)
         try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
         let ts = SharedFormatters.iso8601String(from: now)
@@ -243,25 +275,36 @@ final class CodexCostProviderTests: XCTestCase {
         let usage = try await provider.fetchUsage()
         let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
 
-        XCTAssertEqual(extraInt(usage, "overall.api.totalTokens"), 400)
-        XCTAssertEqual(extraDouble(usage, "overall.api.estimatedCostUsd") ?? -1, 0.5, accuracy: 1e-9)
-        XCTAssertEqual(extraInt(usage, "overall.sub.totalTokens"), 1_000_000)
-        XCTAssertEqual(extraDouble(usage, "overall.sub.estimatedCostUsd") ?? -1, 0.0, accuracy: 1e-9)
+        XCTAssertEqual(extraInt(usage, "overall.proxy.totalTokens"), 430)
+        XCTAssertEqual(extraDouble(usage, "overall.proxy.estimatedCostUsd") ?? -1, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(extraInt(usage, "overall.nonProxy.totalTokens"), 1_000_000)
+        XCTAssertEqual(extraDouble(usage, "overall.nonProxy.estimatedCostUsd") ?? -1, 0.0, accuracy: 1e-9)
 
-        // 合计 token = 两轨之和；合计成本 = 仅 API（订阅不计费）。
-        XCTAssertEqual(summary.costSummary?.overall?.tokens, 1_000_400)
+        // 合计 token = 两轨之和；合计成本 = 仅代理（非代理不监控价格）。
+        XCTAssertEqual(summary.costSummary?.overall?.tokens, 1_000_430)
         XCTAssertEqual(summary.costSummary?.overall?.usd ?? -1, 0.5, accuracy: 1e-9)
 
         let models = try XCTUnwrap(summary.costSummary?.modelBreakdownOverall)
-        let api = try XCTUnwrap(models.first { $0.model == "gpt-5.4 (API)" })
-        XCTAssertEqual(api.totalTokens, 400)
-        XCTAssertEqual(api.estimatedCostUsd, 0.5, accuracy: 1e-9)
-        let sub = try XCTUnwrap(models.first { $0.model == "gpt-5.4 (Sub)" })
-        XCTAssertEqual(sub.totalTokens, 1_000_000)
-        XCTAssertEqual(sub.estimatedCostUsd, 0.0, accuracy: 1e-9)
+        let proxy = try XCTUnwrap(models.first { $0.model == "gpt-5.4 (Proxy)" })
+        XCTAssertEqual(proxy.totalTokens, 430)
+        XCTAssertEqual(proxy.inputTokens, 300)
+        XCTAssertEqual(proxy.outputTokens, 100)
+        XCTAssertEqual(proxy.cacheReadTokens, 20)
+        XCTAssertEqual(proxy.cacheCreateTokens, 10)
+        XCTAssertEqual(proxy.estimatedCostUsd, 0.5, accuracy: 1e-9)
+        let nonProxy = try XCTUnwrap(models.first { $0.model == "gpt-5.4 (Non-Proxy)" })
+        XCTAssertEqual(nonProxy.totalTokens, 1_000_000)
+        XCTAssertEqual(nonProxy.estimatedCostUsd, 0.0, accuracy: 1e-9)
+
+        let proxyTimeline = try XCTUnwrap(summary.costSummary?.modelTimelines?.first { $0.model == "gpt-5.4 (Proxy)" })
+        let proxyDay = try XCTUnwrap(proxyTimeline.daily.last)
+        XCTAssertEqual(proxyDay.inputTokens, 300)
+        XCTAssertEqual(proxyDay.outputTokens, 100)
+        XCTAssertEqual(proxyDay.cacheReadTokens, 20)
+        XCTAssertEqual(proxyDay.cacheCreateTokens, 10)
     }
 
-    func testApiTrackZeroCostModelMarkedUnpriced() async throws {
+    func testProxyTrackZeroCostModelMarkedUnpriced() async throws {
         let tempRoot = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
@@ -281,12 +324,36 @@ final class CodexCostProviderTests: XCTestCase {
 
         XCTAssertEqual(summary.costSummary?.overall?.tokens, 400)
         XCTAssertEqual(summary.costSummary?.overall?.usd, 0)
-        XCTAssertEqual(summary.unpricedModels, ["gpt-5.4 (API)"])
+        XCTAssertEqual(summary.unpricedModels, ["gpt-5.4 (Proxy)"])
     }
 
-    // MARK: - 订阅轨冻结：今天之前冻结、今天重算（删本地日志后历史用量不丢）
+    func testProxyTrackZeroCostWithResolvedPricingIsNotUnpriced() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-    func testSubscriptionPastDayTokensStayFrozenAfterLogDeletion() async throws {
+        let now = Date()
+        let todayKey = utcDayKey(now)
+        try writeProxyApiArchive(home: tempRoot, days: [
+            todayKey: ["gpt-5.4": [
+                "inputTokens": 300, "outputTokens": 100,
+                "cacheReadTokens": 0, "cacheCreateTokens": 0,
+                "costUSD": 0.0, "requests": 1,
+                "pricingResolvedRequests": 1
+            ]]
+        ])
+
+        let provider = makeProvider(home: tempRoot)
+        let usage = try await provider.fetchUsage()
+        let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
+
+        XCTAssertEqual(summary.costSummary?.overall?.tokens, 400)
+        XCTAssertEqual(summary.costSummary?.overall?.usd, 0)
+        XCTAssertNil(summary.unpricedModels)
+    }
+
+    // MARK: - 非代理轨冻结：今天之前冻结、今天重算（删本地日志后历史用量不丢）
+
+    func testNonProxyPastDayTokensStayFrozenAfterLogDeletion() async throws {
         let tempRoot = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
@@ -313,7 +380,7 @@ final class CodexCostProviderTests: XCTestCase {
             tokenCountLine(tts, input: 2_000_000, cached: 0, output: 0)
         ], to: tDir.appendingPathComponent("today.jsonl"))
 
-        // 首跑：昨天 1M、今天 2M、合计 3M（订阅 token；成本恒 0）。
+        // 首跑：昨天 1M、今天 2M、合计 3M（非代理 token；成本恒 0）。
         let provider = makeProvider(home: tempRoot)
         let first = try await provider.fetchUsage()
         let firstSummary = UsageNormalizer.normalize(provider: provider, usage: first)
@@ -329,7 +396,7 @@ final class CodexCostProviderTests: XCTestCase {
         XCTAssertEqual(secondSummary.costSummary?.overall?.tokens, 3_000_000)
     }
 
-    func testFullHistoryImportFreezesSubscriptionArchivePerHome() async throws {
+    func testFullHistoryImportFreezesNonProxyArchivePerHome() async throws {
         let tempRoot = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
@@ -353,15 +420,96 @@ final class CodexCostProviderTests: XCTestCase {
         let otherNeedsImport = await otherProvider.needsFullHistoryImport()
         XCTAssertTrue(otherNeedsImport)
 
-        // 首跑触发全量导入：冻结 60 天前的订阅日（窗口外，必须靠全量扫描）。
+        // 首跑触发全量导入：冻结 60 天前的非代理日（窗口外，必须靠全量扫描）。
         let usage = try await provider.fetchUsage()
         XCTAssertEqual(usage.extra["overall.totalTokens"]?.value as? Int, 50)
 
-        let archiveURL = CodexSubscriptionUsageArchiveStore.fileURL(homeDirectory: tempRoot.path)
+        let archiveURL = CodexNonProxyUsageArchiveStore.fileURL(homeDirectory: tempRoot.path)
         XCTAssertTrue(FileManager.default.fileExists(atPath: archiveURL.path))
 
         let stillNeedsImport = await provider.needsFullHistoryImport()
         XCTAssertFalse(stillNeedsImport)
+    }
+
+    func testLegacySubscriptionArchiveMigratesToNonProxyArchive() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let now = Date()
+        let archivedDayKey = utcDayKey(now.addingTimeInterval(-86_400))
+        let legacyURL = CodexNonProxyUsageArchiveStore.legacyFileURL(homeDirectory: tempRoot.path)
+        try FileManager.default.createDirectory(at: legacyURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let legacyPayload: [String: Any] = [
+            "version": 1,
+            "updatedAt": SharedFormatters.iso8601String(from: now),
+            "fullHistoryImportedAt": SharedFormatters.iso8601String(from: now),
+            "days": [
+                archivedDayKey: [
+                    "usageRows": 2,
+                    "totalTokens": 1049,
+                    "estimatedCostUsd": 9.9,
+                    "models": [
+                        "gpt-5.4 (Sub)": [
+                            "model": "gpt-5.4 (Sub)",
+                            "totalTokens": 50,
+                            "inputTokens": 42,
+                            "outputTokens": 8,
+                            "cacheReadTokens": 0,
+                            "estimatedCostUsd": 9.9
+                        ],
+                        "gpt-5.4 (API)": [
+                            "model": "gpt-5.4 (API)",
+                            "totalTokens": 999,
+                            "inputTokens": 999,
+                            "outputTokens": 0,
+                            "cacheReadTokens": 0,
+                            "estimatedCostUsd": 1.0
+                        ]
+                    ]
+                ]
+            ]
+        ]
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyPayload, options: [.sortedKeys])
+        try legacyData.write(to: legacyURL, options: .atomic)
+
+        let provider = makeProvider(home: tempRoot)
+        let usage = try await provider.fetchUsage()
+        let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
+
+        XCTAssertEqual(extraInt(usage, "overall.nonProxy.totalTokens"), 50)
+        XCTAssertEqual(extraDouble(usage, "overall.nonProxy.estimatedCostUsd") ?? -1, 0.0, accuracy: 1e-9)
+        XCTAssertEqual(summary.costSummary?.overall?.usd ?? -1, 0.0, accuracy: 1e-9)
+        XCTAssertEqual(summary.costSummary?.modelBreakdownOverall?.first?.model, "gpt-5.4 (Non-Proxy)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: CodexNonProxyUsageArchiveStore.fileURL(homeDirectory: tempRoot.path).path))
+    }
+
+    func testNonProxyTodayArchiveClearsWhenTodayLogsDisappear() async throws {
+        let tempRoot = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let now = Date()
+        let sessionDir = codexSessionDirectory(in: tempRoot, for: now)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let ts = SharedFormatters.iso8601String(from: now)
+        let todayFile = sessionDir.appendingPathComponent("today.jsonl")
+        try writeJSONLines([
+            ["type": "session_meta", "timestamp": ts, "payload": ["id": "today-session"]],
+            ["type": "turn_context", "timestamp": ts, "payload": ["model": "gpt-5.4"]],
+            tokenCountLine(ts, input: 100, cached: 0, output: 20)
+        ], to: todayFile)
+
+        let provider = makeProvider(home: tempRoot)
+        let first = try await provider.fetchUsage()
+        XCTAssertEqual(extraInt(first, "today.totalTokens"), 120)
+
+        try FileManager.default.removeItem(at: todayFile)
+
+        do {
+            _ = try await provider.fetchUsage()
+            XCTFail("Expected no_usage_data after today's non-proxy logs disappear")
+        } catch let error as ProviderError {
+            XCTAssertEqual(error.code, "no_usage_data")
+        }
     }
 
     // MARK: - Helpers
@@ -390,6 +538,7 @@ final class CodexCostProviderTests: XCTestCase {
         }
     }
 
+    /// Codex JSONL 的 token_count 事件：不带 rate_limits，验证非代理统计不依赖该字段。
     private func tokenCountLine(_ timestamp: String, input: Int, cached: Int, output: Int) -> [String: Any] {
         [
             "type": "event_msg",

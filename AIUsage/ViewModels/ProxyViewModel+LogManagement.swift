@@ -91,17 +91,19 @@ extension ProxyViewModel {
         saveLogs()
     }
 
-    /// Fill in costs for logs that have estimatedCostUSD == 0 (pricing was missing at creation time).
+    /// Fill in pricing for logs that were recorded before their model had a configured price.
     /// Logs with existing non-zero costs are preserved as-is.
     func recalculateCosts(for configId: String) {
         guard let config = configurations.first(where: { $0.id == configId }),
               let logs = recentLogs[configId] else { return }
 
         var changed = false
+        var changedDayKeys = Set<String>()
+        var costDelta = 0.0
         var updatedLogs: [ProxyRequestLog] = []
 
         for log in logs {
-            if log.estimatedCostUSD == 0, log.tokensInput + log.tokensOutput + log.tokensCache > 0 {
+            if !log.pricingResolved, log.tokensInput + log.tokensOutput + log.tokensCache > 0 {
                 let pricing = config.pricingForModel(log.upstreamModel)
                 let cost = pricing?.costForTokens(
                     input: log.tokensInput,
@@ -109,8 +111,10 @@ extension ProxyViewModel {
                     cacheRead: log.tokensCacheRead,
                     cacheCreate: log.tokensCacheCreation
                 ) ?? 0
-                if cost > 0 {
+                if pricing != nil {
                     changed = true
+                    changedDayKeys.insert(shardDayKey(log.timestamp))
+                    costDelta += cost - log.estimatedCostUSD
                     updatedLogs.append(ProxyRequestLog(
                         id: log.id, configId: log.configId, timestamp: log.timestamp,
                         method: log.method, path: log.path,
@@ -120,7 +124,10 @@ extension ProxyViewModel {
                         tokensCacheRead: log.tokensCacheRead,
                         tokensCacheCreation: log.tokensCacheCreation,
                         estimatedCostUSD: cost,
-                        errorMessage: log.errorMessage
+                        pricingResolved: true,
+                        errorMessage: log.errorMessage,
+                        errorType: log.errorType,
+                        statusCode: log.statusCode
                     ))
                     continue
                 }
@@ -130,12 +137,12 @@ extension ProxyViewModel {
 
         if changed {
             recentLogs[configId] = updatedLogs
-            logsDirtyDays.formUnion(updatedLogs.map { shardDayKey($0.timestamp) })
-            let totalCost = updatedLogs.reduce(0.0) { $0 + $1.estimatedCostUSD }
+            logsDirtyDays.formUnion(changedDayKeys)
             if var stats = statistics[configId] {
-                stats.estimatedCostUSD = totalCost
+                stats.estimatedCostUSD += costDelta
                 statistics[configId] = stats
             }
+            foldDaysIntoUsageArchive(changedDayKeys)
             saveStatistics()
             saveLogs()
             flushLogsRefresh()
@@ -254,13 +261,16 @@ extension ProxyViewModel {
 
     func clearLogs(for configId: String) {
         guard let logs = recentLogs[configId], !logs.isEmpty else { return }
-        logsDirtyDays.formUnion(logs.map { shardDayKey($0.timestamp) })
+        let dayKeys = Set(logs.map { shardDayKey($0.timestamp) })
+        foldDaysIntoUsageArchive(dayKeys)
+        logsDirtyDays.formUnion(dayKeys)
         recentLogs[configId] = []
         saveLogs()
         flushLogsRefresh()
     }
 
     func clearAllLogs() {
+        foldAllLoadedDaysIntoUsageArchive()
         recentLogs.removeAll()
         logsDirtyDays.removeAll()
 

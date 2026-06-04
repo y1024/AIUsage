@@ -41,6 +41,7 @@ struct CodexRow: Codable, Sendable {
     let model: String
     let inputTokens: Int
     let cacheReadTokens: Int
+    var cacheCreateTokens = 0
     let outputTokens: Int
     let totalTokens: Int
     let estimatedCostUsd: Double?
@@ -50,7 +51,7 @@ struct CodexFileFingerprint: Codable, Equatable, Sendable {
     let path: String
     let size: UInt64
     let modifiedAt: TimeInterval
-    let pricingSignature: String
+    let scanSignature: String
 }
 
 struct CodexModelAggregate: Codable, Sendable {
@@ -59,13 +60,59 @@ struct CodexModelAggregate: Codable, Sendable {
     var inputTokens = 0
     var outputTokens = 0
     var cacheReadTokens = 0
+    var cacheCreateTokens = 0
+    var unpricedRequests = 0
     var estimatedCostUsd = 0.0
+
+    init(
+        model: String,
+        totalTokens: Int = 0,
+        inputTokens: Int = 0,
+        outputTokens: Int = 0,
+        cacheReadTokens: Int = 0,
+        cacheCreateTokens: Int = 0,
+        unpricedRequests: Int = 0,
+        estimatedCostUsd: Double = 0
+    ) {
+        self.model = model
+        self.totalTokens = totalTokens
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheCreateTokens = cacheCreateTokens
+        self.unpricedRequests = unpricedRequests
+        self.estimatedCostUsd = estimatedCostUsd
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case model
+        case totalTokens
+        case inputTokens
+        case outputTokens
+        case cacheReadTokens
+        case cacheCreateTokens
+        case unpricedRequests
+        case estimatedCostUsd
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        model = try c.decode(String.self, forKey: .model)
+        totalTokens = try c.decodeIfPresent(Int.self, forKey: .totalTokens) ?? 0
+        inputTokens = try c.decodeIfPresent(Int.self, forKey: .inputTokens) ?? 0
+        outputTokens = try c.decodeIfPresent(Int.self, forKey: .outputTokens) ?? 0
+        cacheReadTokens = try c.decodeIfPresent(Int.self, forKey: .cacheReadTokens) ?? 0
+        cacheCreateTokens = try c.decodeIfPresent(Int.self, forKey: .cacheCreateTokens) ?? 0
+        unpricedRequests = try c.decodeIfPresent(Int.self, forKey: .unpricedRequests) ?? 0
+        estimatedCostUsd = try c.decodeIfPresent(Double.self, forKey: .estimatedCostUsd) ?? 0
+    }
 
     mutating func record(row: CodexRow) {
         totalTokens += row.totalTokens
         inputTokens += row.inputTokens
         outputTokens += row.outputTokens
         cacheReadTokens += row.cacheReadTokens
+        cacheCreateTokens += row.cacheCreateTokens
         estimatedCostUsd += row.estimatedCostUsd ?? 0
     }
 
@@ -74,6 +121,8 @@ struct CodexModelAggregate: Codable, Sendable {
         inputTokens += other.inputTokens
         outputTokens += other.outputTokens
         cacheReadTokens += other.cacheReadTokens
+        cacheCreateTokens += other.cacheCreateTokens
+        unpricedRequests += other.unpricedRequests
         estimatedCostUsd += other.estimatedCostUsd
     }
 }

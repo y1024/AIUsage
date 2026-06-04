@@ -260,6 +260,7 @@ extension ProxyViewModel {
             tokensCacheRead: tokensCacheRead,
             tokensCacheCreation: tokensCacheCreation,
             estimatedCostUSD: estimatedCost,
+            pricingResolved: pricing != nil,
             errorMessage: json["error"] as? String,
             errorType: json["error_type"] as? String,
             statusCode: json["status_code"] as? Int

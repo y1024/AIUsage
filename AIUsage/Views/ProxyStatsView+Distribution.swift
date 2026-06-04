@@ -33,9 +33,9 @@ extension ProxyStatsView {
             : formatCompactNumber(Double(item.tokens))
     }
 
-    /// 订阅模型（合计轨里带 " (Sub)" 后缀）不按 token 计费，费用列以 "—" 呈现而非 $0.0000。
+    /// 非代理模型（合计轨里带 " (Non-Proxy)" 后缀）不监控价格，费用列以 "—" 呈现而非 $0.0000。
     func modelCostText(_ item: StatsDataAdapter.ModelAggregate) -> String {
-        UsageTrack.isSubscription(item.model) ? "—" : formatCurrency(item.cost)
+        UsageTrack.isNonProxy(item.model) ? "—" : formatCurrency(item.cost)
     }
 
     // MARK: - Layout
@@ -136,7 +136,7 @@ extension ProxyStatsView {
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.06), lineWidth: 1))
     }
 
-    /// 模型分布/详情当前视图回显：时间段 · 口径（订阅轨只显示 Tokens 口径）。
+    /// 模型分布/详情当前视图回显：时间段 · 口径（非代理轨只显示 Tokens 口径）。
     var distributionContextLabel: String {
         let metricLabel = effectiveMetric == .cost ? L("Cost", "费用") : "Tokens"
         return "\(period.label) · \(metricLabel)"
@@ -249,10 +249,10 @@ extension ProxyStatsView {
             .frame(minWidth: modelNameColumnMinWidth, maxWidth: modelNameColumnMaxWidth, alignment: .leading)
 
             if showsCost {
-                let isSub = UsageTrack.isSubscription(item.model)
+                let isNonProxy = UsageTrack.isNonProxy(item.model)
                 Text(modelCostText(item))
                     .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(isSub ? Color.secondary : Color.primary)
+                    .foregroundStyle(isNonProxy ? Color.secondary : Color.primary)
                     .frame(width: costWidth, alignment: .trailing)
             }
 

@@ -74,7 +74,7 @@ extension UsageNormalizer {
         )
         base.models = topModels.isEmpty ? nil : topModels
         base.nextResetAt = nil
-        base.spotlight = "This tracker reads local Claude Code JSONL logs and derives token and cost totals from usage entries, so it works best as a local ledger rather than an official subscription meter."
+        base.spotlight = "This tracker reads AIUsage's Claude proxy usage archive. Token and cost totals are frozen when each proxy request is logged, so it works as a local cost ledger rather than an official subscription meter."
         base.unpricedModels = unpricedModels.isEmpty ? nil : unpricedModels
         return base
     }

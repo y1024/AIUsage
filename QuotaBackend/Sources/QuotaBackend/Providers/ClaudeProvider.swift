@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - Claude Provider
-// Claude Code 用量统计的唯一数据源 = 代理日志的永久日归档（成本逐条冻结、不可篡改、
+// Claude Code 用量统计的唯一数据源 = 代理用量永久日归档（成本逐条冻结、不可篡改、
 // 支持同模型不同节点不同价）。本类只读 App 侧 ProxyUsageArchiveStore 写出的 JSON，
 // 复用既有聚合 / 时间线辅助构建 ProviderUsage。
 // 数据来源: ~/.config/aiusage/usage-archive/proxy-usage-claude-v1.json（见 ClaudeProvider+ProxyArchive）
@@ -10,7 +10,7 @@ import Foundation
 public struct ClaudeProvider: ProviderFetcher {
     public let id = "claude"
     public let displayName = "Claude Code"
-    public let description = "Usage-derived Claude token and cost ledger from proxy logs"
+    public let description = "Claude proxy usage archive token and cost ledger"
 
     /// 归档为空时的回退天数（用于 trailing 时间线长度）。
     static let defaultScanDays = 30
@@ -27,7 +27,7 @@ public struct ClaudeProvider: ProviderFetcher {
     public func fetchUsage() async throws -> ProviderUsage {
         let now = Date()
 
-        // 唯一数据源：代理日志的永久日归档（成本逐条冻结、不可篡改、支持同模型不同节点不同价）。
+        // 唯一数据源：代理用量永久日归档（成本逐条冻结、不可篡改、支持同模型不同节点不同价）。
         let archivedDays = loadProxyUsageDays()
         guard !archivedDays.isEmpty else {
             throw ProviderError("no_usage_data", "No proxy usage recorded for Claude Code yet")

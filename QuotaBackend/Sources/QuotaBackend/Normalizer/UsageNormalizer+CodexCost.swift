@@ -51,7 +51,7 @@ extension UsageNormalizer {
         base.headline = HeadlineInfo(
             eyebrow: "Local token ledger",
             primary: "\(formatInt(monthTokens)) tokens",
-            secondary: "Codex session logs this month",
+            secondary: "Codex proxy + non-proxy usage this month",
             supporting: "Week \(formatInt(weekTokens)) tokens / Today \(formatInt(todayTokens))"
         )
         base.metrics = [
@@ -78,7 +78,7 @@ extension UsageNormalizer {
         )
         base.models = topModels.isEmpty ? nil : topModels
         base.nextResetAt = nil
-        base.spotlight = "This tracker reads local Codex session JSONL logs and derives token deltas from token_count events, using turn_context model markers when available."
+        base.spotlight = "This tracker combines priced Codex proxy archive usage with token-only non-proxy Codex session logs. Proxy JSONL rows are ignored here to avoid double counting."
         base.unpricedModels = unpricedModels.isEmpty ? nil : unpricedModels
         return base
     }

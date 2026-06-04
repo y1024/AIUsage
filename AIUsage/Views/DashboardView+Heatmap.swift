@@ -9,7 +9,7 @@ struct LocalTokenUsageHeatmap: View {
     var brandLabel: String? = nil
     var brandAsset: String? = nil
     var accent: Color = .green
-    /// 用量轨道：合计用 timeline.daily 合计口径；API/订阅按模型名后缀从 modelTimelines 过滤汇总。
+    /// 用量轨道：合计用 timeline.daily 合计口径；代理/非代理按模型名后缀从 modelTimelines 过滤汇总。
     var track: UsageTrack = .combined
 
     /// 展示的周数：仪表盘传 26（半年），统计页用默认 52（全年）。
@@ -26,8 +26,8 @@ struct LocalTokenUsageHeatmap: View {
 
     // MARK: - Data
 
-    /// 每日 Token 量聚合。以 JSONL 本地日志为唯一数据源；代理日志仅用于 tooltip 补充模型名，
-    /// 不参与总量计算（代理统计的是每次 API 调用的 token，含重试/中间请求，会虚高）。
+    /// 每日 Token 量聚合。直接使用 provider costSummary：Claude 为代理归档，
+    /// Codex 合计为代理归档 + 非代理 token-only 日志，单轨从 modelTimelines 后缀过滤。
     private var dailyTotals: [Date: Int] {
         let calendar = Calendar.current
         var result: [Date: Int] = [:]

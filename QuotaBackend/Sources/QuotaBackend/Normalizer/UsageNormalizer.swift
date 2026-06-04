@@ -306,6 +306,14 @@ public enum UsageNormalizer {
         }
     }
 
+    static func optionalInt(_ value: Any?) -> Int? {
+        switch value {
+        case let v as Int: return v
+        case let v as Double: return Int(v)
+        default: return nil
+        }
+    }
+
     static func extraDouble(_ usage: ProviderUsage, _ key: String) -> Double? {
         switch usage.extra[key]?.value {
         case let v as Double: return v
@@ -347,7 +355,16 @@ public enum UsageNormalizer {
                 tokens = 0
             }
 
-            return CostTimelinePoint(bucket: bucket, label: label, usd: usd, tokens: tokens)
+            return CostTimelinePoint(
+                bucket: bucket,
+                label: label,
+                usd: usd,
+                tokens: tokens,
+                inputTokens: optionalInt(dict["inputTokens"]?.value),
+                outputTokens: optionalInt(dict["outputTokens"]?.value),
+                cacheReadTokens: optionalInt(dict["cacheReadTokens"]?.value),
+                cacheCreateTokens: optionalInt(dict["cacheCreateTokens"]?.value)
+            )
         }
     }
 
@@ -400,7 +417,16 @@ public enum UsageNormalizer {
             case let v as Double: tokens = Int(v)
             default: tokens = 0
             }
-            return CostTimelinePoint(bucket: bucket, label: label, usd: usd, tokens: tokens)
+            return CostTimelinePoint(
+                bucket: bucket,
+                label: label,
+                usd: usd,
+                tokens: tokens,
+                inputTokens: optionalInt(dict["inputTokens"]?.value),
+                outputTokens: optionalInt(dict["outputTokens"]?.value),
+                cacheReadTokens: optionalInt(dict["cacheReadTokens"]?.value),
+                cacheCreateTokens: optionalInt(dict["cacheCreateTokens"]?.value)
+            )
         }
     }
 
@@ -469,7 +495,7 @@ public enum UsageNormalizer {
             "claude-project-logs": "Local Claude logs",
             "claude-proxy-usage": "Proxy usage ledger",
             "codex-session-logs": "Local Codex logs",
-            "codex-two-track": "Proxy + subscription ledger",
+            "codex-proxy-non-proxy": "Proxy + non-proxy ledger",
             "gemini-cli": "Gemini CLI OAuth",
             "kiro-ide-auth-file": "Kiro IDE session",
             "pasted-cookie": "Pasted cookie",

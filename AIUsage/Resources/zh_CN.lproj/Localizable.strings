@@ -518,7 +518,7 @@
 "AIUsage/Views/ProviderPickerView.swift::Local" = "本地";
 
 /* Views/ProviderPickerView.swift */
-"AIUsage/Views/ProviderPickerView.swift::Local ledgers derived from usage logs" = "基于本地日志推导的费用账本";
+"AIUsage/Views/ProviderPickerView.swift::Usage ledgers from proxy archives and local logs" = "基于代理归档与本地日志的用量账本";
 
 /* Views/ProviderPickerView.swift */
 "AIUsage/Views/ProviderPickerView.swift::Manage Scan Sources" = "管理扫描来源";

@@ -98,6 +98,8 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             currency == .usd ? cacheReadPerMillion : cacheReadPerMillion * Self.cnyToUsdRate
         }
 
+        /// `input` must be non-cached input. Cached input is charged only through
+        /// `cacheRead`; callers should normalize provider usage before pricing.
         func costForTokens(input: Int, output: Int, cacheRead: Int, cacheCreate: Int) -> Double {
             (Double(input) * inputPerMillionUSD
              + Double(output) * outputPerMillionUSD
@@ -507,6 +509,7 @@ struct ProxyRequestLog: Codable, Identifiable {
     let tokensCacheRead: Int
     let tokensCacheCreation: Int
     let estimatedCostUSD: Double
+    let pricingResolved: Bool
     let errorMessage: String?
     let errorType: String?
     let statusCode: Int?
@@ -529,6 +532,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         tokensCacheRead: Int = 0,
         tokensCacheCreation: Int = 0,
         estimatedCostUSD: Double = 0,
+        pricingResolved: Bool = false,
         errorMessage: String? = nil,
         errorType: String? = nil,
         statusCode: Int? = nil
@@ -547,6 +551,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         self.tokensCacheRead = tokensCacheRead
         self.tokensCacheCreation = tokensCacheCreation
         self.estimatedCostUSD = estimatedCostUSD
+        self.pricingResolved = pricingResolved
         self.errorMessage = errorMessage
         self.errorType = errorType
         self.statusCode = statusCode
@@ -568,6 +573,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         case tokensCacheRead
         case tokensCacheCreation
         case estimatedCostUSD
+        case pricingResolved
         case errorMessage
         case errorType
         case statusCode
@@ -599,6 +605,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         }
 
         estimatedCostUSD = try c.decode(Double.self, forKey: .estimatedCostUSD)
+        pricingResolved = try c.decodeIfPresent(Bool.self, forKey: .pricingResolved) ?? (estimatedCostUSD > 0)
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
         errorType = try c.decodeIfPresent(String.self, forKey: .errorType)
         statusCode = try c.decodeIfPresent(Int.self, forKey: .statusCode)
@@ -621,6 +628,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         try c.encode(tokensCacheCreation, forKey: .tokensCacheCreation)
         try c.encode(tokensCacheRead + tokensCacheCreation, forKey: .tokensCache)
         try c.encode(estimatedCostUSD, forKey: .estimatedCostUSD)
+        try c.encode(pricingResolved, forKey: .pricingResolved)
         try c.encodeIfPresent(errorMessage, forKey: .errorMessage)
         try c.encodeIfPresent(errorType, forKey: .errorType)
         try c.encodeIfPresent(statusCode, forKey: .statusCode)

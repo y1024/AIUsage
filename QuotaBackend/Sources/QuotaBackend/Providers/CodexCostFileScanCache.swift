@@ -1,7 +1,8 @@
 import Foundation
 
 actor CodexCostFileScanCache {
-    static let artifactVersion = 4
+    // v6: Codex JSONL 由“订阅/rate_limits”改为“非代理 token”轨，旧缓存标签必须重解析。
+    static let artifactVersion = 6
     var entriesByFile: [String: CodexParsedFile] = [:]
     var hasLoadedDiskCache = false
 

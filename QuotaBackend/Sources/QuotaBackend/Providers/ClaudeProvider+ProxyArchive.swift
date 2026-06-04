@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - Claude Provider: Proxy Usage Archive Source
-// Claude Code 用量统计的唯一数据源是「代理日志的永久日归档」，由 App 侧
+// Claude Code 用量统计的唯一数据源是「代理用量永久日归档」，由 App 侧
 // (ProxyUsageArchiveStore) 从 ProxyRequestLog 折叠写出，成本逐条冻结、不可篡改。
 // QuotaBackend 只读该 JSON 文件（无法 import App 模块，故在此定义匹配的解码 DTO）。
 //
@@ -19,6 +19,7 @@ extension ClaudeProvider {
         let cacheCreateTokens: Int
         let costUSD: Double
         let requests: Int
+        let pricingResolvedRequests: Int?
     }
 
     private struct ProxyUsageDayDTO: Decodable {
@@ -64,7 +65,11 @@ extension ClaudeProvider {
                 bucket.usageRows += max(agg.requests, 0)
                 bucket.totalTokens += total
                 bucket.estimatedCostUsd += agg.costUSD
-                if agg.costUSD == 0 { bucket.unpricedModels.insert(modelName) }
+                let requestCount = max(agg.requests, 0)
+                let resolvedCount = agg.pricingResolvedRequests ?? (agg.costUSD > 0 ? requestCount : 0)
+                if resolvedCount < requestCount {
+                    bucket.unpricedModels.insert(modelName)
+                }
             }
             if !bucket.models.isEmpty { result[dayKey] = bucket }
         }

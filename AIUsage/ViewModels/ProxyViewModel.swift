@@ -385,6 +385,12 @@ class ProxyViewModel: ObservableObject {
             saveProxyOnlyIds()
         }
 
+        if let logs = recentLogs[id], !logs.isEmpty {
+            let dayKeys = Set(logs.map { shardDayKey($0.timestamp) })
+            foldDaysIntoUsageArchive(dayKeys)
+            logsDirtyDays.formUnion(dayKeys)
+        }
+
         configurations.removeAll { $0.id == id }
         statistics.removeValue(forKey: id)
         recentLogs.removeValue(forKey: id)

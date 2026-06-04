@@ -4,9 +4,9 @@ import QuotaBackend
 // MARK: - MenuBarView Cost Tracking Section
 // Claude Code / Codex 各自的「费用 + 用量」汇总（今日 / 本月 / 总计）。
 // 数据源统一为对应本地 cost provider 的 costSummary（refreshCoordinator 已聚合）：
-//   · Claude：来自代理日志永久归档（费用与 token 同源）。
-//   · Codex：费用 = API 轨（代理日志，订阅不计费恒 0）；token = API + 订阅合计，
-//     这样常用的「订阅用量」在费用看不出时也能从 token 列直接看到。
+//   · Claude：来自代理用量永久归档（费用与 token 同源）。
+//   · Codex：费用 = 代理轨（代理归档）；token = 代理 + 非代理合计，
+//     这样非代理用量在费用看不出时也能从 token 列直接看到。
 // 「总计」口径 = 归档全历史（比旧的代理保留窗求和更完整）。
 
 extension MenuBarView {
@@ -43,7 +43,7 @@ extension MenuBarView {
     }
 
     /// 有费用/用量数据的家族（Claude / Codex）及其 costSummary。
-    /// 改用 cost provider 而非代理节点判定，故仅用订阅的 Codex（无 API 节点）也会展示。
+    /// 改用 cost provider 而非代理节点判定，故仅有非代理 Codex 用量（无代理节点）也会展示。
     var costFamilyProviders: [FamilyCost] {
         let providers = appState.localCostProviders(from: refreshCoordinator.providers)
         var result: [FamilyCost] = []

@@ -7,7 +7,20 @@ extension ProviderRefreshCoordinator {
     // MARK: - QuotaBackend → ProviderData conversion
 
     func convertSummary(_ s: QuotaBackend.ProviderSummary) -> ProviderData {
-        ProviderData(
+        func convertTimelinePoint(_ point: QuotaBackend.CostTimelinePoint) -> CostTimelinePoint {
+            CostTimelinePoint(
+                bucket: point.bucket,
+                label: point.label,
+                usd: point.usd,
+                tokens: point.tokens,
+                inputTokens: point.inputTokens,
+                outputTokens: point.outputTokens,
+                cacheReadTokens: point.cacheReadTokens,
+                cacheCreateTokens: point.cacheCreateTokens
+            )
+        }
+
+        return ProviderData(
             id: s.id,
             providerId: s.providerId,
             accountId: s.accountId,
@@ -41,12 +54,8 @@ extension ProviderRefreshCoordinator {
                     overall: cs.overall.map { CostPeriod(usd: $0.usd, tokens: $0.tokens, rangeLabel: $0.rangeLabel) },
                     timeline: cs.timeline.map { timeline in
                         CostTimeline(
-                            hourly: timeline.hourly.map {
-                                CostTimelinePoint(bucket: $0.bucket, label: $0.label, usd: $0.usd, tokens: $0.tokens)
-                            },
-                            daily: timeline.daily.map {
-                                CostTimelinePoint(bucket: $0.bucket, label: $0.label, usd: $0.usd, tokens: $0.tokens)
-                            }
+                            hourly: timeline.hourly.map(convertTimelinePoint),
+                            daily: timeline.daily.map(convertTimelinePoint)
                         )
                     },
                     modelBreakdown: cs.modelBreakdown?.map {
@@ -64,8 +73,8 @@ extension ProviderRefreshCoordinator {
                     modelTimelines: cs.modelTimelines?.map {
                         ModelTimelineSeries(
                             model: $0.model,
-                            hourly: $0.hourly.map { CostTimelinePoint(bucket: $0.bucket, label: $0.label, usd: $0.usd, tokens: $0.tokens) },
-                            daily: $0.daily.map { CostTimelinePoint(bucket: $0.bucket, label: $0.label, usd: $0.usd, tokens: $0.tokens) }
+                            hourly: $0.hourly.map(convertTimelinePoint),
+                            daily: $0.daily.map(convertTimelinePoint)
                         )
                     }
                 )
@@ -185,7 +194,11 @@ extension ProviderRefreshCoordinator {
             bucket: point.bucket,
             label: localizedDynamicText(point.label),
             usd: point.usd,
-            tokens: point.tokens
+            tokens: point.tokens,
+            inputTokens: point.inputTokens,
+            outputTokens: point.outputTokens,
+            cacheReadTokens: point.cacheReadTokens,
+            cacheCreateTokens: point.cacheCreateTokens
         )
     }
 
@@ -246,6 +259,9 @@ extension ProviderRefreshCoordinator {
             "GitHub CLI": "GitHub CLI",
             "Local CLI session": "本地 CLI 会话",
             "Local Claude logs": "本地 Claude 日志",
+            "Proxy usage ledger": "代理用量账本",
+            "Proxy + subscription ledger": "代理 + 非代理账本",
+            "Proxy + non-proxy ledger": "代理 + 非代理账本",
             "Gemini CLI OAuth": "Gemini CLI OAuth",
             "Kiro IDE session": "Kiro IDE 会话",
             "Stored credential": "已存凭证",
@@ -330,14 +346,14 @@ extension ProviderRefreshCoordinator {
             "No urgent resets detected": "暂无即将重置的窗口",
             "A few windows are about to roll over": "有些窗口即将重置",
             "Warp can read from local app cache, which makes the panel feel instantaneous and keeps the design centered on what is actually left right now.": "Warp 可以直接读取本地应用缓存，所以面板刷新很快，重点也能放在当前还剩多少。",
-            "This tracker reads local Claude Code JSONL logs and derives token and cost totals from usage entries, so it works best as a local ledger rather than an official subscription meter.": "这个追踪源会读取本地 Claude Code JSONL 日志，并根据 usage 记录推导 Token 与费用总量，所以它更适合作为本地账本，而不是官方订阅额度计量器。",
-            "This tracker reads local Codex session JSONL logs and derives token deltas from token_count events, using turn_context model markers when available.": "这个追踪源会读取本地 Codex 会话 JSONL 日志，从 token_count 事件推导 token 增量，并优先使用 turn_context 中的模型标记。",
-            "Usage-derived Claude token and cost ledger from local logs": "基于本地日志推导的 Claude Token 与费用账本",
-            "Local token and cost ledger from Claude Code logs": "基于 Claude Code 本地日志的 Token 与费用账本",
-            "Local token ledger from Codex session logs": "基于 Codex 本地会话日志的 Token 账本",
+            "This tracker reads AIUsage's Claude proxy usage archive. Token and cost totals are frozen when each proxy request is logged, so it works as a local cost ledger rather than an official subscription meter.": "这个追踪源会读取 AIUsage 的 Claude 代理用量归档。每条代理请求写入时就会冻结 Token 与费用，所以它是本地费用账本，而不是官方订阅额度计量器。",
+            "This tracker combines priced Codex proxy archive usage with token-only non-proxy Codex session logs. Proxy JSONL rows are ignored here to avoid double counting.": "这个追踪源会合并已计价的 Codex 代理归档用量与仅统计 Token 的非代理 Codex 会话日志。这里会忽略代理 JSONL 行，避免重复统计。",
+            "Claude proxy usage archive token and cost ledger": "Claude 代理用量归档的 Token 与费用账本",
+            "Local token and cost ledger from Claude proxy usage": "基于 Claude 代理用量的本地 Token 与费用账本",
+            "Proxy cost ledger plus non-proxy Codex token usage": "Codex 代理费用账本与非代理 Token 用量",
             "Codex": "Codex",
             "Local token ledger": "本地 Token 账本",
-            "Codex session logs this month": "本月 Codex 会话日志",
+            "Codex proxy + non-proxy usage this month": "本月 Codex 代理 + 非代理用量",
             "Local ledgers and usage-derived spend": "本地账本与用量推导费用",
             "Copilot can mix unlimited and metered lanes. The dashboard keeps unlimited channels visible, but only metered windows affect watch and critical states.": "Copilot 同时存在无限和限额通道。面板会保留无限通道的可见性，但只有有限额的窗口会影响偏低和告急状态。",
             "Codex has multiple overlapping guardrails, so the UI surfaces all windows together and uses the tightest one to drive alerting.": "Codex 有多层重叠的限制窗口，所以界面会把它们一起展示，并用最紧张的那个来驱动提醒。",

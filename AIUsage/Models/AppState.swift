@@ -36,8 +36,8 @@ class AppState: ObservableObject {
         ProviderCatalogItem(id: "minimax", titleEn: "MiniMax Token Plan", titleZh: "MiniMax Token Plan", summaryEn: "MiniMax Token Plan 5-hour rolling and weekly subscription credits", summaryZh: "MiniMax Token Plan 5 小时滚动与周窗口的订阅额度", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "amp", titleEn: "Amp", titleZh: "Amp", summaryEn: "Replenishing credit pool and refill cadence", summaryZh: "会回补的额度池与回补节奏", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "droid", titleEn: "Droid", titleZh: "Droid", summaryEn: "Token-heavy usage pools and remaining allowances", summaryZh: "以 token 为主的额度池与剩余额度", channel: "cli", kind: .official),
-        ProviderCatalogItem(id: "claude", titleEn: "Claude Code", titleZh: "Claude Code", summaryEn: "Local token and cost ledger from Claude Code logs", summaryZh: "基于 Claude Code 本地日志的 Token 与费用账本", channel: "local", kind: .costTracking),
-        ProviderCatalogItem(id: "codex-cost", titleEn: "Codex", titleZh: "Codex", summaryEn: "Local token ledger from Codex session logs", summaryZh: "基于 Codex 本地会话日志的 Token 账本", channel: "local", kind: .costTracking)
+        ProviderCatalogItem(id: "claude", titleEn: "Claude Code", titleZh: "Claude Code", summaryEn: "Local token and cost ledger from Claude proxy usage", summaryZh: "基于 Claude 代理用量的本地 Token 与费用账本", channel: "local", kind: .costTracking),
+        ProviderCatalogItem(id: "codex-cost", titleEn: "Codex", titleZh: "Codex", summaryEn: "Proxy cost ledger plus non-proxy Codex token usage", summaryZh: "Codex 代理费用账本与非代理 Token 用量", channel: "local", kind: .costTracking)
     ]
 
     private static let initialState: InitialState = {

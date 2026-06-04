@@ -61,14 +61,14 @@ struct ProxyStatsView: View {
     }
 
     var selectedTrack: UsageTrack {
-        UsageTrack(rawValue: trackRaw) ?? .combined
+        UsageTrack(storedRawValue: trackRaw)
     }
 
     var trackBinding: Binding<UsageTrack> {
         Binding(get: { selectedTrack }, set: { trackRaw = $0.rawValue })
     }
 
-    /// 仅 Codex 家族才有 API/订阅两轨；其它家族强制合计。
+    /// 仅 Codex 家族才有代理/非代理两轨；其它家族强制合计。
     var effectiveTrack: UsageTrack {
         sourceFamily == .codex ? selectedTrack : .combined
     }
@@ -78,13 +78,13 @@ struct ProxyStatsView: View {
         sourceFamily == .codex && !codexLocalProviders.isEmpty
     }
 
-    /// 订阅制不按 token 计费 → 选「订阅」轨时全页隐藏费用相关 UI（费用 tile / 费用-Tokens 切换 /
+    /// 非代理轨不监控价格 → 选「非代理」轨时全页隐藏费用相关 UI（费用 tile / 费用-Tokens 切换 /
     /// 费用列 / 按费用的占比与饼图），只呈现 token 用量。其它轨道正常显示费用。
     var showsCost: Bool {
-        effectiveTrack != .subscription
+        effectiveTrack != .nonProxy
     }
 
-    /// 隐藏费用时（订阅轨），分布/详情/趋势一律按 Tokens 口径（不改持久化的 metric 偏好）。
+    /// 隐藏费用时（非代理轨），分布/详情/趋势一律按 Tokens 口径（不改持久化的 metric 偏好）。
     var effectiveMetric: StatMetric {
         showsCost ? metric : .tokens
     }
@@ -212,8 +212,8 @@ struct ProxyStatsView: View {
             }
             .pickerStyle(.segmented)
             .fixedSize()
-            .help(L("Split Codex usage into API (proxy logs) and Subscription (local logs) tracks.",
-                    "将 Codex 用量拆分为 API（代理日志）与订阅（本地日志）两轨。"))
+            .help(L("Split Codex usage into Proxy (priced archive) and Non-Proxy (token-only local logs) tracks.",
+                    "将 Codex 用量拆分为代理（可计价归档）与非代理（仅 Token 本地日志）两轨。"))
         }
     }
 
@@ -239,7 +239,7 @@ struct ProxyStatsView: View {
 
     // MARK: - Heatmap
 
-    /// Codex 热力图标题：单轨时附带轨道名（如「Codex · 订阅」），合计时仅品牌名。
+    /// Codex 热力图标题：单轨时附带轨道名（如「Codex · 非代理」），合计时仅品牌名。
     var codexHeatmapLabel: String {
         effectiveTrack == .combined ? "Codex" : "Codex · \(effectiveTrack.label)"
     }
