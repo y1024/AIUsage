@@ -6,7 +6,6 @@ import Foundation
 public enum ProviderRegistry {
 
     private static let all: [any ProviderFetcher] = [
-        AmpProvider(),
         AntigravityProvider(),
         ClaudeProvider(),
         CodexCostProvider(),

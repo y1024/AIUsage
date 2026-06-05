@@ -47,7 +47,6 @@ public enum UsageNormalizer {
     }
 
     static let providerThemes: [String: ThemeInfo] = [
-        "amp":     ThemeInfo(accent: "teal",   glow: "#38cbd6"),
         "antigravity": ThemeInfo(accent: "sky", glow: "#5cc9ff"),
         "claude":  ThemeInfo(accent: "sunset", glow: "#ff9d6c"),
         "codex-cost": ThemeInfo(accent: "indigo", glow: "#6875ff"),
@@ -115,7 +114,6 @@ public enum UsageNormalizer {
         case "kiro":    return normalizeKiro(base: &base, usage: usage)
         case "minimax": return normalizeMiniMax(base: &base, usage: usage)
         case "cursor":  return normalizeCursor(base: &base, usage: usage)
-        case "amp":     return normalizeAmp(base: &base, usage: usage)
         case "droid":   return normalizeDroid(base: &base, usage: usage)
         default:
             base.headline = HeadlineInfo(eyebrow: "Live snapshot", primary: base.label, secondary: "Fetched successfully", supporting: sourceLabel)

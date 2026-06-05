@@ -212,8 +212,6 @@ enum ProviderLoginURLs {
         switch providerId {
         case "cursor":
             return URL(string: "https://cursor.com/login")
-        case "amp":
-            return URL(string: "https://ampcode.com/settings")
         case "droid":
             return URL(string: "https://app.factory.ai")
         default:
@@ -225,8 +223,6 @@ enum ProviderLoginURLs {
         switch providerId {
         case "cursor":
             return ["cursor.com", "www.cursor.com", "cursor.sh"]
-        case "amp":
-            return ["ampcode.com", ".ampcode.com"]
         case "droid":
             return ["factory.ai", ".factory.ai", "app.factory.ai", "auth.factory.ai", "api.factory.ai"]
         default:
@@ -238,8 +234,6 @@ enum ProviderLoginURLs {
         switch providerId {
         case "cursor":
             return ["WorkosCursorSessionToken", "__Secure-next-auth.session-token", "next-auth.session-token", "wos-session", "__Secure-wos-session"]
-        case "amp":
-            return ["session"]
         case "droid":
             return [
                 "wos-session",
@@ -260,16 +254,9 @@ enum ProviderLoginURLs {
         guard let currentURL else { return true }
 
         let host = currentURL.host?.lowercased() ?? ""
-        let path = currentURL.path.lowercased()
         let absolute = currentURL.absoluteString.lowercased()
 
         switch providerId {
-        case "amp":
-            guard host.contains("ampcode.com") else { return false }
-            if path.contains("/login") || path.contains("/signin") || path.contains("/sign-in") {
-                return false
-            }
-            return path == "/settings" || path.hasPrefix("/settings/")
         case "cursor":
             if absolute.contains("/login") || absolute.contains("/signin") || absolute.contains("/auth") {
                 return false
@@ -306,5 +293,5 @@ enum ProviderLoginURLs {
         }
     }
 
-    static var webLoginProviders: Set<String> { ["cursor", "amp", "droid"] }
+    static var webLoginProviders: Set<String> { ["cursor", "droid"] }
 }

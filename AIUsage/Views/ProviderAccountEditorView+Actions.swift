@@ -469,7 +469,6 @@ extension ProviderAccountEditorView {
     func shouldSkipImmediateProviderRefresh(for providerId: String) -> Bool {
         providerId == "codex"
             || providerId == "gemini"
-            || providerId == "amp"
             || providerId == "cursor"
     }
 

@@ -120,14 +120,6 @@ public enum BrowserDiscovery {
             instructions: "Log in to cursor.com in your browser, or paste the Cookie header from DevTools."
         ),
         ProviderAuthCapability(
-            providerId: "amp",
-            displayName: "Amp",
-            supportedMethods: [.cookie, .auto],
-            cookieDomains: ["ampcode.com", ".ampcode.com"],
-            cookieNames: ["session"],
-            instructions: "Log in to ampcode.com/settings in your browser, or paste the Cookie header."
-        ),
-        ProviderAuthCapability(
             providerId: "antigravity",
             displayName: "Antigravity",
             supportedMethods: [.authFile, .oauth],

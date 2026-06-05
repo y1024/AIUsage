@@ -53,7 +53,7 @@
 
 | Feature | Description |
 | --- | --- |
-| **12+ AI Providers** | Codex, Copilot, Cursor, Antigravity, Kiro, Warp, Gemini CLI, Amp, Droid, Claude Code, Kimi, MiniMax — one dashboard |
+| **11+ AI Providers** | Codex, Copilot, Cursor, Antigravity, Kiro, Warp, Gemini CLI, Droid, Claude Code, Kimi, MiniMax — one dashboard |
 | **Multi-account** | Multiple accounts per provider, independent refresh, one-click CLI switching |
 | **Usage Stats** | Unified cost & token breakdown from Claude/Codex proxy archives plus token-only non-proxy Codex sessions — per-model trends, time-period analysis, source-aware aggregation |
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |

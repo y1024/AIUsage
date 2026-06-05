@@ -356,30 +356,6 @@ extension ProviderAuthManager {
         }
     }
 
-    internal static func ampCandidates() -> [ProviderAuthCandidate] {
-        deduplicated(
-            AmpProvider.discoverBrowserSessions().map { session in
-                let profileLabel = "\(session.browserName) \(session.profileName)"
-                let sourceIdentifier = "browser-profile:amp:\(session.browserName.lowercased()):\(session.profileName.lowercased())"
-                return ProviderAuthCandidate(
-                    id: "amp:\(sourceIdentifier)",
-                    providerId: "amp",
-                    sourceIdentifier: sourceIdentifier,
-                    sessionFingerprint: tokenFingerprint(session.cookieHeader),
-                    title: session.accountHint ?? profileLabel,
-                    subtitle: "Browser session",
-                    detail: compactDetail(parts: [profileLabel, "ampcode.com"]),
-                    modifiedAt: nil,
-                    authMethod: .cookie,
-                    credentialValue: session.cookieHeader,
-                    sourcePath: nil,
-                    shouldCopyFile: false,
-                    identityScope: .sharedSource
-                )
-            }
-        )
-    }
-
     internal static func cursorCandidates() -> [ProviderAuthCandidate] {
         deduplicated(
             CursorProvider.discoverBrowserSessions().map { session in

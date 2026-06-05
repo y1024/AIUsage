@@ -8,7 +8,6 @@ final class ProviderRegistryTests: XCTestCase {
         XCTAssertEqual(
             ids,
             [
-                "amp",
                 "antigravity",
                 "claude",
                 "codex-cost",

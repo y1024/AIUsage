@@ -14,15 +14,6 @@ enum ProviderAuthManager {
                 launchActions: [],
                 supportsEmbeddedWebLogin: true
             )
-        case "amp":
-            return ProviderAuthPlan(
-                titleEn: "Connect an Amp account",
-                titleZh: "连接 Amp 账号",
-                summaryEn: "Use the embedded web login and AIUsage will connect that Amp account as its own monitored account.",
-                summaryZh: "使用内置网页登录后，AIUsage 会把这个 Amp 账号接成独立的监控账号。",
-                launchActions: [],
-                supportsEmbeddedWebLogin: true
-            )
         case "codex":
             return ProviderAuthPlan(
                 titleEn: "Connect a Codex account",
@@ -257,8 +248,6 @@ enum ProviderAuthManager {
             rawCandidates = codexCandidates()
         case "cursor":
             rawCandidates = cursorCandidates()
-        case "amp":
-            rawCandidates = ampCandidates()
         case "copilot":
             rawCandidates = copilotCandidates()
         case "antigravity":

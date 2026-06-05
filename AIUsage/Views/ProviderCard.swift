@@ -318,7 +318,6 @@ struct ProviderCard: View {
         case "droid": return .yellow
         case "minimax": return Color(red: 0.886, green: 0.087, blue: 0.494)
         case "warp": return .pink
-        case "amp": return .teal
         default: return .gray
         }
     }
