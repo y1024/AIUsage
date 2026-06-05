@@ -85,6 +85,8 @@ final class ProxyRuntimeService {
         let filePath = #filePath
         return (filePath as NSString).deletingLastPathComponent
     }()
+    private static let proxyStartupTimeout: TimeInterval = 5
+    private static let proxyStartupProbeIntervalNanos: UInt64 = 100_000_000
 
     weak var delegate: ProxyRuntimeServiceDelegate?
 
@@ -408,7 +410,8 @@ final class ProxyRuntimeService {
                 environment["TLS_IDENTITY_PATH"] = TLSCertificateManager.shared.identityFilePath
                 environment["HTTPS_PORT"] = "\(config.effectiveHTTPSPort)"
             } catch {
-                proxyRuntimeLog.error("TLS certificate setup failed, HTTPS disabled: \(String(describing: error), privacy: .public)")
+                proxyRuntimeLog.error("TLS certificate setup failed: \(String(describing: error), privacy: .public)")
+                throw ProxyRuntimeError.proxyStartFailed("TLS certificate setup failed: \(error.localizedDescription)")
             }
         }
 
@@ -453,10 +456,7 @@ final class ProxyRuntimeService {
 
         do {
             try process.run()
-            try await Task.sleep(nanoseconds: 200_000_000)
-            if !process.isRunning {
-                throw ProxyRuntimeError.proxyStartFailed("process exited with code \(process.terminationStatus)")
-            }
+            try await waitForProxyHealth(process: process, config: config)
             runningProcesses[config.id] = process
             runtimeLog.info(
                 "Proxy started for node \(config.name, privacy: .public) on \(config.displayURL, privacy: .public) pid=\(process.processIdentifier, privacy: .public)"
@@ -473,6 +473,9 @@ final class ProxyRuntimeService {
                 }
             }
         } catch {
+            if process.isRunning {
+                process.terminate()
+            }
             runtimeLog.error("Failed to start proxy for node \(config.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             throw error is ProxyRuntimeError
                 ? error
@@ -560,6 +563,61 @@ final class ProxyRuntimeService {
         }
 
         return nil
+    }
+
+    private func waitForProxyHealth(process: Process, config: ProxyConfiguration) async throws {
+        let deadline = Date().addingTimeInterval(Self.proxyStartupTimeout)
+        var lastErrorDescription: String?
+
+        repeat {
+            if !process.isRunning {
+                throw ProxyRuntimeError.proxyStartFailed("process exited with code \(process.terminationStatus)")
+            }
+
+            do {
+                if try await probeProxyHealth(config: config) {
+                    return
+                }
+                lastErrorDescription = "health endpoint returned a non-2xx status"
+            } catch {
+                lastErrorDescription = error.localizedDescription
+            }
+
+            try await Task.sleep(nanoseconds: Self.proxyStartupProbeIntervalNanos)
+        } while Date() < deadline
+
+        if !process.isRunning {
+            throw ProxyRuntimeError.proxyStartFailed("process exited with code \(process.terminationStatus)")
+        }
+
+        if let lastErrorDescription {
+            throw ProxyRuntimeError.proxyStartFailed("health check timed out: \(lastErrorDescription)")
+        }
+        throw ProxyRuntimeError.proxyStartFailed("health check timed out")
+    }
+
+    private func probeProxyHealth(config: ProxyConfiguration) async throws -> Bool {
+        let host = healthCheckHost(for: config.host)
+        let hostComponent = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        guard let url = URL(string: "http://\(hostComponent):\(config.port)/health") else {
+            return false
+        }
+
+        var request = URLRequest(url: url, timeoutInterval: 1)
+        request.httpMethod = "GET"
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            return false
+        }
+        return (200..<300).contains(http.statusCode)
+    }
+
+    private func healthCheckHost(for configuredHost: String) -> String {
+        let trimmed = configuredHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "0.0.0.0" || trimmed == "::" {
+            return "127.0.0.1"
+        }
+        return trimmed
     }
 
     private func buildQuotaServerIfNeeded(packageRoot: String) async -> String? {

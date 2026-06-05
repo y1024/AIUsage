@@ -509,6 +509,101 @@ extension ProxyViewModel: ProxyRuntimeServiceDelegate {
             saveProxyOnlyIds()
             proxyRuntimeLog.notice("Proxy-only process terminated unexpectedly for node \(configId, privacy: .public), removed from running set")
         }
+
+        guard !operationInProgressConfigIds.contains(configId) else {
+            return
+        }
+        guard isNodeActivated(configId),
+              let config = configurations.first(where: { $0.id == configId }),
+              config.needsProxyProcess else {
+            return
+        }
+
+        scheduleProxyRuntimeRestart(for: config)
+    }
+
+    private func scheduleProxyRuntimeRestart(for config: ProxyConfiguration) {
+        let attempt = proxyRuntimeRestartAttempts[config.id, default: 0] + 1
+        guard attempt <= Self.maxProxyRuntimeRestartAttempts else {
+            Task { @MainActor [weak self] in
+                await self?.deactivateAfterRuntimeRestartExhausted(config)
+            }
+            return
+        }
+
+        proxyRuntimeRestartAttempts[config.id] = attempt
+        let delay = Self.proxyRuntimeRestartBaseDelayNanos * UInt64(attempt)
+        proxyRuntimeLog.notice(
+            "Proxy process for active node \(config.name, privacy: .public) exited unexpectedly; scheduling restart attempt \(attempt, privacy: .public)"
+        )
+
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard let self else { return }
+            guard self.isNodeActivated(config.id),
+                  !self.operationInProgressConfigIds.contains(config.id),
+                  let latestConfig = self.configurations.first(where: { $0.id == config.id }),
+                  latestConfig.needsProxyProcess else {
+                return
+            }
+
+            do {
+                try await self.runtimeService.startProxyOnly(for: latestConfig)
+                proxyRuntimeLog.info(
+                    "Proxy process restarted for active node \(latestConfig.name, privacy: .public) on attempt \(attempt, privacy: .public)"
+                )
+                self.scheduleProxyRuntimeRestartReset(for: latestConfig.id, attempt: attempt)
+            } catch {
+                let redactedMessage = SensitiveDataRedactor.redactedMessage(for: error)
+                proxyRuntimeLog.error(
+                    "Failed to restart proxy process for active node \(latestConfig.name, privacy: .public) on attempt \(attempt, privacy: .public): \(redactedMessage, privacy: .public)"
+                )
+                self.scheduleProxyRuntimeRestart(for: latestConfig)
+            }
+        }
+    }
+
+    private func scheduleProxyRuntimeRestartReset(for configId: String, attempt: Int) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.proxyRuntimeRestartStabilityWindowNanos)
+            guard let self else { return }
+            guard self.proxyRuntimeRestartAttempts[configId] == attempt,
+                  self.isProxyRunning(configId) else {
+                return
+            }
+            self.proxyRuntimeRestartAttempts.removeValue(forKey: configId)
+        }
+    }
+
+    private func deactivateAfterRuntimeRestartExhausted(_ config: ProxyConfiguration) async {
+        guard isNodeActivated(config.id),
+              !operationInProgressConfigIds.contains(config.id) else {
+            return
+        }
+
+        proxyRuntimeRestartAttempts.removeValue(forKey: config.id)
+        do {
+            try await deactivateRuntime(for: config)
+        } catch {
+            let redactedMessage = SensitiveDataRedactor.redactedMessage(for: error)
+            proxyRuntimeLog.error(
+                "Failed to restore runtime after proxy restart attempts were exhausted for node \(config.name, privacy: .public): \(redactedMessage, privacy: .public)"
+            )
+        }
+
+        do {
+            try persistActivationSelection(nil, touchLastUsedAt: false, isCodex: config.nodeType.isCodex)
+        } catch {
+            let redactedMessage = SensitiveDataRedactor.redactedMessage(for: error)
+            proxyRuntimeLog.error(
+                "Failed to clear activation after proxy restart attempts were exhausted for node \(config.name, privacy: .public): \(redactedMessage, privacy: .public)"
+            )
+        }
+
+        operationErrorMessage = AppSettings.shared.t(
+            "The active proxy process exited repeatedly and was deactivated. Reconnect the node after checking its configuration.",
+            "当前激活节点的代理进程连续退出，已自动停用。请检查节点配置后重新连接。"
+        )
     }
 }
 

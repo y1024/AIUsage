@@ -69,6 +69,10 @@ class ProxyViewModel: ObservableObject {
     @Published var operationErrorMessage: String?
     @Published var operationInProgressConfigIds: Set<String> = []
     @Published var connectivityTestStates: [String: ProxyConnectivityTestState] = [:]
+    var proxyRuntimeRestartAttempts: [String: Int] = [:]
+    static let maxProxyRuntimeRestartAttempts = 3
+    static let proxyRuntimeRestartBaseDelayNanos: UInt64 = 1_000_000_000
+    static let proxyRuntimeRestartStabilityWindowNanos: UInt64 = 10_000_000_000
 
     struct LogCacheKey: Hashable {
         let nodeFilter: String?
@@ -570,6 +574,7 @@ class ProxyViewModel: ObservableObject {
         }
 
         proxyRuntimeLog.info("Node activated: \(config.name, privacy: .public)")
+        proxyRuntimeRestartAttempts.removeValue(forKey: config.id)
     }
 
     func performDeactivationTransaction(_ id: String) async throws {
@@ -595,6 +600,7 @@ class ProxyViewModel: ObservableObject {
         }
 
         proxyRuntimeLog.info("Node deactivated: \(config.name, privacy: .public)")
+        proxyRuntimeRestartAttempts.removeValue(forKey: config.id)
     }
 
     func persistActivationSelection(_ activeId: String?, touchLastUsedAt: Bool, isCodex: Bool) throws {

@@ -82,6 +82,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
                 tlsListener = try await startHTTPSListener(config: httpsConfig, host: nwHost)
             } catch {
                 httpLog.error("HTTPS listener failed to start: \(error.localizedDescription, privacy: .public)")
+                throw error
             }
         }
 
