@@ -2,6 +2,27 @@ import Foundation
 import QuotaBackend
 import os.log
 
+// MARK: - Connectivity Error
+
+/// 连通性测试专用错误：把底层 URLError/HTTP 状态包装为语义明确、可本地化的类型，
+/// 避免裸抛系统错误（详见架构规范「错误必须被包装为语义明确的类型」）。
+enum ProxyConnectivityError: LocalizedError {
+    case invalidURL
+    case invalidResponse
+    case httpStatus(code: Int, body: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            return AppSettings.shared.t("Invalid endpoint URL", "无效的端点 URL")
+        case .invalidResponse:
+            return AppSettings.shared.t("Invalid server response", "服务器响应无效")
+        case let .httpStatus(code, body):
+            return "HTTP \(code): \(body)"
+        }
+    }
+}
+
 extension ProxyViewModel {
 
     func restoreActivatedNode() {
@@ -198,8 +219,7 @@ extension ProxyViewModel {
     }
 
     func testConnectivity(_ id: String) async {
-        guard let config = configurations.first(where: { $0.id == id }),
-              !config.nodeType.isCodex else { return }
+        guard let config = configurations.first(where: { $0.id == id }) else { return }
         guard !connectivityTestStates[id, default: .init()].isTesting else { return }
 
         connectivityTestStates[id] = ProxyConnectivityTestState(isTesting: true, lastSucceeded: nil, message: nil)
@@ -231,7 +251,9 @@ extension ProxyViewModel {
         }
 
         do {
-            let message = try await performClaudeConnectivityRequest(config)
+            let message = config.nodeType.isCodex
+                ? try await performCodexConnectivityRequest(config)
+                : try await performClaudeConnectivityRequest(config)
             connectivityTestStates[id] = ProxyConnectivityTestState(isTesting: false, lastSucceeded: true, message: message)
             connectivityTestMessage = AppSettings.shared.t(
                 "Connectivity test passed for \"\(config.name)\". \(message)",
@@ -259,7 +281,7 @@ extension ProxyViewModel {
         }
 
         guard let url = URL(string: claudeMessagesEndpoint(baseURL: baseURL)) else {
-            throw URLError(.badURL)
+            throw ProxyConnectivityError.invalidURL
         }
 
         let model = [
@@ -291,16 +313,12 @@ extension ProxyViewModel {
         let (data, response) = try await URLSession.shared.data(for: request)
         let elapsedMs = Int(Date().timeIntervalSince(start) * 1000)
         guard let http = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
+            throw ProxyConnectivityError.invalidResponse
         }
 
         guard (200..<300).contains(http.statusCode) else {
             let text = String(data: data, encoding: .utf8) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
-            throw NSError(
-                domain: "AIUsage.ProxyConnectivity",
-                code: http.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode): \(sanitizedConnectivityMessage(text))"]
-            )
+            throw ProxyConnectivityError.httpStatus(code: http.statusCode, body: sanitizedConnectivityMessage(text))
         }
 
         return AppSettings.shared.t(
@@ -321,24 +339,93 @@ extension ProxyViewModel {
         return "\(trimmed)/v1/messages"
     }
 
+    /// Codex 节点连通性测试：走 OpenAI Responses 口径（`POST /v1/responses`）。
+    /// 经本地 Codex 代理忠实透传到上游，可端到端验证「客户端 key → 代理 → 上游 key」整条链路。
+    private func performCodexConnectivityRequest(_ config: ProxyConfiguration) async throws -> String {
+        let baseURL: String
+        let apiKey: String
+        if config.needsProxyProcess {
+            baseURL = config.displayURL
+            apiKey = config.effectiveClientKey
+        } else {
+            baseURL = config.upstreamBaseURL
+            apiKey = config.upstreamAPIKey
+        }
+
+        guard let url = URL(string: codexResponsesEndpoint(baseURL: baseURL)) else {
+            throw ProxyConnectivityError.invalidURL
+        }
+
+        let model = [
+            config.codexModel,
+            config.defaultModel,
+        ].first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "gpt-5-codex"
+
+        // OpenAI Responses 最小请求；max_output_tokens 下限为 16。
+        let body: [String: Any] = [
+            "model": model,
+            "input": "ping",
+            "max_output_tokens": 16,
+            "stream": false,
+        ]
+
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let start = Date()
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let elapsedMs = Int(Date().timeIntervalSince(start) * 1000)
+        guard let http = response as? HTTPURLResponse else {
+            throw ProxyConnectivityError.invalidResponse
+        }
+
+        guard (200..<300).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+            throw ProxyConnectivityError.httpStatus(code: http.statusCode, body: sanitizedConnectivityMessage(text))
+        }
+
+        return AppSettings.shared.t(
+            "HTTP \(http.statusCode), \(elapsedMs) ms",
+            "HTTP \(http.statusCode)，\(elapsedMs) ms"
+        )
+    }
+
+    private func codexResponsesEndpoint(baseURL: String) -> String {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if trimmed.hasSuffix("/v1/responses") {
+            return trimmed
+        }
+        if trimmed.hasSuffix("/v1") {
+            return "\(trimmed)/responses"
+        }
+        return "\(trimmed)/v1/responses"
+    }
+
+    /// 预编译的脱敏规则（正则 + 替换模板）。提取为静态常量，避免每次测试反复编译正则。
+    private static let connectivityRedactionRules: [(regex: NSRegularExpression, template: String)] = {
+        let specs: [(pattern: String, template: String)] = [
+            (#"(?i)sk-[A-Za-z0-9_\-]{8,}"#, "sk-••••"),
+            (#"(?i)(Bearer\s+)[A-Za-z0-9._~+/=\-]{8,}"#, "$1••••"),
+            (#"(?i)(ANTHROPIC_AUTH_TOKEN["':=\s]+)[^"',\s}]+"#, "$1••••"),
+            (#"(?i)(x-api-key["':=\s]+)[^"',\s}]+"#, "$1••••"),
+        ]
+        return specs.compactMap { spec in
+            (try? NSRegularExpression(pattern: spec.pattern)).map { ($0, spec.template) }
+        }
+    }()
+
     private func sanitizedConnectivityMessage(_ raw: String) -> String {
         var text = raw
-        text = text.replacingOccurrences(
-            of: #"(?i)sk-[A-Za-z0-9_\-]{8,}"#,
-            with: "sk-••••",
-            options: .regularExpression
-        )
-        let patterns = [
-            #"(?i)(Bearer\s+)[A-Za-z0-9._~+/=\-]{8,}"#,
-            #"(?i)(ANTHROPIC_AUTH_TOKEN["':=\s]+)[^"',\s}]+"#,
-            #"(?i)(x-api-key["':=\s]+)[^"',\s}]+"#,
-        ]
-        for pattern in patterns {
-            text = text.replacingOccurrences(
-                of: pattern,
-                with: "$1••••",
-                options: .regularExpression
-            )
+        for rule in Self.connectivityRedactionRules {
+            let range = NSRange(text.startIndex..., in: text)
+            text = rule.regex.stringByReplacingMatches(in: text, range: range, withTemplate: rule.template)
         }
         return String(text.prefix(500))
     }

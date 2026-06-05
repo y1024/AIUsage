@@ -349,10 +349,14 @@ struct ProxyManagementView: View {
         if result.importedCodexGlobalConfig {
             notes += "\n" + L("Codex common config imported.", "Codex 通用配置已导入。")
         }
-        return L(
+        var head = L(
             "\(result.succeeded) imported, \(result.failed) failed, \(result.skipped) skipped",
             "\(result.succeeded) 个导入成功，\(result.failed) 个失败，\(result.skipped) 个跳过"
-        ) + notes
+        )
+        if result.updated > 0 {
+            head += L(", \(result.updated) updated", "，\(result.updated) 个已更新")
+        }
+        return head + notes
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {

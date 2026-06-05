@@ -17,6 +17,9 @@
 		5EF87F012F8D0E9E002FE291 /* ProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */; };
 		5EF87F042F8D0ED3002FE291 /* ProxyViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */; };
 		5EF87F072F8D0EED002FE291 /* ProxyConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */; };
+		C1AA000100000000000000B1 /* JSONWebEditorAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */; };
+		C1AA000200000000000000B2 /* ProxyConfigEditorView+JSONTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */; };
+		C1AA000300000000000000B3 /* ProxyConfigEditorView+Pricing.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000300000000000000A3 /* ProxyConfigEditorView+Pricing.swift */; };
 		5EF87F082F8D0EED002FE291 /* ProxyManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F062F8D0EED002FE291 /* ProxyManagementView.swift */; };
 		C1PM00022FB0000300B26789 /* ProxyManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */; };
 		C1PM00042FB0000300B26789 /* ProxyManagementView+List.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00032FB0000300B26789 /* ProxyManagementView+List.swift */; };
@@ -135,6 +138,9 @@
 		5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyConfiguration.swift; sourceTree = "<group>"; };
 		5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyViewModel.swift; sourceTree = "<group>"; };
 		5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyConfigEditorView.swift; sourceTree = "<group>"; };
+		C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONWebEditorAssets.swift; sourceTree = "<group>"; };
+		C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyConfigEditorView+JSONTab.swift"; sourceTree = "<group>"; };
+		C1AA000300000000000000A3 /* ProxyConfigEditorView+Pricing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyConfigEditorView+Pricing.swift"; sourceTree = "<group>"; };
 		5EF87F062F8D0EED002FE291 /* ProxyManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyManagementView.swift; sourceTree = "<group>"; };
 		C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Toolbar.swift"; sourceTree = "<group>"; };
 		C1PM00032FB0000300B26789 /* ProxyManagementView+List.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+List.swift"; sourceTree = "<group>"; };
@@ -351,6 +357,9 @@
 			isa = PBXGroup;
 			children = (
 				5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */,
+				C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */,
+				C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */,
+				C1AA000300000000000000A3 /* ProxyConfigEditorView+Pricing.swift */,
 				5EF87F062F8D0EED002FE291 /* ProxyManagementView.swift */,
 				C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */,
 				C1PM00032FB0000300B26789 /* ProxyManagementView+List.swift */,
@@ -601,6 +610,9 @@
 				5EFAD7822F87AFE700A15674 /* ProviderPickerView.swift in Sources */,
 				5EFAD7832F87AFE700A15674 /* SecureAccountVault.swift in Sources */,
 				5EF87F072F8D0EED002FE291 /* ProxyConfigEditorView.swift in Sources */,
+				C1AA000100000000000000B1 /* JSONWebEditorAssets.swift in Sources */,
+				C1AA000200000000000000B2 /* ProxyConfigEditorView+JSONTab.swift in Sources */,
+				C1AA000300000000000000B3 /* ProxyConfigEditorView+Pricing.swift in Sources */,
 				5EF87F082F8D0EED002FE291 /* ProxyManagementView.swift in Sources */,
 				C1PM00022FB0000300B26789 /* ProxyManagementView+Toolbar.swift in Sources */,
 				C1PM00042FB0000300B26789 /* ProxyManagementView+List.swift in Sources */,
@@ -821,7 +833,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.8.2;
+				MARKETING_VERSION = 0.8.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -853,7 +865,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.8.2;
+				MARKETING_VERSION = 0.8.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

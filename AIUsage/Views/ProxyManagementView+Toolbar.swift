@@ -100,7 +100,7 @@ extension ProxyManagementView {
         guard !isSyncingCCSwitch else { return }
         isSyncingCCSwitch = true
         Task { @MainActor in
-            let result = viewModel.profileStore.importCCSwitchClaudeProfiles()
+            let result = await viewModel.profileStore.importCCSwitchClaudeProfiles()
             importResult = result
             showImportResult = true
             viewModel.loadConfigurations()

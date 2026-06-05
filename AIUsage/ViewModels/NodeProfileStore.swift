@@ -3,6 +3,7 @@ import SwiftUI
 import Combine
 import os.log
 import SQLite3
+import CryptoKit
 import QuotaBackend
 
 // MARK: - Node Profile Store
@@ -189,6 +190,7 @@ class NodeProfileStore: ObservableObject {
 
     struct ImportResult {
         var succeeded: Int = 0
+        var updated: Int = 0
         var failed: Int = 0
         var skipped: Int = 0
         var importedGlobalConfig = false
@@ -271,51 +273,64 @@ class NodeProfileStore: ObservableObject {
     }
 
     // MARK: - cc-switch Import
+    // 与 cc-switch 的 Claude 供应商保持「镜像同步」：节点 id 由 cc-switch 供应商 id 派生为
+    // 确定性 UUID（stableProfileId），重复同步对同一供应商执行 upsert（保留已分配端口、
+    // 创建时间、排序），因此不会产生重复节点。磁盘 IO（SQLite 读取）放到后台线程，仅把
+    // 纯字符串/数值的原始行（Sendable）跨回主线程，再在主线程解析 JSON、建档、落盘。
 
-    func importCCSwitchClaudeProfiles(dbPath: String? = nil) -> ImportResult {
+    func importCCSwitchClaudeProfiles(dbPath: String? = nil) async -> ImportResult {
         let path = dbPath ?? Self.defaultCCSwitchDBPath
+        let output = await Task.detached(priority: .userInitiated) {
+            Self.readCCSwitchClaudeData(dbPath: path)
+        }.value
+
         var result = ImportResult()
 
-        guard fileManager.fileExists(atPath: path) else {
+        if output.dbMissing {
             result.failed = 1
             result.errors.append("cc-switch database not found: \(path)")
             return result
         }
-
-        guard let db = Self.openReadonlySQLiteDB(at: path) else {
+        if output.openFailed {
             result.failed = 1
             result.errors.append("failed to open cc-switch database")
             return result
         }
-        defer { sqlite3_close(db) }
-
-        let rows = Self.loadCCSwitchClaudeRows(db: db)
-        if rows.isEmpty {
-            result.skipped = 0
+        if output.rawRows.isEmpty {
             result.errors.append("no cc-switch Claude providers found")
             return result
         }
 
         var reservedPorts = Set<Int>()
         let importDate = Date()
-        for row in rows {
-            do {
-                let port = nextAvailablePort(startingAt: 4320, reserving: reservedPorts)
+        for raw in output.rawRows {
+            let row = Self.parseRawRow(raw)
+            let stableId = Self.stableProfileId(forCCSwitchRowId: row.id)
+            let existing = profile(for: stableId)
+            let port: Int
+            if let existing {
+                port = existing.metadata.proxy.port
+            } else {
+                port = nextAvailablePort(startingAt: 4320, reserving: reservedPorts)
                 reservedPorts.insert(port)
-                let profile = try Self.makeProfile(from: row, port: port, importDate: importDate)
-                if save(profile) {
-                    result.succeeded += 1
-                } else {
-                    result.failed += 1
-                    result.errors.append("\(row.name): save failed")
-                }
-            } catch {
+            }
+            let profile = Self.makeProfile(
+                from: row,
+                id: stableId,
+                port: port,
+                existing: existing,
+                importDate: importDate
+            )
+            if save(profile) {
+                if existing == nil { result.succeeded += 1 } else { result.updated += 1 }
+            } else {
                 result.failed += 1
-                result.errors.append("\(row.name): \(error.localizedDescription)")
+                result.errors.append("\(row.name): save failed")
             }
         }
 
-        if let commonSettings = Self.loadCCSwitchClaudeCommonConfig(db: db), !commonSettings.isEmpty {
+        if let commonText = output.commonConfigText,
+           let commonSettings = Self.jsonObject(from: commonText), !commonSettings.isEmpty {
             if globalConfig.settings.isEmpty {
                 globalConfig = GlobalConfig(enabled: true, settings: commonSettings)
                 if saveGlobalConfig() {
@@ -502,6 +517,7 @@ class NodeProfileStore: ObservableObject {
         }
     }
 
+    /// 主线程解析后的 cc-switch 行（含已解码 JSON）。
     private struct CCSwitchClaudeRow {
         var id: String
         var name: String
@@ -511,15 +527,22 @@ class NodeProfileStore: ObservableObject {
         var meta: [String: Any]
     }
 
-    private enum CCSwitchImportError: LocalizedError {
-        case invalidSettings
+    /// 后台读取的原始行：只含 Sendable 标量/字符串，可安全跨线程回主线程再解析。
+    private struct CCSwitchRawRow: Sendable {
+        let id: String
+        let name: String
+        let settingsText: String
+        let isCurrent: Bool
+        let createdAtMs: Int64?
+        let metaText: String
+    }
 
-        var errorDescription: String? {
-            switch self {
-            case .invalidSettings:
-                return "invalid cc-switch settings JSON"
-            }
-        }
+    /// 后台 SQLite 读取的整体产物（Sendable）。
+    private struct CCSwitchReadOutput: Sendable {
+        var rawRows: [CCSwitchRawRow] = []
+        var commonConfigText: String?
+        var dbMissing: Bool = false
+        var openFailed: Bool = false
     }
 
     private static var defaultCCSwitchDBPath: String {
@@ -527,7 +550,24 @@ class NodeProfileStore: ObservableObject {
         return (home as NSString).appendingPathComponent(".cc-switch/cc-switch.db")
     }
 
-    private static func openReadonlySQLiteDB(at path: String) -> OpaquePointer? {
+    /// 在后台线程执行：打开只读库、读取原始行与通用配置文本。不触碰任何主线程状态。
+    nonisolated private static func readCCSwitchClaudeData(dbPath: String) -> CCSwitchReadOutput {
+        var output = CCSwitchReadOutput()
+        guard FileManager.default.fileExists(atPath: dbPath) else {
+            output.dbMissing = true
+            return output
+        }
+        guard let db = openReadonlySQLiteDB(at: dbPath) else {
+            output.openFailed = true
+            return output
+        }
+        defer { sqlite3_close(db) }
+        output.rawRows = readCCSwitchClaudeRawRows(db: db)
+        output.commonConfigText = readCCSwitchClaudeCommonConfigText(db: db)
+        return output
+    }
+
+    nonisolated private static func openReadonlySQLiteDB(at path: String) -> OpaquePointer? {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK else {
@@ -537,7 +577,7 @@ class NodeProfileStore: ObservableObject {
         return db
     }
 
-    private static func loadCCSwitchClaudeRows(db: OpaquePointer) -> [CCSwitchClaudeRow] {
+    nonisolated private static func readCCSwitchClaudeRawRows(db: OpaquePointer) -> [CCSwitchRawRow] {
         let sql = """
         SELECT id, name, settings_config, is_current, created_at, meta
         FROM providers
@@ -548,44 +588,63 @@ class NodeProfileStore: ObservableObject {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        var rows: [CCSwitchClaudeRow] = []
+        var rows: [CCSwitchRawRow] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = sqliteText(stmt, 0) ?? UUID().uuidString
-            let name = sqliteText(stmt, 1)?.nilIfBlank ?? "cc-switch Claude"
+            let name = sqliteText(stmt, 1) ?? ""
             let settingsText = sqliteText(stmt, 2) ?? "{}"
             let metaText = sqliteText(stmt, 5) ?? "{}"
-            let settings = jsonObject(from: settingsText) ?? [:]
-            let meta = jsonObject(from: metaText) ?? [:]
             let createdAt = sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 4)
-            rows.append(CCSwitchClaudeRow(
+            rows.append(CCSwitchRawRow(
                 id: id,
                 name: name,
-                settingsConfig: settings,
+                settingsText: settingsText,
                 isCurrent: sqlite3_column_int(stmt, 3) == 1,
                 createdAtMs: createdAt,
-                meta: meta
+                metaText: metaText
             ))
         }
         return rows
     }
 
-    private static func loadCCSwitchClaudeCommonConfig(db: OpaquePointer) -> [String: Any]? {
+    nonisolated private static func readCCSwitchClaudeCommonConfigText(db: OpaquePointer) -> String? {
         let sql = "SELECT value FROM settings WHERE key = 'common_config_claude' LIMIT 1"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
-        guard sqlite3_step(stmt) == SQLITE_ROW,
-              let text = sqliteText(stmt, 0) else {
-            return nil
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqliteText(stmt, 0)
+    }
+
+    /// 主线程解析：把后台读到的原始文本行解码为带 JSON 的行。
+    private static func parseRawRow(_ raw: CCSwitchRawRow) -> CCSwitchClaudeRow {
+        CCSwitchClaudeRow(
+            id: raw.id,
+            name: raw.name.nilIfBlank ?? "cc-switch Claude",
+            settingsConfig: jsonObject(from: raw.settingsText) ?? [:],
+            isCurrent: raw.isCurrent,
+            createdAtMs: raw.createdAtMs,
+            meta: jsonObject(from: raw.metaText) ?? [:]
+        )
+    }
+
+    /// 由 cc-switch 供应商 id 派生确定性节点 id（SHA-256 → UUID 形态），保证多次同步命中同一节点。
+    private static func stableProfileId(forCCSwitchRowId rowId: String) -> String {
+        let digest = SHA256.hash(data: Data("aiusage.ccswitch.claude.\(rowId)".utf8))
+        let hex = digest.prefix(16).map { String(format: "%02X", Int($0)) }.joined()
+        func seg(_ lo: Int, _ hi: Int) -> Substring {
+            hex[hex.index(hex.startIndex, offsetBy: lo)..<hex.index(hex.startIndex, offsetBy: hi)]
         }
-        return jsonObject(from: text)
+        return "\(seg(0, 8))-\(seg(8, 12))-\(seg(12, 16))-\(seg(16, 20))-\(seg(20, 32))"
     }
 
     private static func makeProfile(
         from row: CCSwitchClaudeRow,
+        id: String,
         port: Int,
+        existing: NodeProfile?,
         importDate: Date
-    ) throws -> NodeProfile {
+    ) -> NodeProfile {
         var settings = row.settingsConfig
         var env = settings["env"] as? [String: Any] ?? [:]
 
@@ -639,20 +698,23 @@ class NodeProfileStore: ObservableObject {
             commonConfigMode: commonMode
         )
 
-        let createdAt = row.createdAtMs.flatMap { dateFromCCSwitchTimestamp($0) } ?? importDate
+        // upsert：已存在节点保留创建时间与排序，避免重复同步把节点重排或重计时。
+        let createdAt = existing?.metadata.createdAt
+            ?? row.createdAtMs.flatMap { dateFromCCSwitchTimestamp($0) }
+            ?? importDate
         let metadata = NodeProfile.Metadata(
-            id: UUID().uuidString,
+            id: id,
             name: "\(row.name) (cc-switch)",
             nodeType: .anthropicDirect,
             createdAt: createdAt,
-            lastUsedAt: row.isCurrent ? importDate : nil,
-            sortOrder: Int.max,
+            lastUsedAt: row.isCurrent ? importDate : existing?.metadata.lastUsedAt,
+            sortOrder: existing?.metadata.sortOrder ?? Int.max,
             proxy: proxy
         )
         return NodeProfile(metadata: metadata, settings: settings)
     }
 
-    private static func sqliteText(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
+    nonisolated private static func sqliteText(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
         guard let cString = sqlite3_column_text(stmt, index) else { return nil }
         return String(cString: cString)
     }

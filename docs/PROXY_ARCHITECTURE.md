@@ -455,6 +455,15 @@ UI 状态管理和激活事务：
 - 内部磁盘存储路径仍为 `global-config.json` / `codex-global-config.json`（与导出文件名解耦，避免迁移既有用户数据）。
 - UI 文案统一：中文「通用配置」，英文 `Common Config`（原 `Global Config`）。
 
+#### cc-switch 一键同步（Claude 家族）
+
+从 [cc-switch](https://github.com/farion1231/cc-switch) 的本地 SQLite 库一键导入 Claude 供应商配置，落为 AIUsage 的 `anthropicDirect` 节点（`importCCSwitchClaudeProfiles(dbPath:)`）：
+
+- **确定性 ID + upsert（关键）**：目标节点 id 由 cc-switch 的 `row.id` 经 `SHA256` 派生（`stableProfileId(forCCSwitchRowId:)`），**与导入时间无关**——同一条 cc-switch 配置无论何时、同步多少次，生成的节点 id 始终一致。已存在则按 upsert 更新（保留既有 `port` / `createdAt` / `sortOrder`，仅刷新内容），不再每次生成重复节点。`ImportResult` 区分 `succeeded`（新建）/ `updated`（已存在更新）/ `failed`。
+- **通用配置一并处理**：cc-switch 的公共配置文本按 Claude 通用配置（`GlobalConfig`）导入，已存在则跳过。
+- **后台 I/O（不卡主线程）**：SQLite 只读读取在 `Task.detached(priority:.userInitiated)` 后台执行（`readCCSwitchClaudeData` 等 `nonisolated static` 函数，产出 `Sendable` 的 `CCSwitchReadOutput`），`@MainActor` 主线程只做 JSON 解析与 profile upsert；同步期间 UI 显示进行中态（`isSyncingCCSwitch`）。
+- **入口**：仅 Claude 家族工具栏提供「同步 cc-switch」按钮（Codex 家族不含此入口）。
+
 ### ProxyRuntimeService
 
 独立 service 层，管理 QuotaServer 进程的物理生命周期：
@@ -470,6 +479,27 @@ UI 状态管理和激活事务：
 - `writeFullSettings(_:)` — 全量替换 `settings.json`（自动备份当前文件到 `settings.backup.json`）
 - `restoreFromBackup()` — 从备份恢复 `settings.json`（停用时调用）
 - 旧方法 `writeEnv()` / `clearEnv()` 保留用于向后兼容
+
+### 节点连通性测试
+
+对单个节点做一次性「能否打通上游」探测，按家族走不同口径（`ProxyViewModel+ProxyServer.swift`）：
+
+| 家族 | 口径 | 端点 | 最小请求体 |
+|------|------|------|-----------|
+| Claude（`anthropicDirect` / `openaiProxy`） | Anthropic Messages | `/v1/messages` | `{model, max_tokens:8, stream:false, messages:[ping]}` + `anthropic-version` 头 |
+| Codex（`codexProxy`） | OpenAI Responses | `/v1/responses` | `{model, input:"ping", max_output_tokens:16, stream:false}`（`max_output_tokens` 下限 16） |
+
+- **端到端**：节点若 `needsProxyProcess`，测试会临时拉起代理进程（`startProxyForConnectivityTest`，结束后按「是否本测试启动」决定是否回收 `stopProxyForConnectivityTest`），请求打到本地代理 `displayURL` + `effectiveClientKey`，从而验证「客户端 key → 本地代理 → 上游 key」整条链路；否则直连上游。Codex 经本地代理 `/v1/responses` 忠实透传，与真实使用路径一致。
+- **鉴权**：同时下发 `Authorization: Bearer <key>` 与 `x-api-key`，覆盖两类上游/代理鉴权习惯（与 `*ProxyService.authenticate` 对齐）。
+- **脱敏**：返回 / 错误文本经 `sanitizedConnectivityMessage` 用**预编译静态正则**（`connectivityRedactionRules`，避免每次测试重复编译）抹掉 `sk-` / `Bearer` / `ANTHROPIC_AUTH_TOKEN` / `x-api-key`，截断 500 字符后才进 UI。
+- **语义化错误**：失败包装为 `ProxyConnectivityError`（`.invalidURL` / `.invalidResponse` / `.httpStatus(code, body)`，实现 `LocalizedError`），不裸抛 `URLError` / `NSError`。
+- **UI**：节点卡片闪电图标 + 上下文菜单「测试连通性」，结果走统一 `Connectivity Test` alert + 卡片着色（绿=通过 / 红=失败 / 橙=未测）。状态存 `ProxyViewModel.connectivityTestStates`，文案存 `connectivityTestMessage`。
+
+### per-node 通用配置合并 + 分层 JSON 编辑器
+
+- **per-node 合并开关**：`ProxySettings.commonConfigMode`（`CommonConfigMode` 枚举）让每个 Claude 节点单独决定是否合并「通用配置」；`shouldMergeClaudeCommonConfig(globalEnabled:)` 综合全局开关与节点策略，激活时 `ProxyViewModel+ProxyOnlyMode` 据此决定是否并入 `GlobalConfig`。
+- **分层 JSON 编辑器**：`ProxyConfigEditorView` 的「最终 JSON」标签页把「通用配置基底 + 节点片段」分层展示并高亮来源（`sourceLegend`），支持搜索 / 折叠 / 行号——基于 `WKWebView` 的富文本编辑器，内嵌 HTML/CSS/JS 静态资源抽到 `JSONWebEditorAssets`（`enum` + `static let html`）。
+- **文件拆分（合规 400/800 行规则）**：`ProxyConfigEditorView.swift`（1277 行）拆为主体 +`ProxyConfigEditorView+JSONTab.swift`（JSON 标签页与同步/校验）+`ProxyConfigEditorView+Pricing.swift`（模型定价子区）；`JSONRawEditorView.swift`（870 行）抽 HTML 后降到 234 行，资源进 `JSONWebEditorAssets.swift`。拆分涉及把跨文件访问的 `@State` / 方法 / `EditorTab` 由 `private` 放宽为 `internal`（Swift `private` 为文件级）。
 
 ---
 

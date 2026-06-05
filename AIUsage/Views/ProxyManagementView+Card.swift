@@ -145,7 +145,7 @@ struct ConfigurationCardView: View, Equatable {
                         .frame(width: 20, height: 20)
                     }
                     .buttonStyle(.plain)
-                    .disabled(isBusy || connectivityState?.isTesting == true || config.nodeType.isCodex)
+                    .disabled(isBusy || connectivityState?.isTesting == true)
                     .instantTooltip(connectivityTooltip)
 
                     Button(action: onEdit) {
@@ -263,7 +263,7 @@ struct ConfigurationCardView: View, Equatable {
         Button { onTestConnectivity() } label: {
             Label(L("Test Connectivity", "测试连通性"), systemImage: "bolt.horizontal.circle")
         }
-        .disabled(isBusy || connectivityState?.isTesting == true || config.nodeType.isCodex)
+        .disabled(isBusy || connectivityState?.isTesting == true)
 
         Divider()
 
