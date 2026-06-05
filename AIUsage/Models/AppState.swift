@@ -182,10 +182,16 @@ class AppState: ObservableObject {
             return
         }
 
+        bringMainWindowToFront()
+    }
+
+    func bringMainWindowToFront() {
         NSApp.activate(ignoringOtherApps: true)
         let candidateWindows = NSApp.windows.filter { !($0 is NSPanel) }
         let window = candidateWindows.max(by: { $0.frame.width < $1.frame.width }) ?? candidateWindows.first
+        window?.orderFrontRegardless()
         window?.makeKeyAndOrderFront(nil)
+        NSRunningApplication.current.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
     }
 
     @MainActor

@@ -35,6 +35,7 @@ extension ProxyManagementView {
                             statsRequests: stats.totalRequests,
                             statsSuccessRate: stats.successRate,
                             lastRequestAt: stats.lastRequestAt,
+                            connectivityState: viewModel.connectivityTestStates[config.id],
                             onDragChanged: { t in
                                 if draggingConfigId != config.id {
                                     draggingConfigId = config.id
@@ -46,6 +47,7 @@ extension ProxyManagementView {
                             onToggleActivation: { Task { await viewModel.toggleActivation(config.id) } },
                             onToggleProxyOnly: { Task { await viewModel.toggleProxyOnly(config.id) } },
                             onCopyLaunchCommand: { viewModel.copyLaunchCommand(for: config.id) },
+                            onTestConnectivity: { Task { await viewModel.testConnectivity(config.id) } },
                             onEdit: {
                                 if let profile = viewModel.profileStore.profile(for: config.id) {
                                     editingProfile = profile

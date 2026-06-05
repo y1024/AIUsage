@@ -27,6 +27,7 @@ struct ProxyManagementView: View {
     @State var showImportResult = false
     @State var exportSelectedIds: Set<String> = []
     @State var showingSettingsEditor = false
+    @State var isSyncingCCSwitch = false
 
     // MARK: - Family Filtering
 
@@ -186,6 +187,23 @@ struct ProxyManagementView: View {
             Text(viewModel.operationErrorMessage ?? "")
         }
         .alert(
+            L("Connectivity Test", "连通性测试"),
+            isPresented: Binding(
+                get: { viewModel.connectivityTestMessage != nil },
+                set: { newValue in
+                    if !newValue {
+                        viewModel.connectivityTestMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK") {
+                viewModel.connectivityTestMessage = nil
+            }
+        } message: {
+            Text(viewModel.connectivityTestMessage ?? "")
+        }
+        .alert(
             L("Delete Node?", "确认删除节点？"),
             isPresented: Binding(
                 get: { pendingDeletionConfig != nil },
@@ -245,6 +263,31 @@ struct ProxyManagementView: View {
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
+
+            if !family.isCodex {
+                Button(action: { syncCCSwitch() }) {
+                    HStack {
+                        if isSyncingCCSwitch {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        Text(isSyncingCCSwitch ? L("Syncing cc-switch", "正在同步 cc-switch") : L("Sync cc-switch", "同步 cc-switch"))
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                    .foregroundStyle(.primary)
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isSyncingCCSwitch)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -299,6 +342,9 @@ struct ProxyManagementView: View {
         var notes = ""
         if result.importedGlobalConfig {
             notes += "\n" + L("Claude common config imported.", "Claude 通用配置已导入。")
+        }
+        if result.skippedGlobalConfig {
+            notes += "\n" + L("Claude common config already exists, skipped.", "已有 Claude 通用配置，已跳过。")
         }
         if result.importedCodexGlobalConfig {
             notes += "\n" + L("Codex common config imported.", "Codex 通用配置已导入。")

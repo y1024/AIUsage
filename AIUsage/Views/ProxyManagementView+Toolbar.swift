@@ -22,6 +22,15 @@ extension ProxyManagementView {
                 ) {
                     showingSettingsEditor = true
                 }
+
+                actionBarButton(
+                    title: isSyncingCCSwitch ? L("Syncing", "同步中") : L("Sync cc-switch", "同步 cc-switch"),
+                    icon: "arrow.triangle.2.circlepath",
+                    tint: .secondary
+                ) {
+                    syncCCSwitch()
+                }
+                .disabled(isSyncingCCSwitch)
             }
 
             actionBarButton(
@@ -85,6 +94,18 @@ extension ProxyManagementView {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    func syncCCSwitch() {
+        guard !isSyncingCCSwitch else { return }
+        isSyncingCCSwitch = true
+        Task { @MainActor in
+            let result = viewModel.profileStore.importCCSwitchClaudeProfiles()
+            importResult = result
+            showImportResult = true
+            viewModel.loadConfigurations()
+            isSyncingCCSwitch = false
+        }
     }
 
     // MARK: - Summary Strip

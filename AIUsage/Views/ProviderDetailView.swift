@@ -496,12 +496,15 @@ struct ProviderDetailView: View {
     }
 
     private var copyTargetValue: String? {
-        detailAccountLabel?.nilIfBlank
-            ?? provider.accountLabel?.nilIfBlank
-            ?? provider.accountId?.nilIfBlank
-            ?? titleOverride?.nilIfBlank
-            ?? detailSubtitle?.nilIfBlank
-            ?? provider.sourceLabel.nilIfBlank
+        let candidates: [String?] = [
+            detailAccountLabel,
+            provider.accountLabel,
+            provider.accountId,
+            titleOverride,
+            detailSubtitle,
+            provider.sourceLabel
+        ]
+        return candidates.compactMap(\.nilIfBlank).first
     }
     
     

@@ -15,12 +15,14 @@ struct ConfigurationCardView: View, Equatable {
     let statsRequests: Int
     let statsSuccessRate: Double
     let lastRequestAt: Date?
+    let connectivityState: ProxyConnectivityTestState?
 
     var onDragChanged: (CGFloat) -> Void = { _ in }
     var onDragEnded: () -> Void = {}
     var onToggleActivation: () -> Void = {}
     var onToggleProxyOnly: () -> Void = {}
     var onCopyLaunchCommand: () -> Void = {}
+    var onTestConnectivity: () -> Void = {}
     var onEdit: () -> Void = {}
     var onDelete: () -> Void = {}
     var onDuplicate: () -> Void = {}
@@ -34,7 +36,8 @@ struct ConfigurationCardView: View, Equatable {
         lhs.isSelected == rhs.isSelected &&
         lhs.statsRequests == rhs.statsRequests &&
         lhs.statsSuccessRate == rhs.statsSuccessRate &&
-        lhs.lastRequestAt == rhs.lastRequestAt
+        lhs.lastRequestAt == rhs.lastRequestAt &&
+        lhs.connectivityState == rhs.connectivityState
     }
 
     private static let anthropicBrand = Color(red: 0.85, green: 0.47, blue: 0.34)
@@ -128,6 +131,23 @@ struct ConfigurationCardView: View, Equatable {
                     .buttonStyle(.plain)
                     .instantTooltip(L("Copy Launch Command", "复制启动命令"))
 
+                    Button(action: onTestConnectivity) {
+                        Group {
+                            if connectivityState?.isTesting == true {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "bolt.horizontal.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(connectivityTint)
+                            }
+                        }
+                        .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isBusy || connectivityState?.isTesting == true || config.nodeType.isCodex)
+                    .instantTooltip(connectivityTooltip)
+
                     Button(action: onEdit) {
                         Image(systemName: "pencil.circle.fill")
                             .font(.system(size: 18))
@@ -194,6 +214,24 @@ struct ConfigurationCardView: View, Equatable {
         return Color.primary.opacity(0.06)
     }
 
+    private var connectivityTint: Color {
+        switch connectivityState?.lastSucceeded {
+        case true: return .green
+        case false: return .red
+        case nil: return .orange
+        }
+    }
+
+    private var connectivityTooltip: String {
+        if connectivityState?.isTesting == true {
+            return L("Testing Connectivity", "正在测试连通性")
+        }
+        if let message = connectivityState?.message, !message.isEmpty {
+            return message
+        }
+        return L("Test Connectivity", "测试连通性")
+    }
+
     // MARK: - Context Menu
 
     @ViewBuilder
@@ -221,6 +259,11 @@ struct ConfigurationCardView: View, Equatable {
         Button { onCopyLaunchCommand() } label: {
             Label(L("Copy Launch Command", "复制启动命令"), systemImage: "doc.on.clipboard")
         }
+
+        Button { onTestConnectivity() } label: {
+            Label(L("Test Connectivity", "测试连通性"), systemImage: "bolt.horizontal.circle")
+        }
+        .disabled(isBusy || connectivityState?.isTesting == true || config.nodeType.isCodex)
 
         Divider()
 

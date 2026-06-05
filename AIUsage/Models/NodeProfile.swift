@@ -1,6 +1,48 @@
 import Foundation
 import QuotaBackend
 
+enum CommonConfigMode: String, Codable, CaseIterable {
+    case followGlobal
+    case alwaysMerge
+    case neverMerge
+
+    var label: String {
+        switch self {
+        case .followGlobal: return AppSettings.shared.t("Follow Global", "跟随全局")
+        case .alwaysMerge: return AppSettings.shared.t("Always Merge", "始终合并")
+        case .neverMerge: return AppSettings.shared.t("Never Merge", "从不合并")
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .followGlobal:
+            return AppSettings.shared.t(
+                "Use the global common config switch.",
+                "使用全局通用配置开关。"
+            )
+        case .alwaysMerge:
+            return AppSettings.shared.t(
+                "Merge common config for this node even if the global switch is off.",
+                "即使全局开关关闭，也为该节点合并通用配置。"
+            )
+        case .neverMerge:
+            return AppSettings.shared.t(
+                "Do not merge common config for this node.",
+                "该节点不合并通用配置。"
+            )
+        }
+    }
+
+    func shouldMerge(globalEnabled: Bool) -> Bool {
+        switch self {
+        case .followGlobal: return globalEnabled
+        case .alwaysMerge: return true
+        case .neverMerge: return false
+        }
+    }
+}
+
 // MARK: - Node Profile
 // Each node profile is a standalone JSON file at ~/.config/aiusage/profiles/<id>.json.
 // The file contains a `_metadata` wrapper (proxy config, name, timestamps) alongside
@@ -255,6 +297,7 @@ struct ProxySettings: Codable, Equatable {
     var enableModelAliasMapping: Bool?
     var enableHTTPS: Bool?
     var httpsPort: Int?
+    var commonConfigMode: CommonConfigMode?
 
     /// Codex 专用：该节点的额外 TOML 顶层键（如 model_reasoning_effort、request_max_retries）。
     /// 激活时与全局通用配置按顶层键合并（节点键覆盖全局），注入受管理 BASE 块。可选以兼容旧档。
@@ -339,6 +382,7 @@ struct ProxySettings: Codable, Equatable {
         anthropicBaseURL: String, anthropicAPIKey: String, usePassthroughProxy: Bool,
         enableModelAliasMapping: Bool = false,
         enableHTTPS: Bool? = nil, httpsPort: Int? = nil,
+        commonConfigMode: CommonConfigMode? = nil,
         extraTOML: String? = nil
     ) {
         self.host = host
@@ -357,6 +401,7 @@ struct ProxySettings: Codable, Equatable {
         self.enableModelAliasMapping = enableModelAliasMapping
         self.enableHTTPS = enableHTTPS
         self.httpsPort = httpsPort
+        self.commonConfigMode = commonConfigMode
         self.extraTOML = extraTOML
     }
 
@@ -372,6 +417,10 @@ struct ProxySettings: Codable, Equatable {
         nodeType == .openaiProxy
             || nodeType == .codexProxy
             || (nodeType == .anthropicDirect && usePassthroughProxy)
+    }
+
+    func shouldMergeClaudeCommonConfig(globalEnabled: Bool) -> Bool {
+        (commonConfigMode ?? .followGlobal).shouldMerge(globalEnabled: globalEnabled)
     }
 
     func pricingForModel(_ model: String) -> ProxyConfiguration.ModelPricing? {

@@ -2,6 +2,8 @@ import Foundation
 import SwiftUI
 import Combine
 import os.log
+import SQLite3
+import QuotaBackend
 
 // MARK: - Node Profile Store
 // File-based persistence for NodeProfile objects. Each profile is a standalone JSON file
@@ -191,6 +193,7 @@ class NodeProfileStore: ObservableObject {
         var skipped: Int = 0
         var importedGlobalConfig = false
         var importedCodexGlobalConfig = false
+        var skippedGlobalConfig = false
         var errors: [String] = []
     }
 
@@ -261,6 +264,67 @@ class NodeProfileStore: ObservableObject {
             } catch {
                 result.failed += 1
                 result.errors.append("\(fileURL.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+
+        return result
+    }
+
+    // MARK: - cc-switch Import
+
+    func importCCSwitchClaudeProfiles(dbPath: String? = nil) -> ImportResult {
+        let path = dbPath ?? Self.defaultCCSwitchDBPath
+        var result = ImportResult()
+
+        guard fileManager.fileExists(atPath: path) else {
+            result.failed = 1
+            result.errors.append("cc-switch database not found: \(path)")
+            return result
+        }
+
+        guard let db = Self.openReadonlySQLiteDB(at: path) else {
+            result.failed = 1
+            result.errors.append("failed to open cc-switch database")
+            return result
+        }
+        defer { sqlite3_close(db) }
+
+        let rows = Self.loadCCSwitchClaudeRows(db: db)
+        if rows.isEmpty {
+            result.skipped = 0
+            result.errors.append("no cc-switch Claude providers found")
+            return result
+        }
+
+        var reservedPorts = Set<Int>()
+        let importDate = Date()
+        for row in rows {
+            do {
+                let port = nextAvailablePort(startingAt: 4320, reserving: reservedPorts)
+                reservedPorts.insert(port)
+                let profile = try Self.makeProfile(from: row, port: port, importDate: importDate)
+                if save(profile) {
+                    result.succeeded += 1
+                } else {
+                    result.failed += 1
+                    result.errors.append("\(row.name): save failed")
+                }
+            } catch {
+                result.failed += 1
+                result.errors.append("\(row.name): \(error.localizedDescription)")
+            }
+        }
+
+        if let commonSettings = Self.loadCCSwitchClaudeCommonConfig(db: db), !commonSettings.isEmpty {
+            if globalConfig.settings.isEmpty {
+                globalConfig = GlobalConfig(enabled: true, settings: commonSettings)
+                if saveGlobalConfig() {
+                    result.importedGlobalConfig = true
+                } else {
+                    result.errors.append("failed to save cc-switch common config")
+                }
+            } else {
+                result.skippedGlobalConfig = true
             }
         }
 
@@ -438,15 +502,204 @@ class NodeProfileStore: ObservableObject {
         }
     }
 
+    private struct CCSwitchClaudeRow {
+        var id: String
+        var name: String
+        var settingsConfig: [String: Any]
+        var isCurrent: Bool
+        var createdAtMs: Int64?
+        var meta: [String: Any]
+    }
+
+    private enum CCSwitchImportError: LocalizedError {
+        case invalidSettings
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidSettings:
+                return "invalid cc-switch settings JSON"
+            }
+        }
+    }
+
+    private static var defaultCCSwitchDBPath: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent(".cc-switch/cc-switch.db")
+    }
+
+    private static func openReadonlySQLiteDB(at path: String) -> OpaquePointer? {
+        var db: OpaquePointer?
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK else {
+            if let db { sqlite3_close(db) }
+            return nil
+        }
+        return db
+    }
+
+    private static func loadCCSwitchClaudeRows(db: OpaquePointer) -> [CCSwitchClaudeRow] {
+        let sql = """
+        SELECT id, name, settings_config, is_current, created_at, meta
+        FROM providers
+        WHERE app_type = 'claude'
+        ORDER BY sort_index, name
+        """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var rows: [CCSwitchClaudeRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqliteText(stmt, 0) ?? UUID().uuidString
+            let name = sqliteText(stmt, 1)?.nilIfBlank ?? "cc-switch Claude"
+            let settingsText = sqliteText(stmt, 2) ?? "{}"
+            let metaText = sqliteText(stmt, 5) ?? "{}"
+            let settings = jsonObject(from: settingsText) ?? [:]
+            let meta = jsonObject(from: metaText) ?? [:]
+            let createdAt = sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 4)
+            rows.append(CCSwitchClaudeRow(
+                id: id,
+                name: name,
+                settingsConfig: settings,
+                isCurrent: sqlite3_column_int(stmt, 3) == 1,
+                createdAtMs: createdAt,
+                meta: meta
+            ))
+        }
+        return rows
+    }
+
+    private static func loadCCSwitchClaudeCommonConfig(db: OpaquePointer) -> [String: Any]? {
+        let sql = "SELECT value FROM settings WHERE key = 'common_config_claude' LIMIT 1"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW,
+              let text = sqliteText(stmt, 0) else {
+            return nil
+        }
+        return jsonObject(from: text)
+    }
+
+    private static func makeProfile(
+        from row: CCSwitchClaudeRow,
+        port: Int,
+        importDate: Date
+    ) throws -> NodeProfile {
+        var settings = row.settingsConfig
+        var env = settings["env"] as? [String: Any] ?? [:]
+
+        let upstreamBaseURL = stringValue(env["ANTHROPIC_BASE_URL"]) ?? "https://api.anthropic.com"
+        let upstreamKey = stringValue(env["ANTHROPIC_AUTH_TOKEN"]) ?? stringValue(env["ANTHROPIC_API_KEY"]) ?? ""
+        let defaultModel = stringValue(env["ANTHROPIC_MODEL"])
+            ?? stringValue(settings["model"])
+            ?? stringValue(env["ANTHROPIC_DEFAULT_SONNET_MODEL"])
+            ?? ""
+        let opus = stringValue(env["ANTHROPIC_DEFAULT_OPUS_MODEL"]) ?? defaultModel
+        let sonnet = stringValue(env["ANTHROPIC_DEFAULT_SONNET_MODEL"]) ?? defaultModel
+        let haiku = stringValue(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"]) ?? defaultModel
+
+        env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:\(port)"
+        env["ANTHROPIC_AUTH_TOKEN"] = upstreamKey
+        if !opus.isEmpty { env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = opus }
+        if !sonnet.isEmpty { env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = sonnet }
+        if !haiku.isEmpty { env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = haiku }
+        settings["env"] = env
+        settings["$schema"] = settings["$schema"] ?? "https://json.schemastore.org/claude-code-settings.json"
+        if !defaultModel.isEmpty { settings["model"] = defaultModel }
+
+        let commonMode: CommonConfigMode?
+        if let enabled = boolValue(row.meta["commonConfigEnabled"]) ?? boolValue(row.meta["common_config_enabled"]) {
+            commonMode = enabled ? .alwaysMerge : .neverMerge
+        } else {
+            commonMode = .followGlobal
+        }
+
+        let proxy = ProxySettings(
+            host: "127.0.0.1",
+            port: port,
+            allowLAN: false,
+            upstreamBaseURL: "https://api.openai.com",
+            openAIUpstreamAPI: .chatCompletions,
+            upstreamAPIKey: "",
+            expectedClientKey: "",
+            maxOutputTokens: 0,
+            defaultModel: defaultModel,
+            modelMapping: ProxyConfiguration.ModelMapping(
+                bigModel: .init(name: opus),
+                middleModel: .init(name: sonnet),
+                smallModel: .init(name: haiku)
+            ),
+            anthropicBaseURL: upstreamBaseURL,
+            anthropicAPIKey: upstreamKey,
+            usePassthroughProxy: true,
+            enableModelAliasMapping: false,
+            enableHTTPS: false,
+            httpsPort: nil,
+            commonConfigMode: commonMode
+        )
+
+        let createdAt = row.createdAtMs.flatMap { dateFromCCSwitchTimestamp($0) } ?? importDate
+        let metadata = NodeProfile.Metadata(
+            id: UUID().uuidString,
+            name: "\(row.name) (cc-switch)",
+            nodeType: .anthropicDirect,
+            createdAt: createdAt,
+            lastUsedAt: row.isCurrent ? importDate : nil,
+            sortOrder: Int.max,
+            proxy: proxy
+        )
+        return NodeProfile(metadata: metadata, settings: settings)
+    }
+
+    private static func sqliteText(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
+        guard let cString = sqlite3_column_text(stmt, index) else { return nil }
+        return String(cString: cString)
+    }
+
+    private static func jsonObject(from text: String) -> [String: Any]? {
+        guard let data = text.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        guard let string = value as? String else { return nil }
+        return string.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+    }
+
+    private static func boolValue(_ value: Any?) -> Bool? {
+        if let bool = value as? Bool { return bool }
+        if let number = value as? NSNumber { return number.boolValue }
+        if let string = value as? String {
+            switch string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "true", "1", "yes": return true
+            case "false", "0", "no": return false
+            default: return nil
+            }
+        }
+        return nil
+    }
+
+    private static func dateFromCCSwitchTimestamp(_ timestamp: Int64) -> Date? {
+        guard timestamp > 0 else { return nil }
+        if timestamp > 10_000_000_000 {
+            return Date(timeIntervalSince1970: Double(timestamp) / 1000.0)
+        }
+        return Date(timeIntervalSince1970: Double(timestamp))
+    }
+
     // MARK: - Helpers
 
     private func filePath(for id: String) -> String {
         (Self.profilesDirectory as NSString).appendingPathComponent("\(id).json")
     }
 
-    private func nextAvailablePort() -> Int {
-        let usedPorts = Set(profiles.map(\.metadata.proxy.port))
-        var port = 8080
+    func nextAvailablePort(startingAt startPort: Int = 8080, reserving reservedPorts: Set<Int> = []) -> Int {
+        let usedPorts = Set(profiles.map(\.metadata.proxy.port)).union(reservedPorts)
+        var port = startPort
         while usedPorts.contains(port) { port += 1 }
         return port
     }

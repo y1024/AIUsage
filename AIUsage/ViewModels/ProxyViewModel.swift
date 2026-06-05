@@ -35,6 +35,12 @@ enum ProxyRuntimeError: LocalizedError {
     }
 }
 
+struct ProxyConnectivityTestState: Equatable {
+    var isTesting: Bool = false
+    var lastSucceeded: Bool?
+    var message: String?
+}
+
 @MainActor
 class ProxyViewModel: ObservableObject {
     static let shared = ProxyViewModel()
@@ -55,6 +61,8 @@ class ProxyViewModel: ObservableObject {
     var recentLogs: [String: [ProxyRequestLog]] = [:]
     @Published var operationErrorMessage: String?
     @Published var operationInProgressConfigIds: Set<String> = []
+    @Published var connectivityTestStates: [String: ProxyConnectivityTestState] = [:]
+    @Published var connectivityTestMessage: String?
 
     struct LogCacheKey: Hashable {
         let nodeFilter: String?
