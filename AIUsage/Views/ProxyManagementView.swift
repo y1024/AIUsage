@@ -187,23 +187,6 @@ struct ProxyManagementView: View {
             Text(viewModel.operationErrorMessage ?? "")
         }
         .alert(
-            L("Connectivity Test", "连通性测试"),
-            isPresented: Binding(
-                get: { viewModel.connectivityTestMessage != nil },
-                set: { newValue in
-                    if !newValue {
-                        viewModel.connectivityTestMessage = nil
-                    }
-                }
-            )
-        ) {
-            Button("OK") {
-                viewModel.connectivityTestMessage = nil
-            }
-        } message: {
-            Text(viewModel.connectivityTestMessage ?? "")
-        }
-        .alert(
             L("Delete Node?", "确认删除节点？"),
             isPresented: Binding(
                 get: { pendingDeletionConfig != nil },

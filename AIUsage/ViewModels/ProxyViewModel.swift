@@ -35,10 +35,17 @@ enum ProxyRuntimeError: LocalizedError {
     }
 }
 
-struct ProxyConnectivityTestState: Equatable {
+struct ProxyConnectivityTestState: Equatable, Codable {
     var isTesting: Bool = false
     var lastSucceeded: Bool?
+    /// 完整明细（脱敏后），供失败 Popover 展示与复制。
     var message: String?
+    /// 已知的 HTTP 状态码（成功/失败均可能有），用于徽章短摘要。
+    var statusCode: Int?
+    /// 成功时的往返耗时（毫秒）。
+    var latencyMs: Int?
+    /// 本次结果产生的时间，供 Popover 显示「多久之前」。
+    var testedAt: Date?
 }
 
 @MainActor
@@ -62,7 +69,6 @@ class ProxyViewModel: ObservableObject {
     @Published var operationErrorMessage: String?
     @Published var operationInProgressConfigIds: Set<String> = []
     @Published var connectivityTestStates: [String: ProxyConnectivityTestState] = [:]
-    @Published var connectivityTestMessage: String?
 
     struct LogCacheKey: Hashable {
         let nodeFilter: String?
@@ -148,6 +154,7 @@ class ProxyViewModel: ObservableObject {
                 self.objectWillChange.send()
             }
         loadConfigurations()
+        restoreConnectivityResults()
         loadStatistics()
         loadLogs()
         restoreActivatedNode()
@@ -311,6 +318,8 @@ class ProxyViewModel: ObservableObject {
                 proxyOnlyRunningIds.remove(profile.id)
             }
             configurations[index] = config
+            // 配置已变更，旧的连通性测试结果不再代表当前节点，清除之。
+            clearConnectivityResult(for: profile.id)
             // 节点定价可能在本次保存中被新增/修改，回填历史 $0 日志的费用。
             recalculateCosts(for: profile.id)
             if wasActivated {
@@ -350,6 +359,8 @@ class ProxyViewModel: ObservableObject {
                 proxyOnlyRunningIds.remove(config.id)
             }
             configurations[index] = config
+            // 配置已变更，旧的连通性测试结果不再代表当前节点，清除之。
+            clearConnectivityResult(for: config.id)
             let profile = NodeProfile.fromLegacyConfiguration(config)
             profileStore.save(profile)
             // 节点定价可能在本次保存中被新增/修改，回填历史 $0 日志的费用。
@@ -402,6 +413,7 @@ class ProxyViewModel: ObservableObject {
         configurations.removeAll { $0.id == id }
         statistics.removeValue(forKey: id)
         recentLogs.removeValue(forKey: id)
+        clearConnectivityResult(for: id)
         profileStore.delete(id)
         saveStatistics()
         saveLogs()

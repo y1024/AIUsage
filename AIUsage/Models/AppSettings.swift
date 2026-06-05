@@ -107,6 +107,7 @@ enum DefaultsKey {
     static let proxyActivatedCodexConfigId = "proxyActivatedCodexConfigId"
     static let proxyAutoRestoreOnLaunch = "proxyAutoRestoreOnLaunch"
     static let proxyOnlyRunningIds = "proxyOnlyRunningIds"
+    static let proxyConnectivityResults = "proxyConnectivityResults"
     static let proxyConfigurations = "proxyConfigurations"
     static let proxyLogRetentionDays = "proxyLogRetentionDays"
     static let proxyLogs = "proxyLogs"

@@ -493,7 +493,9 @@ UI 状态管理和激活事务：
 - **鉴权**：同时下发 `Authorization: Bearer <key>` 与 `x-api-key`，覆盖两类上游/代理鉴权习惯（与 `*ProxyService.authenticate` 对齐）。
 - **脱敏**：返回 / 错误文本经 `sanitizedConnectivityMessage` 用**预编译静态正则**（`connectivityRedactionRules`，避免每次测试重复编译）抹掉 `sk-` / `Bearer` / `ANTHROPIC_AUTH_TOKEN` / `x-api-key`，截断 500 字符后才进 UI。
 - **语义化错误**：失败包装为 `ProxyConnectivityError`（`.invalidURL` / `.invalidResponse` / `.httpStatus(code, body)`，实现 `LocalizedError`），不裸抛 `URLError` / `NSError`。
-- **UI**：节点卡片闪电图标 + 上下文菜单「测试连通性」，结果走统一 `Connectivity Test` alert + 卡片着色（绿=通过 / 红=失败 / 橙=未测）。状态存 `ProxyViewModel.connectivityTestStates`，文案存 `connectivityTestMessage`。
+- **结构化结果**：探测函数返回 `ConnectivityProbeResult`（`statusCode` / `latencyMs` / `message`），由 ViewModel 直接产出结构化字段写入 `ProxyConnectivityTestState`（新增 `statusCode` / `latencyMs` / `testedAt`），UI 只负责渲染，不再在 View 层解析消息字符串。
+- **UI（就地、不打断、对齐优先）**：右侧动作区只保留**等宽图标**（开关/代理/复制/测试/编辑/删除），跨行恒定对齐；测试按钮着色（灰=未测 / 绿=通过 / 红=失败）。连通性结果做成**状态行**常驻在节点名/URL 下方：成功 `✓ <code> · <ms>ms · <时间>`，失败 `✗ <code> · <时间> ›`（整行可点）。失败点开 **Popover**（限宽 360、可滚动、等宽字体、可选中复制、内置「复制」+「重试」），承载完整脱敏报文；**不再用模态 alert 每次打断**。悬浮 tooltip 仅保留简短动作标签并加 `allowsHitTesting(false)`，避免浮层盖住按钮导致无法再次点击。
+- **持久化（跨重启保留）**：已完成结果（含脱敏 `message`）经 `JSONEncoder`（静态复用）存入 `UserDefaults`（`DefaultsKey.proxyConnectivityResults`，按 config id keyed），启动时 `restoreConnectivityResults()` 还原（强制 `isTesting=false` 并裁剪掉已不存在的节点）；节点被**编辑/删除**时 `clearConnectivityResult(for:)` 清除其旧结果（旧结果对新配置不再有效）。
 
 ### per-node 通用配置合并 + 分层 JSON 编辑器
 

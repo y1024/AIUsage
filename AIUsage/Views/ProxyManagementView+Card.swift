@@ -28,6 +28,11 @@ struct ConfigurationCardView: View, Equatable {
     var onDuplicate: () -> Void = {}
     var onToggleSelection: () -> Void = {}
 
+    /// 失败明细 Popover 的展开态。属于本卡片局部 UI 状态，不参与 Equatable 比较。
+    /// 注意：必须为 internal（非 private），否则会把结构体的成员初始化器降级为 private，
+    /// 破坏 `ProxyManagementView+List` 跨文件的卡片构造。
+    @State var showConnectivityDetail = false
+
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.config == rhs.config &&
         lhs.isActive == rhs.isActive &&
@@ -88,6 +93,7 @@ struct ConfigurationCardView: View, Equatable {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    connectivityStatusLine
                 }
 
                 Spacer()
@@ -131,22 +137,7 @@ struct ConfigurationCardView: View, Equatable {
                     .buttonStyle(.plain)
                     .instantTooltip(L("Copy Launch Command", "复制启动命令"))
 
-                    Button(action: onTestConnectivity) {
-                        Group {
-                            if connectivityState?.isTesting == true {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "bolt.horizontal.circle.fill")
-                                    .font(.system(size: 18))
-                                    .foregroundStyle(connectivityTint)
-                            }
-                        }
-                        .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isBusy || connectivityState?.isTesting == true)
-                    .instantTooltip(connectivityTooltip)
+                    connectivityControl
 
                     Button(action: onEdit) {
                         Image(systemName: "pencil.circle.fill")
@@ -214,19 +205,162 @@ struct ConfigurationCardView: View, Equatable {
         return Color.primary.opacity(0.06)
     }
 
+    // MARK: - Connectivity Test
+
+    /// 未测试 = 中性灰；成功 = 绿；失败 = 红。状态明细由名称下方的状态行承载。
     private var connectivityTint: Color {
-        guard let succeeded = connectivityState?.lastSucceeded else { return .orange }
+        guard let succeeded = connectivityState?.lastSucceeded else { return .secondary }
         return succeeded ? .green : .red
     }
 
-    private var connectivityTooltip: String {
-        if connectivityState?.isTesting == true {
-            return L("Testing Connectivity", "正在测试连通性")
+    /// tooltip 仅保留简短动作标签；长错误改由失败状态行的 Popover 承载。
+    private var connectivityActionLabel: String {
+        connectivityState?.isTesting == true
+            ? L("Testing Connectivity", "正在测试连通性")
+            : L("Test Connectivity", "测试连通性")
+    }
+
+    /// 右侧动作区里只保留等宽的「测试」触发按钮（着色：灰=未测/绿=通/红=败），
+    /// 结果明细移到节点名/URL 下方的状态行，避免可变宽度撑动作图标导致跨行错位。
+    private var connectivityControl: some View {
+        Button(action: onTestConnectivity) {
+            Group {
+                if connectivityState?.isTesting == true {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "bolt.horizontal.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(connectivityTint)
+                }
+            }
+            .frame(width: 20, height: 20)
         }
-        if let message = connectivityState?.message, !message.isEmpty {
-            return message
+        .buttonStyle(.plain)
+        .disabled(isBusy || connectivityState?.isTesting == true)
+        .instantTooltip(connectivityActionLabel)
+    }
+
+    /// 连通性结果状态行（在节点名/URL 下方常驻）：状态点 + 摘要 + 上次测试时间。
+    /// 失败时整行可点开 Popover 查看完整报文。
+    @ViewBuilder
+    private var connectivityStatusLine: some View {
+        if let state = connectivityState, !state.isTesting, let succeeded = state.lastSucceeded {
+            if succeeded {
+                connectivityStatusContent(
+                    state: state,
+                    color: .green,
+                    systemImage: "checkmark.circle.fill",
+                    text: connectivitySuccessText(state)
+                )
+            } else {
+                Button {
+                    showConnectivityDetail = true
+                } label: {
+                    HStack(spacing: 4) {
+                        connectivityStatusContent(
+                            state: state,
+                            color: .red,
+                            systemImage: "exclamationmark.circle.fill",
+                            text: connectivityFailureText(state)
+                        )
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .instantTooltip(L("View error details", "查看错误详情"))
+                .popover(isPresented: $showConnectivityDetail, arrowEdge: .bottom) {
+                    connectivityDetailPopover(state)
+                }
+            }
         }
-        return L("Test Connectivity", "测试连通性")
+    }
+
+    private func connectivityStatusContent(state: ProxyConnectivityTestState, color: Color, systemImage: String, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(color)
+            Text(text)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(color)
+            if let testedAt = state.testedAt {
+                Text(Self.relativeFormatter.localizedString(for: testedAt, relativeTo: Date()))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .lineLimit(1)
+    }
+
+    private func connectivitySuccessText(_ state: ProxyConnectivityTestState) -> String {
+        switch (state.statusCode, state.latencyMs) {
+        case let (code?, ms?): return "\(code) · \(ms)ms"
+        case let (code?, nil): return "\(code)"
+        case let (nil, ms?): return "\(ms)ms"
+        case (nil, nil): return L("OK", "正常")
+        }
+    }
+
+    private func connectivityFailureText(_ state: ProxyConnectivityTestState) -> String {
+        if let code = state.statusCode { return "\(code)" }
+        return L("Failed", "失败")
+    }
+
+    private func connectivityDetailPopover(_ state: ProxyConnectivityTestState) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(L("Connectivity Test Failed", "连通性测试失败"))
+                    .font(.system(size: 13, weight: .bold))
+                Spacer(minLength: 8)
+                if let code = state.statusCode {
+                    Text("HTTP \(code)")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            ScrollView {
+                Text((state.message?.isEmpty == false ? state.message : nil) ?? L("Unknown error", "未知错误"))
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 220)
+
+            HStack(spacing: 8) {
+                if let testedAt = state.testedAt {
+                    Text(Self.relativeFormatter.localizedString(for: testedAt, relativeTo: Date()))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(state.message ?? "", forType: .string)
+                } label: {
+                    Label(L("Copy", "复制"), systemImage: "doc.on.doc")
+                }
+                .controlSize(.small)
+                Button {
+                    showConnectivityDetail = false
+                    onTestConnectivity()
+                } label: {
+                    Label(L("Retry", "重试"), systemImage: "arrow.clockwise")
+                }
+                .controlSize(.small)
+                .disabled(isBusy)
+            }
+        }
+        .padding(14)
+        .frame(width: 360)
     }
 
     // MARK: - Context Menu
@@ -443,13 +577,16 @@ private struct InstantTooltip: ViewModifier {
                     Text(text)
                         .font(.caption2)
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .fixedSize()
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(Capsule().fill(Color.black.opacity(0.8)))
-                        .fixedSize()
                         .offset(y: 26)
                         .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .top)))
                         .zIndex(100)
+                        // 关键：浮层永不参与命中测试，避免盖住按钮导致无法再次点击。
+                        .allowsHitTesting(false)
                 }
             }
             .onHover { hovering in

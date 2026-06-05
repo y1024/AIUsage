@@ -21,6 +21,20 @@ enum ProxyConnectivityError: LocalizedError {
             return "HTTP \(code): \(body)"
         }
     }
+
+    /// 已知的 HTTP 状态码（仅 `.httpStatus` 携带），供 UI 徽章展示短摘要。
+    var statusCode: Int? {
+        if case let .httpStatus(code, _) = self { return code }
+        return nil
+    }
+}
+
+/// 连通性探测的结构化结果：把「状态码 + 往返耗时 + 可读明细」从 View 层解析里解耦出来，
+/// 由 ViewModel 直接产出结构化字段，UI 只负责渲染（徽章/Popover）。
+struct ConnectivityProbeResult {
+    let statusCode: Int
+    let latencyMs: Int
+    let message: String
 }
 
 extension ProxyViewModel {
@@ -227,6 +241,7 @@ extension ProxyViewModel {
             var state = connectivityTestStates[id, default: .init()]
             state.isTesting = false
             connectivityTestStates[id] = state
+            saveConnectivityResults()
         }
 
         let startedByTest: Bool
@@ -237,11 +252,13 @@ extension ProxyViewModel {
                 startedByTest = false
             }
         } catch {
-            let message = sanitizedConnectivityMessage(error.localizedDescription)
-            connectivityTestStates[id] = ProxyConnectivityTestState(isTesting: false, lastSucceeded: false, message: message)
-            connectivityTestMessage = AppSettings.shared.t(
-                "Connectivity test failed for \"\(config.name)\": \(message)",
-                "节点「\(config.name)」连通性测试失败：\(message)"
+            connectivityTestStates[id] = ProxyConnectivityTestState(
+                isTesting: false,
+                lastSucceeded: false,
+                message: sanitizedConnectivityMessage(error.localizedDescription),
+                statusCode: (error as? ProxyConnectivityError)?.statusCode,
+                latencyMs: nil,
+                testedAt: Date()
             )
             return
         }
@@ -251,25 +268,68 @@ extension ProxyViewModel {
         }
 
         do {
-            let message = config.nodeType.isCodex
+            let result = config.nodeType.isCodex
                 ? try await performCodexConnectivityRequest(config)
                 : try await performClaudeConnectivityRequest(config)
-            connectivityTestStates[id] = ProxyConnectivityTestState(isTesting: false, lastSucceeded: true, message: message)
-            connectivityTestMessage = AppSettings.shared.t(
-                "Connectivity test passed for \"\(config.name)\". \(message)",
-                "节点「\(config.name)」连通性测试通过。\(message)"
+            connectivityTestStates[id] = ProxyConnectivityTestState(
+                isTesting: false,
+                lastSucceeded: true,
+                message: result.message,
+                statusCode: result.statusCode,
+                latencyMs: result.latencyMs,
+                testedAt: Date()
             )
         } catch {
-            let message = sanitizedConnectivityMessage(error.localizedDescription)
-            connectivityTestStates[id] = ProxyConnectivityTestState(isTesting: false, lastSucceeded: false, message: message)
-            connectivityTestMessage = AppSettings.shared.t(
-                "Connectivity test failed for \"\(config.name)\": \(message)",
-                "节点「\(config.name)」连通性测试失败：\(message)"
+            connectivityTestStates[id] = ProxyConnectivityTestState(
+                isTesting: false,
+                lastSucceeded: false,
+                message: sanitizedConnectivityMessage(error.localizedDescription),
+                statusCode: (error as? ProxyConnectivityError)?.statusCode,
+                latencyMs: nil,
+                testedAt: Date()
             )
         }
     }
 
-    private func performClaudeConnectivityRequest(_ config: ProxyConfiguration) async throws -> String {
+    // MARK: - Connectivity Result Persistence
+
+    // 高成本编解码器提取为静态常量，避免每次保存/读取重复创建。
+    private static let connectivityResultsEncoder = JSONEncoder()
+    private static let connectivityResultsDecoder = JSONDecoder()
+
+    /// 把已完成的连通性结果（含脱敏 message）持久化到 UserDefaults，跨重启保留「上次测试时间 + 结果」。
+    /// 仅存非进行中的条目；message 已经过 `sanitizedConnectivityMessage` 脱敏，无敏感信息。
+    func saveConnectivityResults() {
+        let finished = connectivityTestStates.filter { !$0.value.isTesting }
+        guard let data = try? Self.connectivityResultsEncoder.encode(finished) else {
+            return
+        }
+        UserDefaults.standard.set(data, forKey: DefaultsKey.proxyConnectivityResults)
+    }
+
+    /// 启动时还原连通性结果。强制 `isTesting=false`（重启后没有进行中的测试），并裁剪掉已不存在的节点。
+    func restoreConnectivityResults() {
+        guard let data = UserDefaults.standard.data(forKey: DefaultsKey.proxyConnectivityResults),
+              let decoded = try? Self.connectivityResultsDecoder.decode([String: ProxyConnectivityTestState].self, from: data) else {
+            return
+        }
+        let knownIds = Set(configurations.map(\.id))
+        var restored: [String: ProxyConnectivityTestState] = [:]
+        for (id, var state) in decoded where knownIds.contains(id) {
+            state.isTesting = false
+            restored[id] = state
+        }
+        connectivityTestStates = restored
+    }
+
+    /// 节点被编辑/删除时清除其旧连通性结果（旧结果对新配置不再有效）。
+    func clearConnectivityResult(for id: String) {
+        if connectivityTestStates.removeValue(forKey: id) != nil {
+            saveConnectivityResults()
+        }
+    }
+
+    private func performClaudeConnectivityRequest(_ config: ProxyConfiguration) async throws -> ConnectivityProbeResult {
         let baseURL: String
         let apiKey: String
         if config.needsProxyProcess {
@@ -321,9 +381,13 @@ extension ProxyViewModel {
             throw ProxyConnectivityError.httpStatus(code: http.statusCode, body: sanitizedConnectivityMessage(text))
         }
 
-        return AppSettings.shared.t(
-            "HTTP \(http.statusCode), \(elapsedMs) ms",
-            "HTTP \(http.statusCode)，\(elapsedMs) ms"
+        return ConnectivityProbeResult(
+            statusCode: http.statusCode,
+            latencyMs: elapsedMs,
+            message: AppSettings.shared.t(
+                "HTTP \(http.statusCode), \(elapsedMs) ms",
+                "HTTP \(http.statusCode)，\(elapsedMs) ms"
+            )
         )
     }
 
@@ -341,7 +405,7 @@ extension ProxyViewModel {
 
     /// Codex 节点连通性测试：走 OpenAI Responses 口径（`POST /v1/responses`）。
     /// 经本地 Codex 代理忠实透传到上游，可端到端验证「客户端 key → 代理 → 上游 key」整条链路。
-    private func performCodexConnectivityRequest(_ config: ProxyConfiguration) async throws -> String {
+    private func performCodexConnectivityRequest(_ config: ProxyConfiguration) async throws -> ConnectivityProbeResult {
         let baseURL: String
         let apiKey: String
         if config.needsProxyProcess {
@@ -390,9 +454,13 @@ extension ProxyViewModel {
             throw ProxyConnectivityError.httpStatus(code: http.statusCode, body: sanitizedConnectivityMessage(text))
         }
 
-        return AppSettings.shared.t(
-            "HTTP \(http.statusCode), \(elapsedMs) ms",
-            "HTTP \(http.statusCode)，\(elapsedMs) ms"
+        return ConnectivityProbeResult(
+            statusCode: http.statusCode,
+            latencyMs: elapsedMs,
+            message: AppSettings.shared.t(
+                "HTTP \(http.statusCode), \(elapsedMs) ms",
+                "HTTP \(http.statusCode)，\(elapsedMs) ms"
+            )
         )
     }
 
