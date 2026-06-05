@@ -14,6 +14,7 @@ xcuserdata/
 *.xccheckout
 DerivedData/
 .derived-data/
+.derivedData/
 build/
 *.moved-aside
 *.hmap

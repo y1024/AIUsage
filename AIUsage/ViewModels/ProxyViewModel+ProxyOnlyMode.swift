@@ -130,7 +130,7 @@ extension ProxyViewModel {
         }
 
         let finalSettings: [String: Any]
-        if profileStore.globalConfig.enabled {
+        if profile.metadata.proxy.shouldMergeClaudeCommonConfig(globalEnabled: profileStore.globalConfig.enabled) {
             finalSettings = GlobalConfig.deepMerge(
                 base: profileStore.globalConfig.settings,
                 override: profile.settings

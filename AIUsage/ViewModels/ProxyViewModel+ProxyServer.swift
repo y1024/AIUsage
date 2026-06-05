@@ -144,7 +144,7 @@ extension ProxyViewModel {
 
         if let profile = profileStore.profile(for: config.id) {
             let finalSettings: [String: Any]
-            if profileStore.globalConfig.enabled {
+            if profile.metadata.proxy.shouldMergeClaudeCommonConfig(globalEnabled: profileStore.globalConfig.enabled) {
                 finalSettings = GlobalConfig.deepMerge(
                     base: profileStore.globalConfig.settings,
                     override: profile.settings
@@ -195,6 +195,152 @@ extension ProxyViewModel {
 
     func isProxyRunning(_ configId: String) -> Bool {
         runtimeService.isProxyRunning(configId)
+    }
+
+    func testConnectivity(_ id: String) async {
+        guard let config = configurations.first(where: { $0.id == id }),
+              !config.nodeType.isCodex else { return }
+        guard !connectivityTestStates[id, default: .init()].isTesting else { return }
+
+        connectivityTestStates[id] = ProxyConnectivityTestState(isTesting: true, lastSucceeded: nil, message: nil)
+        defer {
+            var state = connectivityTestStates[id, default: .init()]
+            state.isTesting = false
+            connectivityTestStates[id] = state
+        }
+
+        let startedByTest: Bool
+        do {
+            if config.needsProxyProcess {
+                startedByTest = try await runtimeService.startProxyForConnectivityTest(for: config)
+            } else {
+                startedByTest = false
+            }
+        } catch {
+            let message = sanitizedConnectivityMessage(error.localizedDescription)
+            connectivityTestStates[id] = ProxyConnectivityTestState(isTesting: false, lastSucceeded: false, message: message)
+            connectivityTestMessage = AppSettings.shared.t(
+                "Connectivity test failed for \"\(config.name)\": \(message)",
+                "节点「\(config.name)」连通性测试失败：\(message)"
+            )
+            return
+        }
+
+        defer {
+            runtimeService.stopProxyForConnectivityTest(for: config, startedByTest: startedByTest)
+        }
+
+        do {
+            let message = try await performClaudeConnectivityRequest(config)
+            connectivityTestStates[id] = ProxyConnectivityTestState(isTesting: false, lastSucceeded: true, message: message)
+            connectivityTestMessage = AppSettings.shared.t(
+                "Connectivity test passed for \"\(config.name)\". \(message)",
+                "节点「\(config.name)」连通性测试通过。\(message)"
+            )
+        } catch {
+            let message = sanitizedConnectivityMessage(error.localizedDescription)
+            connectivityTestStates[id] = ProxyConnectivityTestState(isTesting: false, lastSucceeded: false, message: message)
+            connectivityTestMessage = AppSettings.shared.t(
+                "Connectivity test failed for \"\(config.name)\": \(message)",
+                "节点「\(config.name)」连通性测试失败：\(message)"
+            )
+        }
+    }
+
+    private func performClaudeConnectivityRequest(_ config: ProxyConfiguration) async throws -> String {
+        let baseURL: String
+        let apiKey: String
+        if config.needsProxyProcess {
+            baseURL = config.displayURL
+            apiKey = config.effectiveClientKey
+        } else {
+            baseURL = config.anthropicBaseURL
+            apiKey = config.anthropicAPIKey
+        }
+
+        guard let url = URL(string: claudeMessagesEndpoint(baseURL: baseURL)) else {
+            throw URLError(.badURL)
+        }
+
+        let model = [
+            config.defaultModel,
+            config.modelMapping.middleModel.name,
+            config.modelMapping.bigModel.name,
+        ].first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "claude-sonnet-4-6"
+
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": 8,
+            "stream": false,
+            "messages": [
+                ["role": "user", "content": "ping"]
+            ],
+        ]
+
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let start = Date()
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let elapsedMs = Int(Date().timeIntervalSince(start) * 1000)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        guard (200..<300).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+            throw NSError(
+                domain: "AIUsage.ProxyConnectivity",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode): \(sanitizedConnectivityMessage(text))"]
+            )
+        }
+
+        return AppSettings.shared.t(
+            "HTTP \(http.statusCode), \(elapsedMs) ms",
+            "HTTP \(http.statusCode)，\(elapsedMs) ms"
+        )
+    }
+
+    private func claudeMessagesEndpoint(baseURL: String) -> String {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if trimmed.hasSuffix("/v1") {
+            return "\(trimmed)/messages"
+        }
+        if trimmed.hasSuffix("/v1/messages") {
+            return trimmed
+        }
+        return "\(trimmed)/v1/messages"
+    }
+
+    private func sanitizedConnectivityMessage(_ raw: String) -> String {
+        var text = raw
+        text = text.replacingOccurrences(
+            of: #"(?i)sk-[A-Za-z0-9_\-]{8,}"#,
+            with: "sk-••••",
+            options: .regularExpression
+        )
+        let patterns = [
+            #"(?i)(Bearer\s+)[A-Za-z0-9._~+/=\-]{8,}"#,
+            #"(?i)(ANTHROPIC_AUTH_TOKEN["':=\s]+)[^"',\s}]+"#,
+            #"(?i)(x-api-key["':=\s]+)[^"',\s}]+"#,
+        ]
+        for pattern in patterns {
+            text = text.replacingOccurrences(
+                of: pattern,
+                with: "$1••••",
+                options: .regularExpression
+            )
+        }
+        return String(text.prefix(500))
     }
 }
 

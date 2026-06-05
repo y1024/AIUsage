@@ -120,11 +120,10 @@ struct ContentView: View {
         .onAppear {
             appState.registerMainWindowPresenter { section in
                 appState.selectedSection = section
-                NSApp.activate(ignoringOtherApps: true)
                 openWindow(id: AppState.mainWindowID)
-                let candidateWindows = NSApp.windows.filter { !($0 is NSPanel) }
-                let window = candidateWindows.max(by: { $0.frame.width < $1.frame.width }) ?? candidateWindows.first
-                window?.makeKeyAndOrderFront(nil)
+                DispatchQueue.main.async {
+                    appState.bringMainWindowToFront()
+                }
             }
         }
         .sheet(item: $appState.providerPickerMode) { mode in

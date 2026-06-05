@@ -289,6 +289,18 @@ final class ProxyRuntimeService {
         try await startProxy(config)
     }
 
+    /// Starts a proxy for a one-off connectivity test. Returns true when this call started it.
+    func startProxyForConnectivityTest(for config: ProxyConfiguration) async throws -> Bool {
+        if isProxyRunning(config.id) { return false }
+        try await startProxy(config)
+        return true
+    }
+
+    func stopProxyForConnectivityTest(for config: ProxyConfiguration, startedByTest: Bool) {
+        guard startedByTest else { return }
+        stopProxy(config)
+    }
+
     /// Stop a proxy-only process without touching settings.json or backup.
     func stopProxyOnly(for config: ProxyConfiguration) {
         stopProxy(config)
