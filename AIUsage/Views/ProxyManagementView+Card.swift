@@ -215,11 +215,8 @@ struct ConfigurationCardView: View, Equatable {
     }
 
     private var connectivityTint: Color {
-        switch connectivityState?.lastSucceeded {
-        case true: return .green
-        case false: return .red
-        case nil: return .orange
-        }
+        guard let succeeded = connectivityState?.lastSucceeded else { return .orange }
+        return succeeded ? .green : .red
     }
 
     private var connectivityTooltip: String {
