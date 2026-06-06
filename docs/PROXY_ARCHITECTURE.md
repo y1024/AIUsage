@@ -716,7 +716,8 @@ Codex（Rust `reqwest`）会读取 macOS 系统代理，且**不尊重** `127.0.
 
 - `SystemProxyDetector`（`SCDynamicStoreCopyProxies`）检测系统代理是否启用。
 - `CodexNoProxyFixer`：激活 Codex 节点且**检测到系统代理时**，往 `~/.codex/.env` 写入受管理块 `no_proxy/NO_PROXY = 127.0.0.1,localhost,::1`（Codex 启动会加载该文件）；停用/启动清理时移除还原。
-- **隔离保证**：no_proxy 仅含本地回环，对订阅账号（chatgpt.com）/ 任意外网 API **零影响**（它们照常走系统代理）；只作用于 `~/.codex`，不碰用户 shell 配置。
+- **复制启动命令路径（CODEX_HOME）**：`codex` 经 `CODEX_HOME=<dir> codex` 启动时读的是 `$CODEX_HOME/.env` 而非 `~/.codex/.env`，故 `NodeProfileStore.exportCodexHome` 在导出的独立目录里**无条件**一并写入同样的 `.env`（含 no_proxy）。否则「先开代理 + 复制命令」在系统代理开启时会 502。无条件写入安全：codex 经此命令只与本地代理通信，回环跳代理始终正确。
+- **隔离保证**：no_proxy 仅含本地回环，对订阅账号（chatgpt.com）/ 任意外网 API **零影响**（它们照常走系统代理）；只作用于 `~/.codex` 与导出的 CODEX_HOME 目录，不碰用户 shell 配置。
 - UI 横幅（`SystemProxyWarningBanner`）作轻量信息提示并提供「复制 no_proxy」兜底。
 
 ### `/v1/models` 透传

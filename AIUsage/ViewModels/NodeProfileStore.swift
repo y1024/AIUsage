@@ -626,11 +626,23 @@ class NodeProfileStore: ObservableObject {
         do {
             try configTOML.write(toFile: filePath, atomically: true, encoding: .utf8)
             try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath)
-            return dir
         } catch {
             storeLog.error("Failed to export codex home for \(profile.metadata.name, privacy: .public): \(String(describing: error), privacy: .public)")
             return nil
         }
+
+        // codex 用 CODEX_HOME 启动时读 `$CODEX_HOME/.env`，而非 `~/.codex/.env`。系统代理会拦截
+        // codex 发往本地代理（127.0.0.1:<port>）的请求并回 502，故在此独立目录一并写入 no_proxy，
+        // 让 codex(reqwest) 跳过对回环主机的代理。loopback 跳代理始终正确（codex 只与本地代理通信），
+        // 故无条件写入；写入失败不阻断（仍返回目录，外层用复制命令兜底）。
+        let envPath = (dir as NSString).appendingPathComponent(".env")
+        do {
+            try (CodexNoProxyFixer.exportCommand + "\n").write(toFile: envPath, atomically: true, encoding: .utf8)
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: envPath)
+        } catch {
+            storeLog.error("Failed to write CODEX_HOME .env for \(profile.metadata.name, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+        return dir
     }
 
     /// 主线程解析后的 cc-switch 行（含已解码 JSON）。
