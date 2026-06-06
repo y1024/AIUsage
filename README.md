@@ -124,8 +124,9 @@ Point the Codex CLI at any OpenAI-compatible upstream (Responses API), and switc
 | **OpenAI-compatible upstream** | Routes Codex CLI through any `responses`-compatible endpoint |
 | **Unified switcher** | One toggle across subscription accounts (`~/.codex/auth.json`) and API nodes (`config.toml`) |
 | **Surgical config merge** | Injects managed blocks into `~/.codex/config.toml` while preserving your own settings; global fragment + per-node TOML override |
+| **cc-switch sync** | One-click import of Codex providers from local cc-switch (upstream / model / key), preserving `model_reasoning_effort`, `mcp_servers` and other settings; deterministic-id dedup avoids duplicate nodes (symmetric with Claude) |
 
-**Quick start:** Open AIUsage → Codex Proxy → New Node (or pick a subscription account) → Configure → Activate. `~/.codex/config.toml` is merged automatically.
+**Quick start:** Open AIUsage → Codex Proxy → New Node (or pick a subscription account) → Configure → Activate. `~/.codex/config.toml` is merged automatically. Already on cc-switch? Hit "Sync cc-switch" in the toolbar to import in one click.
 
 Usage and billing details for Claude Code and Codex are documented in [docs/USAGE_AND_BILLING.md](docs/USAGE_AND_BILLING.md).
 
