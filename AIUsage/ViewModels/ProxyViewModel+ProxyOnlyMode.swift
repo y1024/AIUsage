@@ -119,7 +119,9 @@ extension ProxyViewModel {
 
     // MARK: - Copy Launch Command
 
-    /// Exports a clean settings file and copies `claude --settings <path>` to the clipboard.
+    /// 复制「不改全局配置即可启动」的命令到剪贴板，按节点类型走不同口径：
+    /// - Claude（anthropicDirect / openaiProxy）：导出干净 settings 文件 → `claude --settings <path>`。
+    /// - Codex（codexProxy）：导出独立 CODEX_HOME 目录 → `CODEX_HOME="<dir>" codex`。
     func copyLaunchCommand(for id: String) {
         guard let profile = profileStore.profile(for: id) else {
             operationErrorMessage = AppSettings.shared.t(
@@ -129,6 +131,34 @@ extension ProxyViewModel {
             return
         }
 
+        let command: String
+        if let config = configurations.first(where: { $0.id == id }), config.nodeType.isCodex {
+            guard let codexCommand = makeCodexLaunchCommand(config: config, profile: profile) else {
+                operationErrorMessage = AppSettings.shared.t(
+                    "Failed to export Codex config.",
+                    "导出 Codex 配置失败。"
+                )
+                return
+            }
+            command = codexCommand
+        } else {
+            guard let claudeCommand = makeClaudeLaunchCommand(profile: profile) else {
+                operationErrorMessage = AppSettings.shared.t(
+                    "Failed to export settings file.",
+                    "导出设置文件失败。"
+                )
+                return
+            }
+            command = claudeCommand
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        proxyRuntimeLog.info("Copied launch command for node \(profile.metadata.name, privacy: .public)")
+    }
+
+    /// Claude：导出干净 settings（剔除 `_metadata`），返回 `claude --settings <path>`。
+    private func makeClaudeLaunchCommand(profile: NodeProfile) -> String? {
         let finalSettings: [String: Any]
         if profile.metadata.proxy.shouldMergeClaudeCommonConfig(globalEnabled: profileStore.globalConfig.enabled) {
             finalSettings = GlobalConfig.deepMerge(
@@ -143,18 +173,36 @@ extension ProxyViewModel {
             for: profile,
             settings: finalSettings
         ) else {
-            operationErrorMessage = AppSettings.shared.t(
-                "Failed to export settings file.",
-                "导出设置文件失败。"
-            )
-            return
+            return nil
         }
 
         let escapedPath = path.contains(" ") ? "\"\(path)\"" : path
-        let command = "claude --settings \(escapedPath)"
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(command, forType: .string)
+        return "claude --settings \(escapedPath)"
+    }
 
-        proxyRuntimeLog.info("Copied launch command for node \(profile.metadata.name, privacy: .public)")
+    /// Codex：导出独立 CODEX_HOME 目录（含指向本地代理的 config.toml），返回 `CODEX_HOME="<dir>" codex`。
+    /// 与激活态采用同一份 baseURL / token / model / 全局+节点 TOML 派生口径，行为等价但不改用户真实 config.toml。
+    private func makeCodexLaunchCommand(config: ProxyConfiguration, profile: NodeProfile) -> String? {
+        let scheme = config.enableHTTPS ? "https" : "http"
+        let port = config.enableHTTPS ? config.effectiveHTTPSPort : config.port
+        let baseURL = "\(scheme)://\(config.host):\(port)/v1"
+
+        let globalTOML = profileStore.codexGlobalConfig.hasContent
+            ? profileStore.codexGlobalConfig.tomlText
+            : nil
+        let nodeTOML = profile.metadata.proxy.extraTOML?.nilIfBlank
+
+        let toml = CodexConfigManager.shared.makeStandaloneConfig(
+            baseURL: baseURL,
+            bearerToken: config.effectiveClientKey,
+            model: config.codexModel,
+            globalTOML: globalTOML,
+            nodeTOML: nodeTOML
+        )
+
+        guard let dir = NodeProfileStore.exportCodexHome(for: profile, configTOML: toml) else {
+            return nil
+        }
+        return "CODEX_HOME=\"\(dir)\" codex"
     }
 }

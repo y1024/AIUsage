@@ -22,16 +22,17 @@ extension ProxyManagementView {
                 ) {
                     showingSettingsEditor = true
                 }
-
-                actionBarButton(
-                    title: isSyncingCCSwitch ? L("Syncing", "同步中") : L("Sync cc-switch", "同步 cc-switch"),
-                    icon: "arrow.triangle.2.circlepath",
-                    tint: .secondary
-                ) {
-                    syncCCSwitch()
-                }
-                .disabled(isSyncingCCSwitch)
             }
+
+            // cc-switch 同步：Claude / Codex 两家族都支持（按当前家族读取对应 app_type 供应商）。
+            actionBarButton(
+                title: isSyncingCCSwitch ? L("Syncing", "同步中") : L("Sync cc-switch", "同步 cc-switch"),
+                icon: "arrow.triangle.2.circlepath",
+                tint: .secondary
+            ) {
+                syncCCSwitch()
+            }
+            .disabled(isSyncingCCSwitch)
 
             actionBarButton(
                 title: L("Import", "导入"),
@@ -99,8 +100,11 @@ extension ProxyManagementView {
     func syncCCSwitch() {
         guard !isSyncingCCSwitch else { return }
         isSyncingCCSwitch = true
+        let isCodex = family.isCodex
         Task { @MainActor in
-            let result = await viewModel.profileStore.importCCSwitchClaudeProfiles()
+            let result = isCodex
+                ? await viewModel.profileStore.importCCSwitchCodexProfiles()
+                : await viewModel.profileStore.importCCSwitchClaudeProfiles()
             importResult = result
             showImportResult = true
             viewModel.loadConfigurations()

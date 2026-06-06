@@ -455,14 +455,15 @@ UI 状态管理和激活事务：
 - 内部磁盘存储路径仍为 `global-config.json` / `codex-global-config.json`（与导出文件名解耦，避免迁移既有用户数据）。
 - UI 文案统一：中文「通用配置」，英文 `Common Config`（原 `Global Config`）。
 
-#### cc-switch 一键同步（Claude 家族）
+#### cc-switch 一键同步（Claude / Codex 双家族）
 
-从 [cc-switch](https://github.com/farion1231/cc-switch) 的本地 SQLite 库一键导入 Claude 供应商配置，落为 AIUsage 的 `anthropicDirect` 节点（`importCCSwitchClaudeProfiles(dbPath:)`）：
+从 [cc-switch](https://github.com/farion1231/cc-switch) 的本地 SQLite 库一键导入供应商配置，Claude → `anthropicDirect` 节点（`importCCSwitchClaudeProfiles(dbPath:)`），Codex → `codexProxy` 节点（`importCCSwitchCodexProfiles(dbPath:)`）：
 
-- **确定性 ID + upsert（关键）**：目标节点 id 由 cc-switch 的 `row.id` 经 `SHA256` 派生（`stableProfileId(forCCSwitchRowId:)`），**与导入时间无关**——同一条 cc-switch 配置无论何时、同步多少次，生成的节点 id 始终一致。已存在则按 upsert 更新（保留既有 `port` / `createdAt` / `sortOrder`，仅刷新内容），不再每次生成重复节点。`ImportResult` 区分 `succeeded`（新建）/ `updated`（已存在更新）/ `failed`。
-- **通用配置一并处理**：cc-switch 的公共配置文本按 Claude 通用配置（`GlobalConfig`）导入，已存在则跳过。
-- **后台 I/O（不卡主线程）**：SQLite 只读读取在 `Task.detached(priority:.userInitiated)` 后台执行（`readCCSwitchClaudeData` 等 `nonisolated static` 函数，产出 `Sendable` 的 `CCSwitchReadOutput`），`@MainActor` 主线程只做 JSON 解析与 profile upsert；同步期间 UI 显示进行中态（`isSyncingCCSwitch`）。
-- **入口**：仅 Claude 家族工具栏提供「同步 cc-switch」按钮（Codex 家族不含此入口）。
+- **确定性 ID + upsert（关键）**：目标节点 id 由 cc-switch 的 `row.id` 经 `SHA256` 派生（`deriveStableId(salt:rowId:)`，Claude / Codex 用不同盐避免互覆），**与导入时间无关**——同一条 cc-switch 配置无论何时、同步多少次，生成的节点 id 始终一致。已存在则按 upsert 更新（保留既有 `port` / `createdAt` / `sortOrder`，仅刷新内容），不再每次生成重复节点。`ImportResult` 区分 `succeeded`（新建）/ `updated`（已存在更新）/ `failed`。
+- **Codex 配置解析（`config.toml` 保真）**：cc-switch 的 Codex 供应商存于 `settings_config = { auth.OPENAI_API_KEY, config(=config.toml 文本) }`。`CodexConfigManager.parseImportedConfig(_:)` 解析这份 TOML：顶层 `model_provider` → 对应 `[model_providers.<id>]` 的 `base_url`（去 `/v1` 存 `upstreamBaseURL`）、顶层 `model`（存单模型）、`auth.OPENAI_API_KEY`（存 `upstreamAPIKey`）；其余用户配置（注释、`model_reasoning_effort`、`[mcp_servers.*]` 等）**剥离托管项后**（顶层 `model`/`model_provider` 与所有 `[model_providers.*]`）原样存入节点 `extraTOML`，激活时由 `injectManagedConfig` 重新注入指向本地代理。Codex 节点落盘 `settings = {}`（不写 Claude blob）。
+- **通用配置一并处理**：Claude 读 `common_config_claude`（JSON）→ `GlobalConfig`；Codex 读 `common_config_codex`（TOML 片段）→ `CodexGlobalConfig`；本地非空则跳过。
+- **后台 I/O（不卡主线程）**：SQLite 只读读取在 `Task.detached(priority:.userInitiated)` 后台执行（`readCCSwitchClaudeData` / `readCCSwitchCodexData` 等 `nonisolated static` 函数，按 `app_type` 复用 `readCCSwitchRawRows`，产出 `Sendable` 的 `CCSwitchReadOutput`），`@MainActor` 主线程只做 JSON/TOML 解析与 profile upsert；同步期间 UI 显示进行中态（`isSyncingCCSwitch`）。
+- **入口**：Claude 与 Codex 家族工具栏均提供「同步 cc-switch」按钮（`syncCCSwitch()` 按当前 `family` 走对应 `app_type`）。
 
 ### ProxyRuntimeService
 

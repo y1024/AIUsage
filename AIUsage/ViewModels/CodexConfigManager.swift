@@ -116,6 +116,29 @@ final class CodexConfigManager {
         codexConfigLog.info("Codex config.toml proxy block injected (provider=\(Self.providerId, privacy: .public), baseKeys=\(merged.topLevel.count), baseTables=\(merged.tables.count))")
     }
 
+    // MARK: - Standalone Config (CODEX_HOME launch command)
+
+    /// 生成一份独立的 config.toml 文本（**不写入** `~/.codex`），供「复制启动命令」的 CODEX_HOME 模式使用。
+    /// 注入与 `activate` 完全一致的受管理块 + 全局/节点 TOML 合并，但作用在空原文上；
+    /// 因此用 `CODEX_HOME=<dir> codex` 启动的 Codex 行为与激活态等价，且不污染用户真实 config.toml。
+    func makeStandaloneConfig(
+        baseURL: String,
+        bearerToken: String,
+        model: String,
+        globalTOML: String? = nil,
+        nodeTOML: String? = nil
+    ) -> String {
+        let merged = mergeBaseFragments(global: globalTOML ?? "", node: nodeTOML ?? "")
+        return injectManagedConfig(
+            into: "",
+            baseURL: baseURL,
+            bearerToken: bearerToken,
+            model: model,
+            baseTopLevel: merged.topLevel,
+            baseTables: merged.tables
+        )
+    }
+
     // MARK: - Deactivation
 
     /// 还原 config.toml：有备份则整文覆盖回原文并删除备份；无备份则剥离受管理块（必要时删文件）。
@@ -334,6 +357,116 @@ final class CodexConfigManager {
         for raw in block.components(separatedBy: "\n") {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("[") { return normalizedTableHeader(trimmed) }
+        }
+        return nil
+    }
+
+    // MARK: - Import Parsing (cc-switch / 外部 config.toml)
+
+    /// 从一份完整 config.toml（如 cc-switch 的 Codex 供应商配置）抽取导入所需信息。
+    struct ImportedCodexConfig {
+        /// 激活 provider（顶层 `model_provider` 指向的 `[model_providers.<id>]`）的 `base_url`，可能含 `/v1`。
+        var providerBaseURL: String?
+        /// 顶层 `model`。
+        var model: String?
+        /// 剥离 `model` / `model_provider` / 所有 `[model_providers.*]` 后的剩余 TOML
+        /// （保真用户其余配置：注释、`model_reasoning_effort`、`[mcp_servers.*]` 等）。
+        var extraTOML: String
+    }
+
+    /// 解析外部 config.toml：抽取激活 provider 的 `base_url`、顶层 `model`，并把其余用户配置
+    /// （去掉 AIUsage 托管的 `model` / `model_provider` / `[model_providers.*]`）整理为 extraTOML，
+    /// 供节点保真保存。激活时这些托管项由 `injectManagedConfig` 重新注入指向本地代理。
+    func parseImportedConfig(_ toml: String) -> ImportedCodexConfig {
+        var activeProvider: String?
+        var model: String?
+        var providerBaseURLs: [String: String] = [:]
+
+        var currentHeader: String?
+        for raw in toml.components(separatedBy: "\n") {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") {
+                currentHeader = normalizedTableHeader(trimmed)
+                continue
+            }
+            if currentHeader == nil {
+                if isTopLevelKey(trimmed, key: "model_provider") {
+                    activeProvider = tomlInlineStringValue(of: trimmed)
+                } else if isTopLevelKey(trimmed, key: "model") {
+                    model = tomlInlineStringValue(of: trimmed)
+                }
+            } else if let header = currentHeader,
+                      header.hasPrefix("model_providers."),
+                      isTopLevelKey(trimmed, key: "base_url") {
+                // 形如 model_providers.<id>(.env...)：取最外层 provider id（首段）。
+                let suffix = header.dropFirst("model_providers.".count)
+                let providerId = suffix.split(separator: ".", maxSplits: 1).first.map(String.init) ?? String(suffix)
+                if providerBaseURLs[providerId] == nil {
+                    providerBaseURLs[providerId] = tomlInlineStringValue(of: trimmed)
+                }
+            }
+        }
+
+        let baseURL: String?
+        if let active = activeProvider, let url = providerBaseURLs[active] {
+            baseURL = url
+        } else {
+            baseURL = providerBaseURLs.values.first
+        }
+
+        return ImportedCodexConfig(
+            providerBaseURL: baseURL,
+            model: model,
+            extraTOML: stripImportManagedKeys(from: toml)
+        )
+    }
+
+    /// 剥离顶层 `model` / `model_provider` 与所有 `[model_providers.*]` 表，保留其余原文（含注释）。
+    private func stripImportManagedKeys(from toml: String) -> String {
+        var result: [String] = []
+        var currentHeader: String?
+        var skippingTable = false
+        for raw in toml.components(separatedBy: "\n") {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") {
+                let header = normalizedTableHeader(trimmed)
+                currentHeader = header
+                if header == "model_providers" || header.hasPrefix("model_providers.") {
+                    skippingTable = true
+                    continue
+                }
+                skippingTable = false
+                result.append(raw)
+                continue
+            }
+            if skippingTable { continue }
+            if currentHeader == nil,
+               isTopLevelKey(trimmed, key: "model") || isTopLevelKey(trimmed, key: "model_provider") {
+                continue
+            }
+            result.append(raw)
+        }
+        return result.joined(separator: "\n")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
+    }
+
+    /// 取 `key = "value"` / `key = 'value'` 行的字符串值（去引号、basic string 反转义）。非字符串返回 nil。
+    private func tomlInlineStringValue(of trimmed: String) -> String? {
+        guard let eq = trimmed.firstIndex(of: "=") else { return nil }
+        let value = trimmed[trimmed.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+        if value.hasPrefix("\"") {
+            let afterQuote = value.dropFirst()
+            guard let end = afterQuote.firstIndex(of: "\"") else { return nil }
+            let inner = String(afterQuote[afterQuote.startIndex..<end])
+            return inner
+                .replacingOccurrences(of: "\\\"", with: "\"")
+                .replacingOccurrences(of: "\\\\", with: "\\")
+                .nilIfBlank
+        }
+        if value.hasPrefix("'") {
+            let afterQuote = value.dropFirst()
+            guard let end = afterQuote.firstIndex(of: "'") else { return nil }
+            return String(afterQuote[afterQuote.startIndex..<end]).nilIfBlank
         }
         return nil
     }

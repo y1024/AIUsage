@@ -99,6 +99,11 @@ class NodeProfileStore: ObservableObject {
     func save(_ profile: NodeProfile) -> Bool {
         ensureDirectoryExists()
         var p = profile
+        // Codex 节点的 settings（Claude settings.json blob）运行时不使用，落盘统一清空保持干净；
+        // 也顺带清理历史档案里残留的 Claude blob（下次保存即收敛）。
+        if p.metadata.nodeType.isCodex, !p.settings.isEmpty {
+            p.settings = [:]
+        }
         let isNew = !profiles.contains(where: { $0.id == p.id })
         if isNew && p.metadata.sortOrder == Int.max {
             // 新建/复制节点默认排到列表最前（取最小 sortOrder - 1）。
@@ -346,6 +351,81 @@ class NodeProfileStore: ObservableObject {
         return result
     }
 
+    /// 与 cc-switch 的 Codex 供应商「镜像同步」。Codex 配置存于 `settings_config = { auth.OPENAI_API_KEY,
+    /// config(=config.toml 文本) }`：解析出激活 provider 的 base_url、顶层 model、API Key，其余用户配置
+    /// （`model_reasoning_effort`、`[mcp_servers.*]` 等）保真存入节点 `extraTOML`。节点 id 由供应商 id 派生
+    /// 为确定性 UUID（codex 专用盐）+ upsert，重复同步不产生重复节点。SQLite 读取放后台线程。
+    func importCCSwitchCodexProfiles(dbPath: String? = nil) async -> ImportResult {
+        let path = dbPath ?? Self.defaultCCSwitchDBPath
+        let output = await Task.detached(priority: .userInitiated) {
+            Self.readCCSwitchCodexData(dbPath: path)
+        }.value
+
+        var result = ImportResult()
+
+        if output.dbMissing {
+            result.failed = 1
+            result.errors.append("cc-switch database not found: \(path)")
+            return result
+        }
+        if output.openFailed {
+            result.failed = 1
+            result.errors.append("failed to open cc-switch database")
+            return result
+        }
+        if output.rawRows.isEmpty {
+            result.errors.append("no cc-switch Codex providers found")
+            return result
+        }
+
+        var reservedPorts = Set<Int>()
+        let importDate = Date()
+        for raw in output.rawRows {
+            guard let row = Self.parseCodexRawRow(raw) else {
+                result.failed += 1
+                result.errors.append("\(raw.name.nilIfBlank ?? "cc-switch Codex"): invalid Codex config")
+                continue
+            }
+            let stableId = Self.stableCodexProfileId(forCCSwitchRowId: row.id)
+            let existing = profile(for: stableId)
+            let port: Int
+            if let existing {
+                port = existing.metadata.proxy.port
+            } else {
+                port = nextAvailablePort(startingAt: 4319, reserving: reservedPorts)
+                reservedPorts.insert(port)
+            }
+            let profile = Self.makeCodexProfile(
+                from: row,
+                id: stableId,
+                port: port,
+                existing: existing,
+                importDate: importDate
+            )
+            if save(profile) {
+                if existing == nil { result.succeeded += 1 } else { result.updated += 1 }
+            } else {
+                result.failed += 1
+                result.errors.append("\(row.name): save failed")
+            }
+        }
+
+        // cc-switch 的 Codex 通用配置（common_config_codex）为 TOML 片段；本地为空时导入。
+        if let commonTOML = output.commonConfigText?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !commonTOML.isEmpty {
+            if codexGlobalConfig.tomlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                codexGlobalConfig = CodexGlobalConfig(enabled: true, tomlText: commonTOML)
+                if saveCodexGlobalConfig() {
+                    result.importedCodexGlobalConfig = true
+                } else {
+                    result.errors.append("failed to save cc-switch Codex common config")
+                }
+            }
+        }
+
+        return result
+    }
+
     // MARK: - Batch Export
 
     @discardableResult
@@ -517,6 +597,42 @@ class NodeProfileStore: ObservableObject {
         }
     }
 
+    private static var codexHomeBaseDirectory: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent(".config/aiusage/codex-home")
+    }
+
+    /// 为 Codex 节点导出一个独立的 CODEX_HOME 目录（内含 `config.toml`），供 `CODEX_HOME=<dir> codex` 启动。
+    /// 与 Claude 的 `exportCleanSettings` 对称：不改用户真实 `~/.codex/config.toml`。
+    /// 成功返回**目录**路径（CODEX_HOME 指向目录而非文件），失败返回 nil。
+    /// config.toml 含 `experimental_bearer_token`，写入后限制为 0600。
+    @discardableResult
+    static func exportCodexHome(for profile: NodeProfile, configTOML: String) -> String? {
+        let allowedChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        let sanitizedName = profile.metadata.name.unicodeScalars
+            .map { allowedChars.contains($0) ? String($0) : "_" }
+            .joined()
+        let dirName = sanitizedName.isEmpty ? profile.id : sanitizedName
+        let dir = (codexHomeBaseDirectory as NSString).appendingPathComponent(dirName)
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        } catch {
+            storeLog.error("Failed to create codex-home directory: \(String(describing: error), privacy: .public)")
+            return nil
+        }
+
+        let filePath = (dir as NSString).appendingPathComponent("config.toml")
+        do {
+            try configTOML.write(toFile: filePath, atomically: true, encoding: .utf8)
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath)
+            return dir
+        } catch {
+            storeLog.error("Failed to export codex home for \(profile.metadata.name, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }
+
     /// 主线程解析后的 cc-switch 行（含已解码 JSON）。
     private struct CCSwitchClaudeRow {
         var id: String
@@ -525,6 +641,18 @@ class NodeProfileStore: ObservableObject {
         var isCurrent: Bool
         var createdAtMs: Int64?
         var meta: [String: Any]
+    }
+
+    /// 主线程解析后的 cc-switch Codex 行（config.toml 已抽取为结构化字段）。
+    private struct CCSwitchCodexRow {
+        var id: String
+        var name: String
+        var baseURL: String       // 已规范化（去 /v1）的上游地址
+        var apiKey: String
+        var model: String
+        var extraTOML: String?
+        var isCurrent: Bool
+        var createdAtMs: Int64?
     }
 
     /// 后台读取的原始行：只含 Sendable 标量/字符串，可安全跨线程回主线程再解析。
@@ -567,6 +695,23 @@ class NodeProfileStore: ObservableObject {
         return output
     }
 
+    /// 后台读取 cc-switch 的 Codex 供应商行与 Codex 通用配置（TOML 片段）。不触碰主线程状态。
+    nonisolated private static func readCCSwitchCodexData(dbPath: String) -> CCSwitchReadOutput {
+        var output = CCSwitchReadOutput()
+        guard FileManager.default.fileExists(atPath: dbPath) else {
+            output.dbMissing = true
+            return output
+        }
+        guard let db = openReadonlySQLiteDB(at: dbPath) else {
+            output.openFailed = true
+            return output
+        }
+        defer { sqlite3_close(db) }
+        output.rawRows = readCCSwitchRawRows(db: db, appType: "codex")
+        output.commonConfigText = readCCSwitchCommonConfigText(db: db, key: "common_config_codex")
+        return output
+    }
+
     nonisolated private static func openReadonlySQLiteDB(at path: String) -> OpaquePointer? {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
@@ -578,10 +723,15 @@ class NodeProfileStore: ObservableObject {
     }
 
     nonisolated private static func readCCSwitchClaudeRawRows(db: OpaquePointer) -> [CCSwitchRawRow] {
+        readCCSwitchRawRows(db: db, appType: "claude")
+    }
+
+    /// 按 app_type 读取 cc-switch 供应商行。appType 为编译期常量（claude / codex），无注入风险。
+    nonisolated private static func readCCSwitchRawRows(db: OpaquePointer, appType: String) -> [CCSwitchRawRow] {
         let sql = """
         SELECT id, name, settings_config, is_current, created_at, meta
         FROM providers
-        WHERE app_type = 'claude'
+        WHERE app_type = '\(appType)'
         ORDER BY sort_index, name
         """
         var stmt: OpaquePointer?
@@ -608,7 +758,12 @@ class NodeProfileStore: ObservableObject {
     }
 
     nonisolated private static func readCCSwitchClaudeCommonConfigText(db: OpaquePointer) -> String? {
-        let sql = "SELECT value FROM settings WHERE key = 'common_config_claude' LIMIT 1"
+        readCCSwitchCommonConfigText(db: db, key: "common_config_claude")
+    }
+
+    /// 读取 settings 表中某通用配置键的值。key 为编译期常量，无注入风险。
+    nonisolated private static func readCCSwitchCommonConfigText(db: OpaquePointer, key: String) -> String? {
+        let sql = "SELECT value FROM settings WHERE key = '\(key)' LIMIT 1"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
@@ -628,14 +783,46 @@ class NodeProfileStore: ObservableObject {
         )
     }
 
-    /// 由 cc-switch 供应商 id 派生确定性节点 id（SHA-256 → UUID 形态），保证多次同步命中同一节点。
-    private static func stableProfileId(forCCSwitchRowId rowId: String) -> String {
-        let digest = SHA256.hash(data: Data("aiusage.ccswitch.claude.\(rowId)".utf8))
+    /// 解析 cc-switch Codex 行：`settings_config = { auth.OPENAI_API_KEY, config:"<config.toml>" }`。
+    /// 用 CodexConfigManager 解析 config.toml 抽取 base_url / model / extraTOML。缺少 TOML 视为无效。
+    private static func parseCodexRawRow(_ raw: CCSwitchRawRow) -> CCSwitchCodexRow? {
+        guard let settingsConfig = jsonObject(from: raw.settingsText) else { return nil }
+        let auth = settingsConfig["auth"] as? [String: Any]
+        let apiKey = stringValue(auth?["OPENAI_API_KEY"]) ?? ""
+        guard let configTOML = stringValue(settingsConfig["config"]) else { return nil }
+
+        let parsed = CodexConfigManager.shared.parseImportedConfig(configTOML)
+        let baseURL = ClaudeProxyConfiguration.normalizeOpenAIBaseURL(parsed.providerBaseURL ?? "")
+
+        return CCSwitchCodexRow(
+            id: raw.id,
+            name: raw.name.nilIfBlank ?? "cc-switch Codex",
+            baseURL: baseURL,
+            apiKey: apiKey,
+            model: parsed.model ?? "",
+            extraTOML: parsed.extraTOML.nilIfBlank,
+            isCurrent: raw.isCurrent,
+            createdAtMs: raw.createdAtMs
+        )
+    }
+
+    /// 由 cc-switch 供应商 id + 家族盐派生确定性节点 id（SHA-256 → UUID 形态），保证多次同步命中同一节点。
+    /// Claude / Codex 用不同盐，避免两家族行 id 偶然相同时互相覆盖。
+    private static func deriveStableId(salt: String, rowId: String) -> String {
+        let digest = SHA256.hash(data: Data("\(salt).\(rowId)".utf8))
         let hex = digest.prefix(16).map { String(format: "%02X", Int($0)) }.joined()
         func seg(_ lo: Int, _ hi: Int) -> Substring {
             hex[hex.index(hex.startIndex, offsetBy: lo)..<hex.index(hex.startIndex, offsetBy: hi)]
         }
         return "\(seg(0, 8))-\(seg(8, 12))-\(seg(12, 16))-\(seg(16, 20))-\(seg(20, 32))"
+    }
+
+    private static func stableProfileId(forCCSwitchRowId rowId: String) -> String {
+        deriveStableId(salt: "aiusage.ccswitch.claude", rowId: rowId)
+    }
+
+    private static func stableCodexProfileId(forCCSwitchRowId rowId: String) -> String {
+        deriveStableId(salt: "aiusage.ccswitch.codex", rowId: rowId)
     }
 
     private static func makeProfile(
@@ -712,6 +899,41 @@ class NodeProfileStore: ObservableObject {
             proxy: proxy
         )
         return NodeProfile(metadata: metadata, settings: settings)
+    }
+
+    /// 由 cc-switch Codex 行建档：复用 Codex 默认（端口本地分配、Responses、不启 HTTPS），
+    /// 写入上游 base_url / API Key / 单模型 + extraTOML 保真。Codex 节点 settings 落盘恒空。
+    private static func makeCodexProfile(
+        from row: CCSwitchCodexRow,
+        id: String,
+        port: Int,
+        existing: NodeProfile?,
+        importDate: Date
+    ) -> NodeProfile {
+        var proxy = ProxySettings.defaultCodex
+        proxy.host = "127.0.0.1"
+        proxy.port = port
+        if !row.baseURL.isEmpty { proxy.upstreamBaseURL = row.baseURL }
+        proxy.upstreamAPIKey = row.apiKey
+        if !row.model.isEmpty {
+            proxy.defaultModel = row.model
+            proxy.modelMapping.bigModel.name = row.model
+        }
+        proxy.extraTOML = row.extraTOML
+
+        let createdAt = existing?.metadata.createdAt
+            ?? row.createdAtMs.flatMap { dateFromCCSwitchTimestamp($0) }
+            ?? importDate
+        let metadata = NodeProfile.Metadata(
+            id: id,
+            name: "\(row.name) (cc-switch)",
+            nodeType: .codexProxy,
+            createdAt: createdAt,
+            lastUsedAt: row.isCurrent ? importDate : existing?.metadata.lastUsedAt,
+            sortOrder: existing?.metadata.sortOrder ?? Int.max,
+            proxy: proxy
+        )
+        return NodeProfile(metadata: metadata, settings: [:])
     }
 
     nonisolated private static func sqliteText(_ stmt: OpaquePointer?, _ index: Int32) -> String? {

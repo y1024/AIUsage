@@ -173,6 +173,12 @@ struct NodeProfile: Identifiable, Equatable {
             defaultModel = ProxyConfiguration.ModelMapping.codexDefault.bigModel.name
         }
 
+        // Codex 节点不写 ~/.claude/settings.json（改写 ~/.codex/config.toml），落盘保持空 settings，
+        // 避免 profile 文件里塞一份运行时用不上的 Claude blob（$schema / env / model）。
+        if nodeType.isCodex {
+            return NodeProfile(metadata: Metadata(nodeType: nodeType, proxy: proxy), settings: [:])
+        }
+
         let envConfig = proxy.buildEnvConfig(nodeType: nodeType)
         var settings: [String: Any] = [
             "$schema": "https://json.schemastore.org/claude-code-settings.json",
@@ -206,6 +212,11 @@ struct NodeProfile: Identifiable, Equatable {
             lastUsedAt: config.lastUsedAt,
             proxy: proxy
         )
+
+        // Codex 节点落盘保持空 settings（同 defaultProfile）。
+        if config.nodeType.isCodex {
+            return NodeProfile(metadata: metadata, settings: [:])
+        }
 
         let envConfig = proxy.buildEnvConfig(nodeType: config.nodeType)
         var settings: [String: Any] = [
@@ -248,6 +259,11 @@ struct NodeProfile: Identifiable, Equatable {
     /// Rebuilds the `env` keys managed by the proxy from the current proxy settings,
     /// preserving any user-added env keys.
     mutating func syncEnvFromProxy() {
+        // Codex 节点不写 Claude settings.json，落盘保持空；配置全在 metadata.proxy / extraTOML。
+        if metadata.nodeType.isCodex {
+            settings = [:]
+            return
+        }
         let envConfig = metadata.proxy.buildEnvConfig(nodeType: metadata.nodeType)
         var env = settings["env"] as? [String: Any] ?? [:]
 
