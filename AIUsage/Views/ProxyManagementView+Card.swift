@@ -57,6 +57,27 @@ struct ConfigurationCardView: View, Equatable {
         }
     }
 
+    // MARK: - Activation Labels (node-type aware)
+    // Codex 节点写 ~/.codex/config.toml，Claude/OpenAI 代理节点写 ~/.claude/settings.json，
+    // 所以激活相关文案要按目标 CLI 区分，不能一律写「Claude」。
+
+    /// 激活所针对的目标 CLI 名称：Codex 节点为 "Codex"，其余为 "Claude"。
+    private var activationTargetName: String {
+        config.nodeType.isCodex ? "Codex" : "Claude"
+    }
+
+    private var applyLabel: String {
+        L("Apply to \(activationTargetName)", "接入 \(activationTargetName)")
+    }
+
+    private var disconnectLabel: String {
+        L("Disconnect \(activationTargetName)", "断开 \(activationTargetName)")
+    }
+
+    private var connectedUnavailableLabel: String {
+        L("Unavailable while connected to \(activationTargetName)", "接入 \(activationTargetName) 时不可用")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             nodeTypeBadge
@@ -108,9 +129,7 @@ struct ConfigurationCardView: View, Equatable {
                         isBusy: isBusy
                     ))
                     .disabled(isBusy)
-                    .instantTooltip(isActive
-                          ? L("Disconnect Claude", "断开 Claude")
-                          : L("Apply to Claude", "接入 Claude"))
+                    .instantTooltip(isActive ? disconnectLabel : applyLabel)
 
                     if config.needsProxyProcess {
                         Button(action: onToggleProxyOnly) {
@@ -122,7 +141,7 @@ struct ConfigurationCardView: View, Equatable {
                         .buttonStyle(.plain)
                         .disabled(isBusy || isActive)
                         .instantTooltip(isActive
-                              ? L("Unavailable while connected to Claude", "接入 Claude 时不可用")
+                              ? connectedUnavailableLabel
                               : isProxyOnlyRunning
                               ? L("Stop Proxy", "停止代理")
                               : L("Start Proxy", "启动代理"))
@@ -369,7 +388,7 @@ struct ConfigurationCardView: View, Equatable {
     private var cardContextMenu: some View {
         Button { onToggleActivation() } label: {
             Label(
-                isActive ? L("Disconnect Claude", "断开 Claude") : L("Apply to Claude", "接入 Claude"),
+                isActive ? disconnectLabel : applyLabel,
                 systemImage: isActive ? "stop.circle" : "power.circle"
             )
         }
@@ -379,7 +398,7 @@ struct ConfigurationCardView: View, Equatable {
             Button { onToggleProxyOnly() } label: {
                 Label(
                     isActive
-                        ? L("Unavailable while connected to Claude", "接入 Claude 时不可用")
+                        ? connectedUnavailableLabel
                         : isProxyOnlyRunning ? L("Stop Proxy", "停止代理") : L("Start Proxy", "启动代理"),
                     systemImage: "antenna.radiowaves.left.and.right"
                 )

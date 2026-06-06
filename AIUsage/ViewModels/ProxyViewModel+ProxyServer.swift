@@ -425,12 +425,26 @@ extension ProxyViewModel {
             config.defaultModel,
         ].first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "gpt-5-codex"
 
-        // OpenAI Responses 最小请求；max_output_tokens 下限为 16。
+        // Codex 连通性探测请求体。
+        // 注意：new-api / one-api 类中转（如 anyrouter）会校验入站是否为「合法 Codex 请求」，
+        // 仅当 `input` 为消息数组且携带 `include:["reasoning.encrypted_content"]`（真实 Codex CLI 的签名）
+        // 才放行；否则一律 HTTP 400 `invalid_responses_request`。纯字符串 input 或缺 include 都会被拒。
+        // 因此这里按真实 Codex 形态构造最小请求；max_output_tokens 下限为 16，用于压低探测成本。
         let body: [String: Any] = [
             "model": model,
-            "input": "ping",
-            "max_output_tokens": 16,
+            "input": [
+                [
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        ["type": "input_text", "text": "ping"]
+                    ],
+                ]
+            ],
+            "include": ["reasoning.encrypted_content"],
+            "store": false,
             "stream": false,
+            "max_output_tokens": 16,
         ]
 
         var request = URLRequest(url: url, timeoutInterval: 30)

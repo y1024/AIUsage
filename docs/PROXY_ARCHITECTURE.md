@@ -487,9 +487,10 @@ UI 状态管理和激活事务：
 | 家族 | 口径 | 端点 | 最小请求体 |
 |------|------|------|-----------|
 | Claude（`anthropicDirect` / `openaiProxy`） | Anthropic Messages | `/v1/messages` | `{model, max_tokens:8, stream:false, messages:[ping]}` + `anthropic-version` 头 |
-| Codex（`codexProxy`） | OpenAI Responses | `/v1/responses` | `{model, input:"ping", max_output_tokens:16, stream:false}`（`max_output_tokens` 下限 16） |
+| Codex（`codexProxy`） | OpenAI Responses | `/v1/responses` | `{model, input:[消息数组], include:["reasoning.encrypted_content"], store:false, stream:false, max_output_tokens:16}` |
 
 - **端到端**：节点若 `needsProxyProcess`，测试会临时拉起代理进程（`startProxyForConnectivityTest`，结束后按「是否本测试启动」决定是否回收 `stopProxyForConnectivityTest`），请求打到本地代理 `displayURL` + `effectiveClientKey`，从而验证「客户端 key → 本地代理 → 上游 key」整条链路；否则直连上游。Codex 经本地代理 `/v1/responses` 忠实透传，与真实使用路径一致。
+- **Codex 探测必须贴近真实 CLI 形态**：`new-api` / `one-api` 类中转（如 anyrouter）会校验入站是否为「合法 Codex 请求」——只有 `input` 为消息数组 **且** 携带 `include:["reasoning.encrypted_content"]`（真实 Codex CLI 的请求签名）才放行，否则一律 `HTTP 400 invalid_responses_request`。因此探测体不能用极简的 `input:"ping"` 字符串，而是按真实 Codex 形态构造（`stream:false` 仍能命中代理的非流式 handler 拿到真实上游状态码，`max_output_tokens:16` 用于压低探测成本）。注意 `get_channel_failed`（模型负载已达上限）等属上游容量问题，会被如实透出，而非误报为格式错误。
 - **鉴权**：同时下发 `Authorization: Bearer <key>` 与 `x-api-key`，覆盖两类上游/代理鉴权习惯（与 `*ProxyService.authenticate` 对齐）。
 - **脱敏**：返回 / 错误文本经 `sanitizedConnectivityMessage` 用**预编译静态正则**（`connectivityRedactionRules`，避免每次测试重复编译）抹掉 `sk-` / `Bearer` / `ANTHROPIC_AUTH_TOKEN` / `x-api-key`，截断 500 字符后才进 UI。
 - **语义化错误**：失败包装为 `ProxyConnectivityError`（`.invalidURL` / `.invalidResponse` / `.httpStatus(code, body)`，实现 `LocalizedError`），不裸抛 `URLError` / `NSError`。
