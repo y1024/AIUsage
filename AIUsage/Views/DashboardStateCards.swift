@@ -117,7 +117,7 @@ struct SkeletonBlock: View {
 struct LoadingAccountCard: View {
     let providerId: String
     let title: String
-    let subtitle: String
+    let accountLabel: String?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -131,9 +131,6 @@ struct LoadingAccountCard: View {
                     Text(title)
                         .font(.headline)
                         .bold()
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -157,9 +154,20 @@ struct LoadingAccountCard: View {
 
             Spacer(minLength: 0)
 
-            Text(L("Fetching latest usage…", "正在获取最新用量…"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack {
+                if let accountLabel {
+                    Label(accountLabel, systemImage: accountIdentityIcon(for: accountLabel))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Text(L("Fetching latest usage…", "正在获取最新用量…"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(minHeight: 180)
         .padding()
@@ -180,7 +188,7 @@ struct LoadingAccountCard: View {
 struct NeedsConnectionCard: View {
     let providerId: String
     let title: String
-    let subtitle: String
+    let accountLabel: String?
     let onConnect: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
@@ -195,9 +203,6 @@ struct NeedsConnectionCard: View {
                     Text(title)
                         .font(.headline)
                         .bold()
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
@@ -226,11 +231,22 @@ struct NeedsConnectionCard: View {
 
             Spacer(minLength: 0)
 
-            Button(action: onConnect) {
-                Label(L("Connect account", "连接账号"), systemImage: "link.badge.plus")
+            HStack {
+                if let accountLabel {
+                    Label(accountLabel, systemImage: accountIdentityIcon(for: accountLabel))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button(action: onConnect) {
+                    Label(L("Connect account", "连接账号"), systemImage: "link.badge.plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
         }
         .frame(minHeight: 180)
         .padding()

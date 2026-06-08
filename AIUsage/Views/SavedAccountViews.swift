@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SavedAccountCard: View {
     let account: ProviderAccountEntry
@@ -8,6 +9,7 @@ struct SavedAccountCard: View {
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingDetail = false
+    @State private var showingNoteEditor = false
     @State private var isRefreshing = false
     private var hasSecureCredential: Bool {
         account.storedAccount?.credentialId != nil
@@ -24,10 +26,6 @@ struct SavedAccountCard: View {
                     Text(account.cardTitle)
                         .font(.headline)
                         .bold()
-
-                    Text(account.cardSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
                     if let accountLabel = account.footerAccountLabel {
                         Label(accountLabel, systemImage: accountIdentityIcon(for: accountLabel))
@@ -136,10 +134,46 @@ struct SavedAccountCard: View {
                 .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05), lineWidth: 1)
         )
         .onTapGesture { showingDetail = true }
+        .contextMenu {
+            Button {
+                showingDetail = true
+            } label: {
+                Label(L("Open Details", "查看详情"), systemImage: "doc.text.magnifyingglass")
+            }
+
+            Button {
+                showingNoteEditor = true
+            } label: {
+                Label(L("Edit Note", "编辑注释"), systemImage: "square.and.pencil")
+            }
+
+            if let accountLabel = account.footerAccountLabel {
+                Button {
+                    copyToPasteboard(accountLabel)
+                } label: {
+                    Label(L("Copy Account", "复制账号"), systemImage: "doc.on.doc")
+                }
+            }
+        }
         .sheet(isPresented: $showingDetail) {
             SavedAccountDetailView(account: account, onReconnect: onReconnect)
                 .environmentObject(appState)
         }
+        .sheet(isPresented: $showingNoteEditor) {
+            AccountNoteEditorView(
+                providerTitle: account.providerTitle,
+                accountLabel: account.accountPrimaryLabel,
+                note: account.accountNote
+            ) { updatedNote in
+                appState.updateAccountNote(for: account, note: updatedNote)
+            }
+            .environmentObject(appState)
+        }
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 }
 
@@ -168,10 +202,6 @@ struct SavedAccountDetailView: View {
                     Text(account.cardTitle)
                         .font(.title2)
                         .bold()
-
-                    Text(account.cardSubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
 
                     if let accountLabel = account.footerAccountLabel {
                         Label(accountLabel, systemImage: accountIdentityIcon(for: accountLabel))
@@ -295,7 +325,7 @@ struct SavedAccountDetailView: View {
         .sheet(isPresented: $showingNoteEditor) {
             AccountNoteEditorView(
                 providerTitle: account.providerTitle,
-                accountLabel: account.cardTitle,
+                accountLabel: account.accountPrimaryLabel,
                 note: account.accountNote
             ) { updatedNote in
                 appState.updateAccountNote(for: account, note: updatedNote)

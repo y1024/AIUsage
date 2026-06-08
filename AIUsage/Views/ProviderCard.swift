@@ -16,6 +16,7 @@ struct ProviderCard: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovered = false
     @State private var showingDetail = false
+    @State private var showingNoteEditor = false
     @State private var activationMessage: String?
     @State private var showActivationAlert = false
 
@@ -194,6 +195,14 @@ struct ProviderCard: View {
                 Label(L("Open Details", "查看详情"), systemImage: "doc.text.magnifyingglass")
             }
 
+            if let accountEntry, accountEntry.canEditNote {
+                Button {
+                    showingNoteEditor = true
+                } label: {
+                    Label(L("Edit Note", "编辑注释"), systemImage: "square.and.pencil")
+                }
+            }
+
             Button {
                 Task {
                     if let refreshAction {
@@ -235,6 +244,18 @@ struct ProviderCard: View {
                 accountDisplayOverride: footerAccountLabelOverride,
                 accountEntry: accountEntry
             )
+        }
+        .sheet(isPresented: $showingNoteEditor) {
+            if let accountEntry {
+                AccountNoteEditorView(
+                    providerTitle: accountEntry.providerTitle,
+                    accountLabel: accountEntry.accountPrimaryLabel,
+                    note: accountEntry.accountNote
+                ) { updatedNote in
+                    appState.updateAccountNote(for: accountEntry, note: updatedNote)
+                }
+                .environmentObject(appState)
+            }
         }
         .alert(L("Account Switch", "账号切换"), isPresented: $showActivationAlert) {
             Button("OK") { activationMessage = nil }

@@ -368,30 +368,21 @@ private struct SubscriptionRowHeightKey: PreferenceKey {
 }
 
 // MARK: - Codex Global Config Section
-// 对齐 Claude 的双层模型：
-//  1) 通用配置基底片段（CodexGlobalConfig）—— 激活节点/订阅时按顶层键合并写入 config.toml，
-//     节点 extraTOML 优先级更高；带 Merge 开关，可编辑原文 TOML（高亮 + 轻量检查）。
-//  2) config.toml 实时文件入口 —— 仅查看/编辑磁盘上真实生效的 ~/.codex/config.toml。
+// 通用配置基底片段（CodexGlobalConfig）—— 激活节点/订阅时按顶层键合并写入 config.toml，
+// 节点 extraTOML 优先级更高；带 Merge 开关，可编辑原文 TOML（高亮 + 轻量检查）。
+// 实时 ~/.codex/config.toml 文件入口统一放在 ProxyManagementView 顶部工具栏。
 
 struct CodexGlobalConfigSection: View {
     @ObservedObject private var store = NodeProfileStore.shared
     @State private var showingFragmentEditor = false
-    @State private var showingLiveFileEditor = false
 
     private var fragment: CodexGlobalConfig { store.codexGlobalConfig }
     private var keyCount: Int { CodexGlobalConfig.topLevelEntryCount(in: fragment.tomlText) }
-    private var isManaged: Bool { CodexConfigManager.shared.isManaged }
 
     var body: some View {
-        VStack(spacing: 10) {
-            fragmentCard
-            liveFileRow
-        }
+        fragmentCard
         .sheet(isPresented: $showingFragmentEditor) {
             CodexGlobalConfigEditorView(store: store)
-        }
-        .sheet(isPresented: $showingLiveFileEditor) {
-            CodexConfigEditorView()
         }
     }
 
@@ -453,45 +444,6 @@ struct CodexGlobalConfigSection: View {
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-        )
-    }
-
-    // config.toml 实时文件入口（查看磁盘真实文件）
-    private var liveFileRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L("config.toml (live file)", "config.toml（实时文件）"))
-                    .font(.caption.weight(.semibold))
-                Text(isManaged
-                     ? L("Proxy block injected (auto-managed)", "已注入代理块（自动管理）")
-                     : L("View the actual file on disk", "查看磁盘上真实生效的文件"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Button {
-                showingLiveFileEditor = true
-            } label: {
-                Text(L("Open", "查看"))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.primary.opacity(0.06)))
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.primary.opacity(0.03))
         )
     }
 }

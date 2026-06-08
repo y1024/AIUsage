@@ -91,7 +91,7 @@ struct ProviderDetailView: View {
             if let accountEntry {
                 AccountNoteEditorView(
                     providerTitle: accountEntry.providerTitle,
-                    accountLabel: accountEntry.cardTitle,
+                    accountLabel: accountEntry.accountPrimaryLabel,
                     note: accountEntry.accountNote
                 ) { updatedNote in
                     appState.updateAccountNote(for: accountEntry, note: updatedNote)
@@ -248,10 +248,6 @@ struct ProviderDetailView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(accountEntry.cardTitle)
                         .font(.headline)
-
-                    Text(accountEntry.cardSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
                     if let accountLabel = detailAccountLabel {
                         Label(accountLabel, systemImage: accountIdentityIcon(for: accountLabel))

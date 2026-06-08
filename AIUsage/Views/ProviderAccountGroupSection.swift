@@ -152,7 +152,7 @@ struct ProviderAccountGroupSection: View {
                 NeedsConnectionCard(
                     providerId: account.providerId,
                     title: account.cardTitle,
-                    subtitle: account.cardSubtitle,
+                    accountLabel: account.footerAccountLabel,
                     onConnect: onAddAccount
                 )
             } else {
@@ -164,7 +164,7 @@ struct ProviderAccountGroupSection: View {
             LoadingAccountCard(
                 providerId: account.providerId,
                 title: account.cardTitle,
-                subtitle: account.cardSubtitle
+                accountLabel: account.footerAccountLabel
             )
         } else {
             SavedAccountCard(account: account, onReconnect: { onAddAccount() })
@@ -336,7 +336,6 @@ struct ManagedProviderAccountCard: View {
         ProviderCard(
             provider: provider,
             titleOverride: account.cardTitle,
-            subtitleOverride: account.cardSubtitle,
             footerAccountLabelOverride: account.footerAccountLabel,
             accountEntry: account,
             refreshAction: refreshThisAccount

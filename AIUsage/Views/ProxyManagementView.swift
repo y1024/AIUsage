@@ -80,7 +80,7 @@ struct ProxyManagementView: View {
                         actionBar
                         summaryStrip
                         if family.isCodex {
-                            // Codex 的「通用配置」就是 live config.toml 本体（唯一编辑入口，置顶）。
+                            // Codex 通用配置只管理激活时合并进 config.toml 的片段；实时文件入口统一放在顶部工具栏。
                             CodexGlobalConfigSection()
                             // 统一切换器（订阅账号 + API 节点，单一互斥激活）。
                             if !codexSubscriptionEntries.isEmpty {
@@ -134,7 +134,11 @@ struct ProxyManagementView: View {
             Text(importResultMessage(result))
         }
         .sheet(isPresented: $showingSettingsEditor) {
-            LocalSettingsEditorView()
+            if family.isCodex {
+                CodexConfigEditorView()
+            } else {
+                LocalSettingsEditorView()
+            }
         }
         .sheet(isPresented: $showingNewConfigEditor) {
             if family.isCodex {
@@ -247,30 +251,30 @@ struct ProxyManagementView: View {
             }
             .buttonStyle(.plain)
 
-            if !family.isCodex {
-                Button(action: { syncCCSwitch() }) {
-                    HStack {
-                        if isSyncingCCSwitch {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                        }
-                        Text(isSyncingCCSwitch ? L("Syncing cc-switch", "正在同步 cc-switch") : L("Sync cc-switch", "同步 cc-switch"))
+            Button(action: { syncCCSwitch() }) {
+                HStack {
+                    if isSyncingCCSwitch {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "tray.and.arrow.down.fill")
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .background(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
-                    .foregroundStyle(.primary)
-                    .clipShape(Capsule())
-                    .overlay(
-                        Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
-                    )
+                    Text(isSyncingCCSwitch ? L("Importing cc-switch", "正在导入 cc-switch") : L("Import cc-switch", "导入 cc-switch"))
                 }
-                .buttonStyle(.plain)
-                .disabled(isSyncingCCSwitch)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+                .background(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
+                .foregroundStyle(.primary)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
             }
+            .buttonStyle(.plain)
+            .disabled(isSyncingCCSwitch)
+            .help(L("Import nodes and common config from cc-switch.", "从 cc-switch 导入节点和通用配置。"))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

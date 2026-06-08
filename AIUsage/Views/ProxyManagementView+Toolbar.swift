@@ -2,7 +2,7 @@ import SwiftUI
 import QuotaBackend
 
 // MARK: - ProxyManagementView Toolbar & Summary
-// 顶部工具栏（导入/导出/新建/settings.json）与节点汇总条（节点数/激活/请求/成功率/Token/费用）。
+// 顶部工具栏（cc-switch 导入/实时配置文件/节点导入导出/新建）与节点汇总条。
 // 与主视图分离以控制单文件规模；依赖主视图的 @State 与过滤属性（family-scoped）。
 
 extension ProxyManagementView {
@@ -10,91 +10,190 @@ extension ProxyManagementView {
     // MARK: - Action Bar
 
     var actionBar: some View {
-        HStack(spacing: 10) {
-            Spacer()
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                ccSwitchImportButton
+                liveConfigFileButton
 
-            // Codex 的 config.toml 编辑入口统一收敛到下方「通用配置」卡片，避免与工具栏按钮重复。
-            if !family.isCodex {
-                actionBarButton(
-                    title: L("settings.json", "settings.json"),
-                    icon: "doc.text.fill",
-                    tint: .secondary
-                ) {
-                    showingSettingsEditor = true
+                Spacer(minLength: 16)
+
+                importNodesButton
+                exportNodesButton
+                newNodeButton
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    ccSwitchImportButton
+                    liveConfigFileButton
+                    Spacer(minLength: 0)
+                }
+
+                HStack(spacing: 10) {
+                    importNodesButton
+                    exportNodesButton
+                    Spacer(minLength: 8)
+                    newNodeButton
                 }
             }
-
-            // cc-switch 同步：Claude / Codex 两家族都支持（按当前家族读取对应 app_type 供应商）。
-            actionBarButton(
-                title: isSyncingCCSwitch ? L("Syncing", "同步中") : L("Sync cc-switch", "同步 cc-switch"),
-                icon: "arrow.triangle.2.circlepath",
-                tint: .secondary
-            ) {
-                syncCCSwitch()
-            }
-            .disabled(isSyncingCCSwitch)
-
-            actionBarButton(
-                title: L("Import", "导入"),
-                icon: "square.and.arrow.down",
-                tint: .secondary
-            ) {
-                showingImporter = true
-            }
-
-            actionBarButton(
-                title: L("Export", "导出"),
-                icon: "square.and.arrow.up",
-                tint: .secondary
-            ) {
-                exportSelectedIds = Set(displayConfigs.map(\.id))
-                showingExporter = true
-            }
-            .disabled(displayConfigs.isEmpty)
-
-            actionBarButton(
-                title: L("New Node", "新建节点"),
-                icon: "plus.circle.fill",
-                tint: .accentColor,
-                prominent: true
-            ) {
-                showingNewConfigEditor = true
-            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(actionBarBackground)
+        .overlay(actionBarBorder)
+    }
+
+    private var ccSwitchImportButton: some View {
+        actionBarButton(
+            title: isSyncingCCSwitch ? L("Importing", "导入中") : L("Import cc-switch", "导入 cc-switch"),
+            icon: isSyncingCCSwitch ? nil : "tray.and.arrow.down.fill",
+            role: .secondary,
+            help: L(
+                "Import nodes and common config from cc-switch.",
+                "从 cc-switch 导入节点和通用配置。"
+            )
+        ) {
+            syncCCSwitch()
+        }
+        .disabled(isSyncingCCSwitch)
+    }
+
+    private var liveConfigFileButton: some View {
+        actionBarButton(
+            title: family.isCodex ? "config.toml" : "settings.json",
+            icon: "doc.text.magnifyingglass",
+            role: .file,
+            help: family.isCodex
+                ? L("Open the live Codex config.toml file.", "打开 Codex 当前生效的 config.toml 文件。")
+                : L("Open the live Claude settings.json file.", "打开 Claude Code 当前生效的 settings.json 文件。")
+        ) {
+            showingSettingsEditor = true
+        }
+    }
+
+    private var importNodesButton: some View {
+        actionBarButton(
+            title: L("Import Nodes", "导入节点"),
+            icon: "square.and.arrow.down",
+            role: .secondary,
+            help: L("Import node profiles from JSON or a folder.", "从 JSON 或文件夹导入节点配置。")
+        ) {
+            showingImporter = true
+        }
+    }
+
+    private var exportNodesButton: some View {
+        actionBarButton(
+            title: L("Export Nodes", "导出节点"),
+            icon: "square.and.arrow.up",
+            role: .secondary,
+            help: L("Export the nodes shown in this view.", "导出当前视图中的节点。")
+        ) {
+            exportSelectedIds = Set(displayConfigs.map(\.id))
+            showingExporter = true
+        }
+        .disabled(displayConfigs.isEmpty)
+    }
+
+    private var newNodeButton: some View {
+        actionBarButton(
+            title: L("New Node", "新建节点"),
+            icon: "plus.circle.fill",
+            role: .primary,
+            help: L("Create a new proxy node.", "新建一个代理节点。")
+        ) {
+            showingNewConfigEditor = true
+        }
+    }
+
+    private enum ActionBarButtonRole {
+        case secondary
+        case file
+        case primary
     }
 
     private func actionBarButton(
         title: String,
-        icon: String,
-        tint: Color,
-        prominent: Bool = false,
+        icon: String?,
+        role: ActionBarButtonRole,
+        help: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
+            HStack(spacing: 6) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 14)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 14)
+                }
+
                 Text(title)
                     .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
             }
-            .foregroundStyle(prominent ? .white : tint)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .foregroundStyle(actionButtonForeground(role))
+            .padding(.horizontal, 11)
+            .frame(minHeight: 32)
             .background(
-                Capsule().fill(
-                    prominent
-                        ? AnyShapeStyle(Color.accentColor)
-                        : AnyShapeStyle(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.05))
-                )
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(actionButtonBackground(role))
             )
             .overlay(
-                Capsule().stroke(
-                    prominent ? Color.clear : Color.primary.opacity(0.08),
-                    lineWidth: 0.5
-                )
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(actionButtonBorder(role), lineWidth: 0.5)
             )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private var actionBarBackground: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.78 : 0.94))
+    }
+
+    private var actionBarBorder: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.06), lineWidth: 1)
+    }
+
+    private func actionButtonForeground(_ role: ActionBarButtonRole) -> Color {
+        switch role {
+        case .primary:
+            return .white
+        case .file:
+            return family.isCodex ? Color.indigo : Color.blue
+        case .secondary:
+            return .primary
+        }
+    }
+
+    private func actionButtonBackground(_ role: ActionBarButtonRole) -> Color {
+        switch role {
+        case .primary:
+            return Color.accentColor
+        case .file:
+            return (family.isCodex ? Color.indigo : Color.blue).opacity(colorScheme == .dark ? 0.18 : 0.10)
+        case .secondary:
+            return colorScheme == .dark ? Color.white.opacity(0.075) : Color.primary.opacity(0.045)
+        }
+    }
+
+    private func actionButtonBorder(_ role: ActionBarButtonRole) -> Color {
+        switch role {
+        case .primary:
+            return Color.white.opacity(colorScheme == .dark ? 0.18 : 0.12)
+        case .file:
+            return (family.isCodex ? Color.indigo : Color.blue).opacity(colorScheme == .dark ? 0.30 : 0.18)
+        case .secondary:
+            return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08)
+        }
     }
 
     func syncCCSwitch() {

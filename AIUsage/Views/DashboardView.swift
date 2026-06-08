@@ -366,7 +366,7 @@ struct DashboardView: View {
                 NeedsConnectionCard(
                     providerId: entry.providerId,
                     title: entry.cardTitle,
-                    subtitle: entry.cardSubtitle,
+                    accountLabel: entry.footerAccountLabel,
                     onConnect: { appState.selectedSection = .providers }
                 )
             } else {
@@ -378,7 +378,7 @@ struct DashboardView: View {
             LoadingAccountCard(
                 providerId: entry.providerId,
                 title: entry.cardTitle,
-                subtitle: entry.cardSubtitle
+                accountLabel: entry.footerAccountLabel
             )
         } else {
             SavedAccountCard(account: entry, onReconnect: { appState.selectedSection = .providers })
