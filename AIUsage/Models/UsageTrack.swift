@@ -25,9 +25,9 @@ enum UsageTrack: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .combined:     return L("Combined", "合计")
-        case .proxy:        return L("Proxy", "代理")
-        case .nonProxy:     return L("Non-Proxy", "非代理")
+        case .combined:     return L("Combined", "合计", key: "usage_track.combined")
+        case .proxy:        return L("Proxy", "代理", key: "usage_track.proxy")
+        case .nonProxy:     return L("Non-Proxy", "非代理", key: "usage_track.non_proxy")
         }
     }
 

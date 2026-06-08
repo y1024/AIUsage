@@ -1282,6 +1282,11 @@
 /* Views/ProvidersView.swift */
 "providers.search.placeholder" = "搜索账号...";
 
+/* Models/UsageTrack.swift - Track labels */
+"usage_track.combined" = "合计";
+"usage_track.proxy" = "代理";
+"usage_track.non_proxy" = "非代理";
+
 /* Views/ProxyConfigEditorView.swift - Tab labels */
 "Proxy" = "代理设置";
 "Settings" = "可视化配置";

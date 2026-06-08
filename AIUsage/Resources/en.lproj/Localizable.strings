@@ -1282,6 +1282,11 @@
 /* Views/ProvidersView.swift */
 "providers.search.placeholder" = "Search accounts...";
 
+/* Models/UsageTrack.swift - Track labels */
+"usage_track.combined" = "Combined";
+"usage_track.proxy" = "Proxy";
+"usage_track.non_proxy" = "Non-Proxy";
+
 /* Views/ProxyConfigEditorView.swift - Tab labels */
 "Proxy" = "Proxy";
 "Settings" = "Settings";
