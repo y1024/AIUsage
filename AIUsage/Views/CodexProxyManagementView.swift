@@ -99,7 +99,11 @@ struct CodexSubscriptionSection: View {
                 ForEach(Array(ordered.enumerated()), id: \.element.id) { index, entry in
                     let isDragging = draggingId == entry.id
                     subscriptionRow(entry)
-                        .background(rowHeightReader(for: entry.id))
+                        .background {
+                            if draggingId != nil {
+                                rowHeightReader(for: entry.id)
+                            }
+                        }
                         .offset(y: rowOffset(index: index, id: entry.id, srcIdx: srcIdx, target: target))
                         .scaleEffect(isDragging ? 1.02 : 1, anchor: .center)
                         .shadow(color: .black.opacity(isDragging ? 0.22 : 0),
@@ -119,7 +123,15 @@ struct CodexSubscriptionSection: View {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
-        .onPreferenceChange(SubscriptionRowHeightKey.self) { rowHeights = $0 }
+        .onPreferenceChange(SubscriptionRowHeightKey.self) { heights in
+            guard draggingId != nil, rowHeights != heights else { return }
+            rowHeights = heights
+        }
+        .onChange(of: draggingId) { _, id in
+            if id == nil, !rowHeights.isEmpty {
+                rowHeights.removeAll()
+            }
+        }
         .sheet(item: $editingNoteEntry) { entry in
             AccountNoteEditorView(
                 providerTitle: entry.providerTitle,

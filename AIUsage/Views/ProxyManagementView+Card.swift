@@ -587,32 +587,10 @@ struct ProxyActivationToggleStyle: ToggleStyle {
 
 private struct InstantTooltip: ViewModifier {
     let text: String
-    @State private var isHovering = false
 
     func body(content: Content) -> some View {
         content
-            .overlay(alignment: .bottom) {
-                if isHovering {
-                    Text(text)
-                        .font(.caption2)
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(Color.black.opacity(0.8)))
-                        .offset(y: 26)
-                        .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .top)))
-                        .zIndex(100)
-                        // 关键：浮层永不参与命中测试，避免盖住按钮导致无法再次点击。
-                        .allowsHitTesting(false)
-                }
-            }
-            .onHover { hovering in
-                withAnimation(.easeOut(duration: 0.15)) {
-                    isHovering = hovering
-                }
-            }
+            .help(text)
     }
 }
 

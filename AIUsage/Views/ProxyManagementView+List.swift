@@ -64,7 +64,11 @@ extension ProxyManagementView {
                             }
                         )
                         .equatable()
-                        .background(nodeRowHeightReader(for: config.id))
+                        .background {
+                            if draggingConfigId != nil {
+                                nodeRowHeightReader(for: config.id)
+                            }
+                        }
                         .padding(.vertical, 4)
 
                         if isSelected && config.needsProxyProcess {
@@ -84,7 +88,15 @@ extension ProxyManagementView {
                     .animation(.interactiveSpring(response: 0.30, dampingFraction: 0.85), value: draggingConfigId)
                 }
             }
-            .onPreferenceChange(NodeRowHeightKey.self) { nodeRowHeights = $0 }
+            .onPreferenceChange(NodeRowHeightKey.self) { heights in
+                guard draggingConfigId != nil, nodeRowHeights != heights else { return }
+                nodeRowHeights = heights
+            }
+            .onChange(of: draggingConfigId) { _, id in
+                if id == nil, !nodeRowHeights.isEmpty {
+                    nodeRowHeights.removeAll()
+                }
+            }
         }
         .padding(16)
         .background(
