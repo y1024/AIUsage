@@ -122,17 +122,27 @@ struct ProviderPickerView: View {
 
                 if !items.isEmpty {
                     HStack(spacing: 8) {
-                        Button(L("Select All", "全选")) {
+                        Button {
                             selection = Set(items.map(\.id))
+                        } label: {
+                            ProviderActionLabel(
+                                title: L("Select All", "全选"),
+                                systemImage: "checkmark.circle"
+                            )
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.plain)
+                        .disabled(selection.count == items.count)
 
-                        Button(L("Clear", "清空")) {
+                        Button {
                             selection.removeAll()
+                        } label: {
+                            ProviderActionLabel(
+                                title: L("Clear", "清空"),
+                                systemImage: "xmark.circle"
+                            )
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.plain)
+                        .disabled(selection.isEmpty)
                     }
                     .font(.subheadline)
                 }
@@ -152,7 +162,10 @@ struct ProviderPickerView: View {
                 Spacer()
 
                 if !items.isEmpty {
-                    searchField
+                    ProviderSearchControl(
+                        placeholder: L("Search apps", "搜索应用"),
+                        text: $searchText
+                    )
                         .frame(maxWidth: 260)
                 }
             }
@@ -222,10 +235,17 @@ struct ProviderPickerView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
 
-            Button(L("Close", "关闭")) {
+            Button {
                 close()
+            } label: {
+                ProviderActionLabel(
+                    title: L("Close", "关闭"),
+                    systemImage: "xmark",
+                    style: .primary,
+                    minWidth: 96
+                )
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.plain)
 
             Spacer()
         }
@@ -249,10 +269,16 @@ struct ProviderPickerView: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
 
-            Button(L("Clear Search", "清空搜索")) {
+            Button {
                 searchText = ""
+            } label: {
+                ProviderActionLabel(
+                    title: L("Clear Search", "清空搜索"),
+                    systemImage: "xmark.circle",
+                    minWidth: 102
+                )
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
 
             Spacer()
         }
@@ -261,24 +287,58 @@ struct ProviderPickerView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: footerStatusIcon)
+                    .font(.system(size: 12, weight: .semibold))
+
+                Text(footerStatusText)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isSubmitDisabled ? Color.secondary : Color.accentColor)
+
+            Spacer(minLength: 16)
+
             if mode == .add || mode == .manage {
-                Button(L("Cancel", "取消")) {
+                Button {
                     close()
+                } label: {
+                    ProviderActionLabel(
+                        title: L("Cancel", "取消"),
+                        systemImage: "xmark",
+                        minWidth: 82
+                    )
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
             }
 
-            Spacer()
-
-            Button(submitButtonTitle) {
+            Button {
                 submit()
+            } label: {
+                ProviderActionLabel(
+                    title: submitButtonTitle,
+                    systemImage: submitButtonIcon,
+                    style: .primary,
+                    minWidth: 132
+                )
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.plain)
             .disabled(isSubmitDisabled)
+            .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.vertical, 13)
+        .background(
+            Rectangle()
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.35 : 0.55))
+                        .frame(height: 0.5)
+                }
+        )
     }
 
     private func toggleSelection(for id: String) {
@@ -307,40 +367,19 @@ struct ProviderPickerView: View {
     }
 
     private func summaryBadge(text: String, tint: Color) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint == .secondary ? .secondary : tint)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background((tint == .secondary ? Color.secondary : tint).opacity(colorScheme == .dark ? 0.18 : 0.10))
-            .clipShape(Capsule())
-    }
+        HStack(spacing: 6) {
+            Image(systemName: tint == .secondary ? "eye" : "checkmark.circle.fill")
+                .font(.system(size: 11, weight: .semibold))
 
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            TextField(L("Search apps", "搜索应用"), text: $searchText)
-                .textFieldStyle(.plain)
-
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
+            Text(text)
+                .lineLimit(1)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(tint == .secondary ? .secondary : tint)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background((tint == .secondary ? Color.secondary : tint).opacity(colorScheme == .dark ? 0.18 : 0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func previewPanel(for item: ProviderCatalogItem) -> some View {
@@ -466,6 +505,38 @@ struct ProviderPickerView: View {
             return L("Add Selected", "添加所选")
         case .manage:
             return L("Apply Changes", "应用变更")
+        }
+    }
+
+    private var submitButtonIcon: String {
+        switch mode {
+        case .initialSetup:
+            return "play.fill"
+        case .add:
+            return "plus"
+        case .manage:
+            return "checkmark"
+        }
+    }
+
+    private var footerStatusIcon: String {
+        isSubmitDisabled ? "circle.dashed" : "checkmark.circle.fill"
+    }
+
+    private var footerStatusText: String {
+        switch mode {
+        case .initialSetup:
+            return selection.isEmpty
+                ? L("Choose at least one source", "至少选择一个来源")
+                : L("\(selection.count) sources ready", "已准备 \(selection.count) 个来源")
+        case .add:
+            return selection.isEmpty
+                ? L("No apps selected", "未选择应用")
+                : L("\(selection.count) apps selected", "已选 \(selection.count) 个应用")
+        case .manage:
+            return selection == appState.selectedProviderIds
+                ? L("No changes to apply", "没有需要应用的变更")
+                : L("\(selection.count) sources enabled", "已启用 \(selection.count) 个来源")
         }
     }
 

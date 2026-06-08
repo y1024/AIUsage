@@ -4,6 +4,7 @@ import QuotaBackend
 struct ProvidersView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var accountStore: AccountStore
+    @Environment(\.colorScheme) private var colorScheme
     @State private var searchText = ""
     @State private var selectedChannel: String = "all"
     @State private var selectedProviderFilter: String = "all"
@@ -48,6 +49,10 @@ struct ProvidersView: View {
 
     private var availableProviderFilters: [ProviderAccountGroup] {
         serviceGroups.filter { selectedChannel == "all" || $0.channel == selectedChannel }
+    }
+
+    private var hiddenAccounts: [StoredProviderAccount] {
+        accountStore.hiddenAccounts()
     }
 
     private var filteredGroups: [ProviderAccountGroup] {
@@ -96,46 +101,87 @@ struct ProvidersView: View {
     // MARK: - Toolbar
 
     private var toolbar: some View {
-        HStack(spacing: 16) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                searchControl
+                    .frame(minWidth: 260, idealWidth: 360, maxWidth: 440)
 
-                TextField(L("Search accounts...", "搜索账号...", key: "providers.search.placeholder"), text: $searchText)
-                    .textFieldStyle(.plain)
+                channelControl
+                    .frame(width: 232)
 
-                if !searchText.isEmpty {
-                    Button(action: { searchText = "" }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
+                Spacer(minLength: 8)
+                toolbarActions
             }
-            .padding(8)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .cornerRadius(8)
 
-            Picker(L("Channel", "渠道", key: "providers.channel"), selection: $selectedChannel) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    searchControl
+                        .frame(maxWidth: .infinity)
+
+                    toolbarActions
+                }
+
+                channelControl
+                    .frame(width: 232)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+        .background(toolbarBackground)
+    }
+
+    private var searchControl: some View {
+        ProviderSearchControl(
+            placeholder: L("Search accounts...", "搜索账号...", key: "providers.search.placeholder"),
+            text: $searchText
+        )
+    }
+
+    private var channelControl: some View {
+        HStack(spacing: 8) {
+            Label {
+                Text(L("Channel", "渠道", key: "providers.channel"))
+                    .font(.caption.weight(.semibold))
+            } icon: {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(.secondary)
+            .labelStyle(.titleAndIcon)
+
+            Picker("", selection: $selectedChannel) {
                 Text(L("All", "全部", key: "common.all")).tag("all")
                 Text("CLI").tag("cli")
                 Text("IDE").tag("ide")
             }
+            .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(maxWidth: 320)
+            .frame(width: 144)
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .padding(.vertical, 5)
+        .frame(height: 34)
+        .background(controlBackground)
+        .overlay(controlBorder)
+    }
 
-            Spacer()
-
+    private var toolbarActions: some View {
+        HStack(spacing: 8) {
             Button {
                 appState.presentManageProviderPicker()
             } label: {
-                Label(L("Manage Sources", "管理来源", key: "providers.manage_sources"), systemImage: "slider.horizontal.3")
+                ProviderActionLabel(
+                    title: L("Manage Sources", "管理来源", key: "providers.manage_sources"),
+                    systemImage: "slider.horizontal.3"
+                )
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
 
-            if !accountStore.hiddenAccounts().isEmpty {
+            if !hiddenAccounts.isEmpty {
                 Menu {
-                    ForEach(accountStore.hiddenAccounts()) { storedAccount in
+                    ForEach(hiddenAccounts) { storedAccount in
                         Button {
                             appState.restoreAccount(storedAccount.id)
                         } label: {
@@ -148,8 +194,12 @@ struct ProvidersView: View {
                         }
                     }
                 } label: {
-                    Label(L("Hidden Accounts", "已隐藏账号", key: "providers.hidden_accounts"), systemImage: "eye.slash")
+                    ProviderActionLabel(
+                        title: L("Hidden Accounts", "已隐藏账号", key: "providers.hidden_accounts"),
+                        systemImage: "eye.slash"
+                    )
                 }
+                .buttonStyle(.plain)
             }
 
             Button {
@@ -159,12 +209,35 @@ struct ProvidersView: View {
                     appState.presentAddProviderPicker()
                 }
             } label: {
-                Label(L("Add App", "添加应用", key: "providers.add_app"), systemImage: "plus")
+                ProviderActionLabel(
+                    title: L("Add App", "添加应用", key: "providers.add_app"),
+                    systemImage: "plus",
+                    style: .primary,
+                    minWidth: 96
+                )
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.plain)
         }
-        .padding([.horizontal, .top])
-        .padding(.bottom, 10)
+    }
+
+    private var toolbarBackground: some View {
+        Rectangle()
+            .fill(Color(nsColor: .windowBackgroundColor))
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.35 : 0.55))
+                    .frame(height: 0.5)
+            }
+    }
+
+    private var controlBackground: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.82 : 0.94))
+    }
+
+    private var controlBorder: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .stroke(Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.38 : 0.55), lineWidth: 0.5)
     }
 
     private var filterBar: some View {
@@ -205,8 +278,12 @@ struct ProvidersView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
             .background(
-                Capsule()
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(isSelected ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.clear : Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
@@ -238,9 +315,14 @@ struct ProvidersView: View {
                 Button {
                     appState.presentAddProviderPicker()
                 } label: {
-                    Label(L("Add App", "添加应用", key: "providers.add_app"), systemImage: "plus")
+                    ProviderActionLabel(
+                        title: L("Add App", "添加应用", key: "providers.add_app"),
+                        systemImage: "plus",
+                        style: .primary,
+                        minWidth: 104
+                    )
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -251,4 +333,125 @@ struct ProvidersView: View {
 struct ProviderEditorTarget: Identifiable {
     let providerId: String
     var id: String { providerId }
+}
+
+struct ProviderSearchControl: View {
+    let placeholder: String
+    @Binding var text: String
+    var height: CGFloat = 34
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .lineLimit(1)
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(L("Clear Search", "清空搜索"))
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(height: height)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.82 : 0.94))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.38 : 0.55), lineWidth: 0.5)
+        )
+    }
+}
+
+struct ProviderActionLabel: View {
+    enum Style {
+        case primary
+        case secondary
+    }
+
+    let title: String
+    let systemImage: String
+    var style: Style = .secondary
+    var minWidth: CGFloat?
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 14)
+
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(foregroundColor)
+        .padding(.horizontal, 11)
+        .frame(minWidth: minWidth, minHeight: 32)
+        .background(backgroundShape)
+        .overlay(borderShape)
+        .opacity(isEnabled ? 1 : 0.56)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onHover { isHovered = $0 }
+        .help(title)
+    }
+
+    private var foregroundColor: Color {
+        switch style {
+        case .primary:
+            return .white
+        case .secondary:
+            return .primary
+        }
+    }
+
+    private var backgroundShape: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(backgroundColor)
+    }
+
+    private var borderShape: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .stroke(borderColor, lineWidth: 0.5)
+    }
+
+    private var backgroundColor: Color {
+        switch style {
+        case .primary:
+            return isEnabled
+                ? Color.accentColor.opacity(isHovered ? 0.92 : 1.0)
+                : Color.accentColor.opacity(0.46)
+        case .secondary:
+            if colorScheme == .dark {
+                return Color.white.opacity(isHovered ? 0.105 : 0.075)
+            }
+            return Color.primary.opacity(isHovered ? 0.070 : 0.045)
+        }
+    }
+
+    private var borderColor: Color {
+        switch style {
+        case .primary:
+            return Color.white.opacity(colorScheme == .dark ? 0.18 : 0.12)
+        case .secondary:
+            return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08)
+        }
+    }
 }
