@@ -160,80 +160,114 @@ struct ProxyStatsView: View {
 
     // MARK: - Control Deck
     // 统一控制台：左「数据源」（家族 + Codex 轨道），右「视图」（时间段 + 费用/Tokens）。
-    // 宽屏一行（中间分隔），窄屏自动折成两行。时间段与口径全页共用，移除了卡片内重复 picker。
+    // 使用自定义等宽分段控件，避免原生 segmented picker 在 Codex 组合下被压缩变形。
 
     var controlDeck: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 16) {
-                controlCluster(L("Source", "数据源")) { scopeControls }
-                Divider().frame(height: 20)
-                controlCluster(L("View", "视图")) { lensControls }
-                Spacer(minLength: 0)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                controlCluster(L("Source", "数据源")) { scopeControls }
-                controlCluster(L("View", "视图")) { lensControls }
+        Group {
+            if usesStackedControlLayout {
+                VStack(alignment: .leading, spacing: 9) {
+                    controlCluster(L("Source", "数据源"), systemImage: "square.stack.3d.up") { scopeControls }
+                    controlCluster(L("View", "视图"), systemImage: "slider.horizontal.3") { lensControls }
+                }
+            } else {
+                wideControlDeck
             }
         }
-        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private var wideControlDeck: some View {
+        HStack(alignment: .center, spacing: 18) {
+            controlCluster(L("Source", "数据源"), systemImage: "square.stack.3d.up") { scopeControls }
+            Spacer(minLength: 12)
+            controlCluster(L("View", "视图"), systemImage: "slider.horizontal.3") { lensControls }
+        }
+    }
+
+    private var usesStackedControlLayout: Bool {
+        contentWidth == 0 || contentWidth < 950
     }
 
     private func controlCluster<Content: View>(
         _ title: String,
+        systemImage: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        HStack(spacing: 8) {
-            Text(title)
+        HStack(spacing: 9) {
+            Label(title, systemImage: systemImage)
                 .font(.caption2.weight(.semibold))
+                .labelStyle(.titleAndIcon)
                 .foregroundStyle(.secondary)
+                .frame(width: 62, alignment: .leading)
+
             content()
         }
     }
 
-    @ViewBuilder
     private var scopeControls: some View {
-        Picker("", selection: familyBinding) {
-            Text(L("Combined", "综合")).tag(SourceFamily.all)
-            Text("Claude Code").tag(SourceFamily.claude)
-            Text("Codex").tag(SourceFamily.codex)
-        }
-        .pickerStyle(.segmented)
-        .fixedSize()
-
-        if showsTrackPicker {
-            Picker("", selection: trackBinding) {
-                ForEach(UsageTrack.allCases) { track in
-                    Text(track.label).tag(track)
+        HStack(spacing: 8) {
+            StatsSegmentedControl(
+                SourceFamily.allCases,
+                selection: familyBinding,
+                segmentWidth: 84,
+                tint: .indigo
+            ) { family in
+                switch family {
+                case .all: return L("Combined", "综合")
+                case .claude: return "Claude Code"
+                case .codex: return "Codex"
                 }
             }
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .help(L("Split Codex usage into Proxy (priced archive) and Non-Proxy (token-only local logs) tracks.",
-                    "将 Codex 用量拆分为代理（可计价归档）与非代理（仅 Token 本地日志）两轨。"))
+
+            if showsTrackPicker {
+                StatsSegmentedControl(
+                    UsageTrack.allCases,
+                    selection: trackBinding,
+                    segmentWidth: 66,
+                    tint: .teal
+                ) { track in
+                    track.label
+                }
+                .help(L("Split Codex usage into Proxy (priced archive) and Non-Proxy (token-only local logs) tracks.",
+                        "将 Codex 用量拆分为代理（可计价归档）与非代理（仅 Token 本地日志）两轨。"))
+            }
         }
     }
 
-    @ViewBuilder
     private var lensControls: some View {
-        Picker("", selection: $period) {
-            ForEach(DistributionPeriod.allCases) { p in
-                Text(p.label).tag(p)
+        HStack(spacing: 8) {
+            StatsSegmentedControl(
+                DistributionPeriod.allCases,
+                selection: $period,
+                segmentWidth: 50,
+                tint: .blue
+            ) { period in
+                period.label
             }
-        }
-        .pickerStyle(.segmented)
-        .fixedSize()
 
-        if showsCost {
-            Picker("", selection: $metric) {
-                Text(L("Cost", "费用")).tag(StatMetric.cost)
-                Text("Tokens").tag(StatMetric.tokens)
+            if showsCost {
+                StatsSegmentedControl(
+                    StatMetric.allCases,
+                    selection: $metric,
+                    segmentWidth: 64,
+                    tint: .orange
+                ) { metric in
+                    switch metric {
+                    case .cost: return L("Cost", "费用")
+                    case .tokens: return "Tokens"
+                    }
+                }
             }
-            .pickerStyle(.segmented)
-            .fixedSize()
         }
     }
 
@@ -302,6 +336,84 @@ struct ProxyStatsView: View {
     enum InsightsLayout {
         case split
         case stacked
+    }
+}
+
+private struct StatsSegmentedControl<Option: Hashable>: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let options: [Option]
+    @Binding var selection: Option
+    let segmentWidth: CGFloat
+    let tint: Color
+    let title: (Option) -> String
+
+    init(
+        _ options: [Option],
+        selection: Binding<Option>,
+        segmentWidth: CGFloat,
+        tint: Color,
+        title: @escaping (Option) -> String
+    ) {
+        self.options = options
+        self._selection = selection
+        self.segmentWidth = segmentWidth
+        self.tint = tint
+        self.title = title
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { option in
+                segment(option)
+            }
+        }
+        .padding(3)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.045))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.06), lineWidth: 0.5)
+        )
+    }
+
+    private func segment(_ option: Option) -> some View {
+        let isSelected = selection == option
+        return Button {
+            withAnimation(.easeOut(duration: 0.14)) {
+                selection = option
+            }
+        } label: {
+            Text(title(option))
+                .font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .allowsTightening(true)
+                .foregroundStyle(isSelected ? tint : Color.primary.opacity(0.70))
+                .frame(width: segmentWidth, height: 24)
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isSelected ? selectedFill : Color.clear)
+                        .shadow(
+                            color: isSelected ? Color.black.opacity(colorScheme == .dark ? 0.18 : 0.08) : .clear,
+                            radius: isSelected ? 2 : 0,
+                            y: isSelected ? 1 : 0
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(isSelected ? tint.opacity(0.22) : Color.clear, lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title(option))
+    }
+
+    private var selectedFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.88)
     }
 }
 
