@@ -129,7 +129,10 @@ struct AIUsageApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState.shared
     @ObservedObject private var appSettings = AppSettings.shared
-    @ObservedObject private var proxyViewModel = ProxyViewModel.shared
+    // 注意：根 Scene 故意不订阅 ProxyViewModel（不用 @ObservedObject）。
+    // 代理活跃时它每 0.5s 发一次 objectWillChange，根层订阅会导致整个窗口树重算。
+    // 这里只持有实例用于 environmentObject 注入，由需要的子视图自行订阅。
+    private let proxyViewModel = ProxyViewModel.shared
     @StateObject private var sparkle = SparkleController()
     
     var body: some Scene {
@@ -199,7 +202,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        ProxyViewModel.shared.flushPersistence()
+        ProxyViewModel.shared.flushPersistenceAndWait()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

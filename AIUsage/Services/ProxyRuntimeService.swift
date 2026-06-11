@@ -436,11 +436,14 @@ final class ProxyRuntimeService {
         let configName = config.name
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
-            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            runtimeLog.debug("Proxy runtime output for \(configName, privacy: .public): \(trimmed, privacy: .private)")
+            guard !data.isEmpty, let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
+            runtimeLog.debug("Proxy runtime output for \(configName, privacy: .public): \(output, privacy: .private)")
 
-            for line in trimmed.components(separatedBy: .newlines) {
+            // 高频 stdout 输出只在确认含 PROXY_LOG 标记时才做行拆分与解析，
+            // 避免代理流量高峰期对每块输出做无谓的全量字符串处理。
+            guard output.contains("PROXY_LOG:") else { return }
+
+            for line in output.split(separator: "\n") {
                 guard line.hasPrefix("PROXY_LOG:"),
                       let jsonStart = line.firstIndex(of: Character("{")) else {
                     continue

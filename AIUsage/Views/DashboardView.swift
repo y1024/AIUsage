@@ -3,7 +3,6 @@ import SwiftUI
 struct DashboardView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
-    @EnvironmentObject var proxyVM: ProxyViewModel
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {

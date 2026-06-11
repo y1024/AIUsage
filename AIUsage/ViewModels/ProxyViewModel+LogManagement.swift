@@ -1,5 +1,6 @@
 import Foundation
 import QuotaBackend
+import os
 
 extension ProxyViewModel {
 
@@ -18,15 +19,16 @@ extension ProxyViewModel {
         }
     }
 
-    @discardableResult
-    func saveStatistics() -> Bool {
-        do {
-            let data = try JSONEncoder().encode(statistics)
-            UserDefaults.standard.set(data, forKey: DefaultsKey.proxyStatistics)
-            return true
-        } catch {
-            logPersistenceError("save proxy statistics", error: error)
-            return false
+    /// 主线程只取值快照，JSON 编码与 UserDefaults 写入在持久化队列上执行。
+    func saveStatistics() {
+        let snapshot = statistics
+        ProxyPersistence.queue.async {
+            do {
+                let data = try ProxyPersistence.encoder.encode(snapshot)
+                UserDefaults.standard.set(data, forKey: DefaultsKey.proxyStatistics)
+            } catch {
+                proxyPersistenceLog.error("Failed to save proxy statistics: \(String(describing: error), privacy: .public)")
+            }
         }
     }
 
@@ -52,9 +54,7 @@ extension ProxyViewModel {
 
         statistics[log.configId] = stats
 
-        var logs = recentLogs[log.configId] ?? []
-        logs.append(log)
-        recentLogs[log.configId] = logs
+        recentLogs[log.configId, default: []].append(log)
 
         logsDirtyDays.insert(shardDayKey(log.timestamp))
         schedulePersistence()
@@ -82,6 +82,9 @@ extension ProxyViewModel {
     }
 
     /// Immediately flush any pending debounced persistence.
+    /// 注意：实际写盘在持久化队列上异步完成；若调用方依赖「文件已落盘」
+    /// 的顺序（如刷新前冻结归档），请使用 `flushPersistenceAsync()` 或
+    /// `flushPersistenceAndWait()`。
     func flushPersistence() {
         persistenceWorkItem?.cancel()
         persistenceWorkItem = nil
@@ -89,6 +92,21 @@ extension ProxyViewModel {
         foldDaysIntoUsageArchive(logsDirtyDays)
         saveStatistics()
         saveLogs()
+    }
+
+    /// Flush 并异步等待后台写盘完成。供本地统计刷新链路使用：
+    /// 归档文件确认写完后，ProviderEngine 才去读盘，避免读到旧数据。
+    func flushPersistenceAsync() async {
+        flushPersistence()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            ProxyPersistence.queue.async { continuation.resume() }
+        }
+    }
+
+    /// Flush 并同步等待后台写盘完成。仅供 App 终止前调用（阻塞一次主线程）。
+    func flushPersistenceAndWait() {
+        flushPersistence()
+        ProxyPersistence.queue.sync {}
     }
 
     /// Fill in pricing for logs that were recorded before their model had a configured price.
@@ -182,48 +200,48 @@ extension ProxyViewModel {
         flushLogsRefresh()
     }
 
-    @discardableResult
-    func saveLogs() -> Bool {
-        guard !logsDirtyDays.isEmpty else { return true }
+    /// 主线程只做日志字典快照（CoW，O(1)），按日过滤、JSON 编码与写盘
+    /// 全部在持久化队列上执行，避免代理高频请求期间阻塞 UI。
+    func saveLogs() {
+        guard !logsDirtyDays.isEmpty else { return }
 
-        let fm = FileManager.default
+        let dirtyDays = logsDirtyDays
+        logsDirtyDays.removeAll()
+        let logsSnapshot = recentLogs
         let shardDir = URL(fileURLWithPath: logsShardDirPath, isDirectory: true)
 
-        do {
-            try fm.createDirectory(at: shardDir, withIntermediateDirectories: true)
-        } catch {
-            logPersistenceError("create proxy logs shard directory", error: error)
-            return false
-        }
-
-        let encoder = JSONEncoder()
-        var ok = true
-
-        for dayKey in logsDirtyDays {
-            var dayLogs: [String: [ProxyRequestLog]] = [:]
-            for (configId, logs) in recentLogs {
-                let filtered = logs.filter { shardDayKey($0.timestamp) == dayKey }
-                if !filtered.isEmpty {
-                    dayLogs[configId] = filtered
-                }
+        ProxyPersistence.queue.async {
+            let fm = FileManager.default
+            do {
+                try fm.createDirectory(at: shardDir, withIntermediateDirectories: true)
+            } catch {
+                proxyPersistenceLog.error("Failed to create proxy logs shard directory: \(String(describing: error), privacy: .public)")
+                return
             }
 
-            let url = shardDir.appendingPathComponent("proxy-logs-\(dayKey).json")
-            if dayLogs.isEmpty {
-                try? fm.removeItem(at: url)
-            } else {
-                do {
-                    let data = try encoder.encode(dayLogs)
-                    try data.write(to: url, options: .atomic)
-                } catch {
-                    logPersistenceError("save proxy logs shard \(dayKey)", error: error)
-                    ok = false
+            for dayKey in dirtyDays {
+                guard let interval = ProxyPersistence.dayInterval(for: dayKey) else { continue }
+                var dayLogs: [String: [ProxyRequestLog]] = [:]
+                for (configId, logs) in logsSnapshot {
+                    let filtered = logs.filter { $0.timestamp >= interval.start && $0.timestamp < interval.end }
+                    if !filtered.isEmpty {
+                        dayLogs[configId] = filtered
+                    }
+                }
+
+                let url = shardDir.appendingPathComponent("proxy-logs-\(dayKey).json")
+                if dayLogs.isEmpty {
+                    try? fm.removeItem(at: url)
+                } else {
+                    do {
+                        let data = try ProxyPersistence.encoder.encode(dayLogs)
+                        try data.write(to: url, options: .atomic)
+                    } catch {
+                        proxyPersistenceLog.error("Failed to save proxy logs shard \(dayKey, privacy: .public): \(String(describing: error), privacy: .public)")
+                    }
                 }
             }
         }
-
-        logsDirtyDays.removeAll()
-        return ok
     }
 
     func pruneOldLogs() {
@@ -239,15 +257,17 @@ extension ProxyViewModel {
             }
         }
 
-        let fm = FileManager.default
+        // 文件枚举与删除走持久化队列：与排队中的写入保持先后顺序，且不阻塞主线程。
         let shardDir = URL(fileURLWithPath: logsShardDirPath, isDirectory: true)
-        if let items = try? fm.contentsOfDirectory(
-            at: shardDir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) {
+        ProxyPersistence.queue.async {
+            let fm = FileManager.default
+            guard let items = try? fm.contentsOfDirectory(
+                at: shardDir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else { return }
             for item in items {
-                guard let dayKey = extractShardDayKey(from: item.lastPathComponent) else { continue }
+                guard let dayKey = Self.extractShardDayKey(from: item.lastPathComponent) else { continue }
                 if dayKey < cutoffKey {
                     try? fm.removeItem(at: item)
                 }
@@ -274,13 +294,16 @@ extension ProxyViewModel {
         recentLogs.removeAll()
         logsDirtyDays.removeAll()
 
-        let fm = FileManager.default
+        // 删除入队到持久化队列：保证先于本次删除入队的写盘任务完成后才删，
+        // 不会出现「队列里的旧写入把刚删掉的分片文件又写回来」。
         let shardDir = URL(fileURLWithPath: logsShardDirPath, isDirectory: true)
-        if let items = try? fm.contentsOfDirectory(
-            at: shardDir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) {
+        ProxyPersistence.queue.async {
+            let fm = FileManager.default
+            guard let items = try? fm.contentsOfDirectory(
+                at: shardDir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else { return }
             for item in items where item.lastPathComponent.hasPrefix("proxy-logs-") {
                 try? fm.removeItem(at: item)
             }
@@ -318,7 +341,10 @@ extension ProxyViewModel {
             mergeIntoMemory(legacy)
             logsDirtyDays.formUnion(allDayKeys(from: legacy))
             saveLogs()
-            try FileManager.default.removeItem(at: legacyURL)
+            // 串行队列保证：分片写盘完成后才删除旧的单文件，迁移途中崩溃不丢数据。
+            ProxyPersistence.queue.async {
+                try? FileManager.default.removeItem(at: legacyURL)
+            }
         } catch {
             logPersistenceError("migrate proxy logs from single file", error: error)
         }
@@ -340,7 +366,7 @@ extension ProxyViewModel {
         return keys
     }
 
-    private func extractShardDayKey(from filename: String) -> String? {
+    private nonisolated static func extractShardDayKey(from filename: String) -> String? {
         guard filename.hasPrefix("proxy-logs-"), filename.hasSuffix(".json") else { return nil }
         let start = filename.index(filename.startIndex, offsetBy: "proxy-logs-".count)
         let end = filename.index(filename.endIndex, offsetBy: -".json".count)

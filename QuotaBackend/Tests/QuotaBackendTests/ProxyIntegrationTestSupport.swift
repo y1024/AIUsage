@@ -360,17 +360,50 @@ final class MockHTTPServer {
     }
 }
 
-func findFreePort() throws -> Int {
-    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
-    guard descriptor >= 0 else {
-        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+// 端口分配避开 macOS 临时端口范围（49152–65535）。
+// 旧实现 bind 端口 0 拿临时端口后立即 close，再交给 NWListener 重新绑定；
+// 窗口期内该端口可能被 URLSession 出站连接的临时端口分配抢占，
+// 导致随机用例偶发 "Address already in use"。
+// 现在从 20000–31999 顺序分配（随机基址起步），并用真实 bind 探测可用性。
+private enum TestPortAllocator {
+    private static let lock = NSLock()
+    private static let lowerBound = 20000
+    private static let upperBound = 32000
+    private static var nextPort = Int.random(in: lowerBound..<upperBound)
+
+    static func nextCandidate() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        if nextPort >= upperBound { nextPort = lowerBound }
+        let port = nextPort
+        nextPort += 1
+        return port
     }
+}
+
+func findFreePort() throws -> Int {
+    for _ in 0..<128 {
+        let candidate = TestPortAllocator.nextCandidate()
+        if isPortBindable(candidate) {
+            return candidate
+        }
+    }
+    throw NSError(
+        domain: NSPOSIXErrorDomain,
+        code: Int(EADDRINUSE),
+        userInfo: [NSLocalizedDescriptionKey: "findFreePort: no bindable port after 128 attempts"]
+    )
+}
+
+private func isPortBindable(_ port: Int) -> Bool {
+    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { return false }
     defer { close(descriptor) }
 
     var address = sockaddr_in()
     address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     address.sin_family = sa_family_t(AF_INET)
-    address.sin_port = in_port_t(0).bigEndian
+    address.sin_port = in_port_t(UInt16(port)).bigEndian
     address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
 
     let bindResult = withUnsafePointer(to: &address) {
@@ -378,20 +411,5 @@ func findFreePort() throws -> Int {
             bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
         }
     }
-    guard bindResult == 0 else {
-        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-    }
-
-    var boundAddress = sockaddr_in()
-    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-    let nameResult = withUnsafeMutablePointer(to: &boundAddress) {
-        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-            getsockname(descriptor, $0, &length)
-        }
-    }
-    guard nameResult == 0 else {
-        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-    }
-
-    return Int(UInt16(bigEndian: boundAddress.sin_port))
+    return bindResult == 0
 }

@@ -32,40 +32,27 @@ extension QuotaHTTPServer {
     // MARK: - Claude Proxy Handlers
 
     func handleEventLoggingEndpoint(request: HTTPRequest, headers: [String: String]) async -> HTTPResponse {
-        httpLog.debug("→ POST /api/event_logging/batch")
+        httpLog.debug("→ POST /api/event_logging/batch (\(request.body.count) bytes)")
 
-        let batchId = UUID().uuidString
-        var processedCount = 0
-
-        // Parse request body
-        if let loggingRequest = try? JSONDecoder().decode(EventLoggingBatchRequest.self, from: request.body) {
-            let events = loggingRequest.events ?? []
-            processedCount = events.count
-
-            // Log first 5 events
-            let previewCount = min(5, events.count)
-            for (index, event) in events.prefix(previewCount).enumerated() {
-                let eventType = event.eventType ?? "unknown"
-                httpLog.debug("  Event \(index + 1): \(eventType)")
-            }
-
-            if events.count > previewCount {
-                httpLog.debug("  ... and \(events.count - previewCount) more events")
-            }
-        }
-
-        // Always return success (telemetry endpoint should never fail)
+        // Telemetry 端点快速返回：不再全量解码 body（解码结果除 debug 日志外从未被使用），
+        // 避免 Claude Code 的高频遥测批次与代理热路径争抢 CPU。端点永远回成功。
         let response = EventLoggingBatchResponse(
             success: true,
-            batchId: batchId,
-            processedCount: processedCount,
-            message: "Batch received and logged"
+            batchId: UUID().uuidString,
+            processedCount: 0,
+            message: "Batch received"
         )
 
         return jsonResponse(encodable: response, headers: headers)
     }
 
-    func handleMessagesEndpoint(request: HTTPRequest, headers: [String: String]) async -> HTTPResponse {
+    /// `claudeRequest` 可传入 `handleConnection` 已解码的请求体，避免大 body 重复解析；
+    /// 为 nil 时（经通用路由进入）在认证后再解码一次。
+    func handleMessagesEndpoint(
+        request: HTTPRequest,
+        claudeRequest decodedRequest: ClaudeMessageRequest? = nil,
+        headers: [String: String]
+    ) async -> HTTPResponse {
         guard let proxy = proxyService else {
             return claudeErrorResponse(
                 type: "api_error",
@@ -85,8 +72,9 @@ extension QuotaHTTPServer {
             )
         }
 
-        // Parse request
-        guard let claudeRequest = try? JSONDecoder().decode(ClaudeMessageRequest.self, from: request.body) else {
+        // Parse request (reuse the pre-decoded body when available)
+        guard let claudeRequest = decodedRequest
+                ?? (try? Self.requestDecoder.decode(ClaudeMessageRequest.self, from: request.body)) else {
             return claudeErrorResponse(
                 type: "invalid_request_error",
                 message: "Failed to parse request body",
@@ -163,7 +151,7 @@ extension QuotaHTTPServer {
             }
         }
 
-        guard let tokenRequest = try? JSONDecoder().decode(ClaudeTokenCountRequest.self, from: request.body) else {
+        guard let tokenRequest = try? Self.requestDecoder.decode(ClaudeTokenCountRequest.self, from: request.body) else {
             return claudeErrorResponse(
                 type: "invalid_request_error",
                 message: "Failed to parse token count request body",
@@ -558,7 +546,12 @@ extension QuotaHTTPServer {
         return parameters
     }
 
-    func handleStreamingProxy(_ connection: NWConnection, request: HTTPRequest) async {
+    /// `claudeRequest` 由 `handleConnection` 单次解码后传入，本方法不再重复解析请求体。
+    func handleStreamingProxy(
+        _ connection: NWConnection,
+        request: HTTPRequest,
+        claudeRequest: ClaudeMessageRequest
+    ) async {
         guard let proxy = proxyService else {
             let response = claudeErrorResponse(
                 type: "api_error",
@@ -584,19 +577,6 @@ extension QuotaHTTPServer {
             return
         }
 
-        // Parse request
-        guard let claudeRequest = try? JSONDecoder().decode(ClaudeMessageRequest.self, from: request.body) else {
-            let response = claudeErrorResponse(
-                type: "invalid_request_error",
-                message: "Failed to parse request body",
-                status: 400,
-                headers: [:]
-            )
-            await sendResponse(connection, response: response)
-            connection.cancel()
-            return
-        }
-
         httpLog.debug("→ POST /v1/messages (streaming, model: \(claudeRequest.model))")
 
         let streamStartTime = Date()
@@ -613,7 +593,7 @@ extension QuotaHTTPServer {
         do {
             let upstreamModel = await proxy.mapModel(claudeRequest.model)
 
-            let encoder = JSONEncoder()
+            let encoder = Self.responseEncoder
             let messageID = "msg_\(UUID().uuidString.prefix(24))"
             var outputTokens = 0
             var reportedOutputTokens: Int?

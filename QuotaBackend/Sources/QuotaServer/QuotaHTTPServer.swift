@@ -21,6 +21,23 @@ enum QuotaHTTPServerError: LocalizedError {
 // as the original Node.js backend.
 
 public final class QuotaHTTPServer: @unchecked Sendable {
+    // JSONDecoder/JSONEncoder 的 decode/encode 线程安全（配置不可变时），
+    // 静态复用避免每请求/每事件重复创建高成本对象。
+    static let requestDecoder = JSONDecoder()
+    static let responseEncoder = JSONEncoder()
+
+    static let corsHeaders = [
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, x-api-key, authorization, anthropic-version, anthropic-beta"
+    ]
+
+    /// 仅探测请求体顶层 `stream` 标志的轻量解码目标，
+    /// 避免为路由判断对大 body 做 JSONSerialization 全量建图。
+    struct StreamFlagProbe: Decodable {
+        let stream: Bool?
+    }
+
     let host: String
     let port: Int
     let engine = ProviderEngine()
@@ -254,27 +271,29 @@ public final class QuotaHTTPServer: @unchecked Sendable {
                 await handlePassthroughProxy(connection, request: request)
                 return
             }
-            if proxyService != nil {
-                let isStreaming: Bool
-                if let json = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any] {
-                    isStreaming = json["stream"] as? Bool ?? false
-                } else {
-                    isStreaming = false
-                }
-                if isStreaming {
-                    await handleStreamingProxy(connection, request: request)
+            if proxyService != nil, cleanPath == "/v1/messages" {
+                // 单次解码：一次拿到 stream 标志与完整请求，流式/非流式 handler 直接复用，
+                // 不再「JSONSerialization 全量建图读 stream + handler 再 JSONDecoder 解一遍」。
+                if let claudeRequest = try? Self.requestDecoder.decode(ClaudeMessageRequest.self, from: request.body) {
+                    if claudeRequest.stream == true {
+                        await handleStreamingProxy(connection, request: request, claudeRequest: claudeRequest)
+                    } else {
+                        let response = await handleMessagesEndpoint(
+                            request: request,
+                            claudeRequest: claudeRequest,
+                            headers: Self.corsHeaders
+                        )
+                        await sendResponse(connection, response: response)
+                        connection.cancel()
+                    }
                     return
                 }
+                // 解码失败：交由通用路由按非流式流程返回 400。
             }
         }
 
         if request.method == "POST", cleanPath == "/v1/responses", codexProxyService != nil {
-            let isStreaming: Bool
-            if let json = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any] {
-                isStreaming = json["stream"] as? Bool ?? false
-            } else {
-                isStreaming = false
-            }
+            let isStreaming = (try? Self.requestDecoder.decode(StreamFlagProbe.self, from: request.body))?.stream ?? false
             if isStreaming {
                 await handleCodexStreamingProxy(connection, request: request)
                 return
@@ -289,11 +308,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     private func routeRequest(_ request: HTTPRequest) async -> HTTPResponse {
         let path = request.path.split(separator: "?").first.map(String.init) ?? request.path
         let queryItems = parseQueryItems(request.path)
-        let corsHeaders = [
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, x-api-key, authorization, anthropic-version, anthropic-beta"
-        ]
+        let corsHeaders = Self.corsHeaders
 
         if request.method == "OPTIONS" {
             return HTTPResponse(status: 204, headers: corsHeaders, body: "")
@@ -567,9 +582,11 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         return result
     }
 
+    // JSON 响应统一紧凑输出（不 prettyPrinted）：代理热路径上的响应体不必为可读性
+    // 膨胀约 30% 的体积与编码成本；调试时可用 jq 等工具格式化。
     func jsonResponse(_ object: Any, status: Int = 200, headers: [String: String] = [:]) -> HTTPResponse {
         let body: String
-        if let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted]),
+        if let data = try? JSONSerialization.data(withJSONObject: object),
            let str = String(data: data, encoding: .utf8) {
             body = str
         } else {
@@ -582,10 +599,8 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     }
 
     func jsonResponse<T: Encodable>(encodable: T, status: Int = 200, headers: [String: String] = [:]) -> HTTPResponse {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
         let body: String
-        if let data = try? encoder.encode(encodable), let str = String(data: data, encoding: .utf8) {
+        if let data = try? Self.responseEncoder.encode(encodable), let str = String(data: data, encoding: .utf8) {
             body = str
         } else {
             body = "{}"

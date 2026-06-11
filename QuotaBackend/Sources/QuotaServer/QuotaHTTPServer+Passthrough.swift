@@ -264,6 +264,12 @@ extension QuotaHTTPServer {
                 guard line.hasPrefix("data:"), let jsonStart = line.firstIndex(of: Character("{")) else {
                     return
                 }
+                // 廉价子串预过滤：只有可能携带 usage 或参与 output 兜底估算
+                // （content_block_delta）的事件才值得做 JSON 解析；
+                // ping / content_block_start / message_stop 等高频帧直接跳过。
+                guard line.contains("\"usage\"") || line.contains("content_block_delta") else {
+                    return
+                }
                 let jsonStr = String(line[jsonStart...])
                 guard let eventData = try? JSONSerialization.jsonObject(with: Data(jsonStr.utf8)) as? [String: Any] else {
                     return

@@ -18,20 +18,29 @@ extension ProxyViewModel {
 
     /// 重算给定日期集合的每日聚合并整日替换进归档。
     /// 仅遍历命中这些日期的日志，保持单次持久化周期的成本可控。
+    /// 命中判断用预解析的日期区间做 Date 比较（脏日期通常只有「今天」一个），
+    /// 避免对每条日志执行 DateFormatter 格式化。
     func foldDaysIntoUsageArchive(_ dayKeys: Set<String>) {
         guard !dayKeys.isEmpty else { return }
+
+        let dayRanges = dayKeys.compactMap { key -> (key: String, start: Date, end: Date)? in
+            guard let interval = ProxyPersistence.dayInterval(for: key) else { return nil }
+            return (key, interval.start, interval.end)
+        }
+        guard !dayRanges.isEmpty else { return }
 
         var perFamily: [ProxyUsageFamily: [String: ProxyUsageDay]] = [:]
         for (configId, logs) in recentLogs {
             let family = usageFamily(forConfigId: configId)
             for log in logs {
-                let dayKey = shardDayKey(log.timestamp)
-                guard dayKeys.contains(dayKey) else { continue }
-                var day = perFamily[family]?[dayKey] ?? ProxyUsageDay()
+                guard let range = dayRanges.first(where: { log.timestamp >= $0.start && log.timestamp < $0.end }) else {
+                    continue
+                }
+                var day = perFamily[family]?[range.key] ?? ProxyUsageDay()
                 var agg = day.models[log.upstreamModel] ?? ProxyUsageModelAgg()
                 agg.add(log)
                 day.models[log.upstreamModel] = agg
-                perFamily[family, default: [:]][dayKey] = day
+                perFamily[family, default: [:]][range.key] = day
             }
         }
 

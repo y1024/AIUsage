@@ -157,17 +157,21 @@ final class ProxyUsageArchiveStore {
         return decoded
     }
 
+    /// 归档为 Sendable 值类型，编码与写盘移交持久化串行队列：
+    /// 主线程只更新内存态，磁盘 IO 不再阻塞 UI；串行队列保证写入顺序。
     private func save(_ family: ProxyUsageFamily, archive: ProxyUsageArchive) {
         let url = Self.fileURL(family)
-        do {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let data = try JSONEncoder().encode(archive)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            proxyUsageArchiveLog.warning("Failed to save proxy usage archive (\(family.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
+        ProxyPersistence.queue.async {
+            do {
+                try FileManager.default.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                let data = try ProxyPersistence.encoder.encode(archive)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                proxyUsageArchiveLog.warning("Failed to save proxy usage archive (\(family.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
+            }
         }
     }
 

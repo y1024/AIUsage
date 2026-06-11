@@ -113,8 +113,8 @@ final class ProviderRefreshCoordinator: ObservableObject {
     func refreshLocalTokenStatsOnly() {
         Task { @MainActor in
             // Claude（及 Codex 代理轨）统计读取代理用量永久归档；先把待写入的脏日期
-            // 入档落盘，确保引擎随后读到的归档反映最新请求。
-            ProxyViewModel.shared.flushPersistence()
+            // 入档落盘（异步等待后台写盘完成），确保引擎随后读到的归档反映最新请求。
+            await ProxyViewModel.shared.flushPersistenceAsync()
             // Fan-out so a slow `codex-cost` (300s archive timeout) cannot
             // hold up Claude's refresh. Each call goes through
             // `refreshingProviderIDs` so concurrent refreshes of the same

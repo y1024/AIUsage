@@ -170,7 +170,9 @@ Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_A
    - **Codex track**: spawns `QuotaServer(PROXY_TARGET=codex)`, then injects managed block into `~/.codex/config.toml` (backup-as-source-of-truth); if a system proxy is detected, writes `no_proxy` into `~/.codex/.env`
    - Spawns `QuotaServer` process (via `ProxyRuntimeService`)
    - Persists `activatedConfigId` / `activatedCodexConfigId` only after all steps succeed
-3. Pipes stdout/stderr, parses `PROXY_LOG:` JSON lines for stats
+3. Pipes stdout/stderr, parses `PROXY_LOG:` JSON lines for stats. Stats ingestion is main-thread-light:
+   cache invalidation + `objectWillChange` are throttled to 0.5s, and all persistence (log shards,
+   statistics, usage archive) is encoded and written on a background serial queue (`ProxyPersistence.queue`)
 4. On deactivation: kills process, restores `settings.json` / `config.toml` (+ `.env`) from backup, rolls back state
 
 **Proxy modes**:

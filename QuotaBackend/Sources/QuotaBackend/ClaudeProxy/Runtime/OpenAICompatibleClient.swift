@@ -7,11 +7,9 @@ private let upstreamLog = Logger(subsystem: "com.aiusage.quotaserver", category:
 
 public actor OpenAICompatibleClient {
     private static let jsonDecoder = JSONDecoder()
-    private static let jsonEncoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .sortedKeys
-        return encoder
-    }()
+    // 不启用 sortedKeys：上游请求体（长会话 messages/input）可达数 MB，
+    // 全键排序只增加 CPU 与分配成本，对上游语义无影响。
+    private static let jsonEncoder = JSONEncoder()
 
     private let configuration: ClaudeProxyConfiguration
     private let session: URLSession

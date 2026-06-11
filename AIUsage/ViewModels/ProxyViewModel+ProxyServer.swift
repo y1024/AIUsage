@@ -676,8 +676,8 @@ extension ProxyViewModel {
             statusCode: json["status_code"] as? Int
         )
 
-        DispatchQueue.main.async { [weak self] in
-            self?.recordRequest(log)
-        }
+        // parseProxyLog 本身已运行在 MainActor（pipe 回调经 Task { @MainActor } 跳转而来），
+        // 直接记录即可，无需再经 DispatchQueue.main 多跳一次。
+        recordRequest(log)
     }
 }

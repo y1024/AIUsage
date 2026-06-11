@@ -825,6 +825,20 @@ Codex 会话日志 `session_meta.model_provider` 可区分来源：`aiusage-prox
 
 折叠语义为「整日替换」：保留期窗口内的日期每个持久化周期用 `recentLogs` 重算覆盖（幂等，冻结成本确定性求和），窗口外旧日期保持冻结值——杜绝刷新膨胀。`loadLogs` 在裁剪前先全量入档。
 
+#### 后台持久化队列（v0.8.12+）
+
+所有代理相关磁盘写入（日志日分片 / 统计 UserDefaults blob / 用量归档）统一经由 `ProxyPersistence.queue`（串行、`.utility`）执行：主线程只做值类型快照（CoW），JSON 编码与原子写盘全部在后台完成，代理高频请求期间不再阻塞 UI。串行队列同时保证写入顺序——清理/删除分片的操作与排队中的写入按入队顺序执行，不会出现旧写入复活已删文件。
+
+flush 语义分三档：
+
+| 方法 | 行为 | 调用方 |
+|------|------|--------|
+| `flushPersistence()` | 折叠归档 + 调度后台写盘（不等待） | 常规去抖周期 |
+| `flushPersistenceAsync()` | flush 后异步等待队列排空 | `refreshLocalTokenStatsOnly()`——归档文件落盘后 `ProviderEngine` 才读盘 |
+| `flushPersistenceAndWait()` | flush 后同步等待队列排空 | `applicationWillTerminate`（退出前不丢数据） |
+
+UI 侧配套：`recordRequest` 不再逐条清空聚合缓存——缓存失效与 `objectWillChange` 一起并入 0.5s 节流（`logsChangeSubject`），代理流量高峰期间派生统计最多滞后一个节流窗口。根 Scene（`AIUsageApp`）不订阅 `ProxyViewModel`，只注入 `environmentObject`，由代理相关页面自行订阅。
+
 ### 关键文件（新增）
 
 | 文件 | 职责 |

@@ -257,10 +257,15 @@ extension QuotaHTTPServer {
         await streamer.finish()
     }
 
+    /// 仅探测顶层 `model` 字段的轻量解码目标（避免对大 body 做 JSONSerialization 全量建图）。
+    private struct ModelProbe: Decodable {
+        let model: String?
+    }
+
     /// 从原始请求体中安全读取 model（仅用于日志/映射展示）。
     private static func peekModel(from body: Data) -> String {
-        guard let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
-              let model = object["model"] as? String, !model.isEmpty else {
+        guard let model = (try? requestDecoder.decode(ModelProbe.self, from: body))?.model,
+              !model.isEmpty else {
             return "unknown"
         }
         return model

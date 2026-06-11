@@ -9,6 +9,37 @@ import QuotaBackend
 internal let proxyPersistenceLog = Logger(subsystem: "com.aiusage.desktop", category: "ProxyPersistence")
 internal let proxyRuntimeLog = Logger(subsystem: "com.aiusage.desktop", category: "ProxyRuntime")
 
+// MARK: - Proxy Persistence Infrastructure
+// 代理日志/统计/用量归档的后台持久化基础设施：所有 JSON 编码与磁盘写入统一经由
+// 同一条串行队列执行，确保写入顺序（先入队先落盘）并把高成本编码移出主线程。
+// 代理高频请求期间主线程只做内存快照，落盘不再阻塞 UI。
+enum ProxyPersistence {
+    static let queue = DispatchQueue(label: "com.aiusage.proxy-persistence", qos: .utility)
+    static let encoder = JSONEncoder()
+
+    /// DateFormatter 的 string(from:) 自 macOS 10.9 起线程安全，可跨队列共享。
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = .current
+        return f
+    }()
+
+    static func dayKey(for date: Date) -> String {
+        dayKeyFormatter.string(from: date)
+    }
+
+    /// 把日键解析为本地时区的 [当日起点, 次日起点) 区间。
+    /// 与 `dayKey(for:)` 的分桶语义一致；跨日扫描时用 Date 区间比较替代
+    /// 对每条日志做 DateFormatter 格式化（后者贵 1-2 个数量级）。
+    static func dayInterval(for key: String) -> (start: Date, end: Date)? {
+        guard let start = dayKeyFormatter.date(from: key) else { return nil }
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start)
+            ?? start.addingTimeInterval(86_400)
+        return (start, end)
+    }
+}
+
 enum ProxyRuntimeError: LocalizedError {
     case configurationNotFound
     case quotaServerNotFound
@@ -121,13 +152,6 @@ class ProxyViewModel: ObservableObject {
 
     let runtimeService: ProxyRuntimeService
 
-    private static let shardDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = .current
-        return f
-    }()
-
     var logRetentionDays: Int {
         let days = UserDefaults.standard.integer(forKey: DefaultsKey.proxyLogRetentionDays)
         return days > 0 ? days : 30
@@ -144,7 +168,7 @@ class ProxyViewModel: ObservableObject {
     }
 
     func shardDayKey(_ date: Date) -> String {
-        Self.shardDateFormatter.string(from: date)
+        ProxyPersistence.dayKey(for: date)
     }
 
     init() {
@@ -155,6 +179,9 @@ class ProxyViewModel: ObservableObject {
             .sink { [weak self] _ in
                 guard let self, self.logsDirty else { return }
                 self.logsDirty = false
+                // 缓存失效与 UI 通知同步节流：高频请求期间不再每条都清空全部聚合缓存，
+                // 派生数据最多滞后 logsPublishInterval（与 UI 刷新节奏一致）。
+                self.invalidateLogCaches()
                 self.objectWillChange.send()
             }
         loadConfigurations()
@@ -180,13 +207,12 @@ class ProxyViewModel: ObservableObject {
         }
     }
 
-    /// Marks that logs/statistics have changed. Caches are invalidated immediately so that
-    /// any SwiftUI re-evaluation (even triggered by other @Published fields) reads fresh data.
-    /// The actual `objectWillChange` notification is coalesced by the throttle in `init`;
+    /// Marks that logs/statistics have changed. Cache invalidation and the `objectWillChange`
+    /// notification are both coalesced by the throttle in `init` (invalidating on every call
+    /// would force a full re-aggregation per proxied request during streaming bursts);
     /// callers that need the UI to update synchronously (e.g. user-initiated delete/clear)
     /// should additionally call `flushLogsRefresh()`.
     func scheduleLogsRefresh() {
-        invalidateLogCaches()
         logsDirty = true
         logsChangeSubject.send(())
     }
