@@ -31,9 +31,12 @@ let port = Int(args["port"] ?? "4318") ?? 4318
 startupLog.info("QuotaServer starting on \(host):\(port)")
 
 // Load proxy configuration from environment.
-// PROXY_TARGET=codex 时启用 Codex 代理（/v1/responses），并禁用 Claude 代理以避免端口/语义冲突。
+// PROXY_TARGET=codex 时启用 Codex 代理（/v1/responses），
+// PROXY_TARGET=opencode 时启用 OpenCode 透传代理（/v1/chat/completions），
+// 二者互斥，且任一启用时禁用 Claude 代理以避免端口/语义冲突。
 let codexConfig = CodexProxyConfiguration.loadFromEnvironment()
-let proxyConfig = codexConfig == nil ? ClaudeProxyConfiguration.loadFromEnvironment() : nil
+let openCodeConfig = codexConfig == nil ? OpenCodeProxyConfiguration.loadFromEnvironment() : nil
+let proxyConfig = (codexConfig == nil && openCodeConfig == nil) ? ClaudeProxyConfiguration.loadFromEnvironment() : nil
 
 if let cfg = proxyConfig {
     let modeStr = cfg.mode == .anthropicPassthrough ? "passthrough" : "openai-convert"
@@ -49,6 +52,12 @@ if let codexCfg = codexConfig {
     startupLog.info("Codex Proxy: disabled")
 }
 
+if let openCodeCfg = openCodeConfig {
+    startupLog.info("OpenCode Proxy: enabled (upstream=\(openCodeCfg.upstreamBaseURL, privacy: .private))")
+} else {
+    startupLog.info("OpenCode Proxy: disabled")
+}
+
 var httpsConfig: HTTPSConfig?
 if ProcessInfo.processInfo.environment["ENABLE_HTTPS"] == "1",
    let tlsPath = ProcessInfo.processInfo.environment["TLS_IDENTITY_PATH"] {
@@ -57,7 +66,7 @@ if ProcessInfo.processInfo.environment["ENABLE_HTTPS"] == "1",
     startupLog.info("HTTPS: enabled on port \(httpsPort)")
 }
 
-let server = QuotaHTTPServer(host: host, port: port, proxyConfig: proxyConfig, codexConfig: codexConfig, httpsConfig: httpsConfig)
+let server = QuotaHTTPServer(host: host, port: port, proxyConfig: proxyConfig, codexConfig: codexConfig, openCodeConfig: openCodeConfig, httpsConfig: httpsConfig)
 try await server.run()
 
 private func parseArgs() -> [String: String] {

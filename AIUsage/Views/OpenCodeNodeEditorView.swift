@@ -44,13 +44,14 @@ struct OpenCodeNodeEditorView: View {
                     basicSection
                     modelsSection
                     limitsSection
+                    proxySection
                 }
                 .padding(18)
             }
             Divider()
             footer
         }
-        .frame(width: 480, height: 560)
+        .frame(width: 480, height: 600)
     }
 
     // MARK: - Sections
@@ -154,6 +155,40 @@ struct OpenCodeNodeEditorView: View {
         }
     }
 
+    private var proxySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: $node.proxyEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Local proxy (request logs)", "本地代理（请求日志）"))
+                        .font(.caption.weight(.semibold))
+                    Text(L(
+                        "Route OpenCode through a local passthrough proxy to capture per-request logs. Usage costs still come from OpenCode's own records.",
+                        "让 OpenCode 经本地透传代理访问上游，以获得逐条请求日志。用量费用仍以 OpenCode 自身记录为准。"
+                    ))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+
+            if node.proxyEnabled {
+                HStack(spacing: 6) {
+                    Text(L("Port", "端口"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("\(OpenCodeNode.defaultProxyPort)", value: $node.proxyPort, format: .number.grouping(.never))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90)
+                    Text(L("OpenCode will connect to 127.0.0.1:\(String(node.proxyPort)).", "OpenCode 将连接 127.0.0.1:\(String(node.proxyPort))。"))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
     private var footer: some View {
         HStack {
             Spacer()
@@ -210,6 +245,9 @@ struct OpenCodeNodeEditorView: View {
         saved.models = parsedModels
         if !saved.models.contains(saved.defaultModel) {
             saved.defaultModel = saved.models.first ?? ""
+        }
+        if !(1...65_535).contains(saved.proxyPort) {
+            saved.proxyPort = OpenCodeNode.defaultProxyPort
         }
         onSave(saved)
         dismiss()

@@ -2,16 +2,19 @@ import SwiftUI
 
 // MARK: - OpenCode Management View
 // 「OpenCode 代理」主视图：节点列表 + 一键接管/还原 opencode.json。
-// 与 Claude/Codex 代理不同：OpenCode 原生支持 OpenAI 兼容上游，无本地代理进程，
-// 激活即把节点（baseURL/APIKey/模型）写入受管 provider 块，停用即整文还原。
+// 直连模式: 激活即把节点（baseURL/APIKey/模型）写入受管 provider 块，停用即整文还原。
+// 代理模式（路线 B）: 激活同时拉起本地透传进程，opencode.json 指向 127.0.0.1，
+// 底部展示实时请求日志（仅观测，计费仍以 opencode.db 为准）。
 
 struct OpenCodeManagementView: View {
     @ObservedObject private var store = OpenCodeNodeStore.shared
+    @ObservedObject private var proxyRuntime = OpenCodeProxyRuntime.shared
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var editingNode: OpenCodeNode?
     @State private var pendingDeletion: OpenCodeNode?
     @State private var actionError: String?
+    @State private var activationInProgress = false
 
     static let brand = Color(red: 0.18, green: 0.83, blue: 0.75)
 
@@ -23,8 +26,12 @@ struct OpenCodeManagementView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         statusBanner
+                        proxyErrorBanner
                         actionBar
                         nodeList
+                        if store.activeNode?.proxyEnabled == true {
+                            OpenCodeRequestLogSection()
+                        }
                     }
                     .padding(20)
                 }
@@ -80,14 +87,34 @@ struct OpenCodeManagementView: View {
                 icon: "checkmark.circle.fill",
                 tint: Self.brand,
                 title: L("Managing opencode.json — \(active.displayName)", "已接管 opencode.json — \(active.displayName)"),
-                message: L(
-                    "OpenCode now talks to this node directly. Restart OpenCode sessions for the change to take effect.",
-                    "OpenCode 将直连该节点。重启 OpenCode 会话后生效。"
-                ),
+                message: active.proxyEnabled
+                    ? (proxyRuntime.isRunning
+                        ? L(
+                            "OpenCode goes through the local proxy at 127.0.0.1:\(String(active.proxyPort)) — request logs below. Restart OpenCode sessions for the change to take effect.",
+                            "OpenCode 经本地代理 127.0.0.1:\(String(active.proxyPort)) 访问上游，下方可查看请求日志。重启 OpenCode 会话后生效。"
+                        )
+                        : L(
+                            "Local proxy is not running — OpenCode requests will fail until it is restarted.",
+                            "本地代理未在运行——重启代理前 OpenCode 请求将失败。"
+                        ))
+                    : L(
+                        "OpenCode now talks to this node directly. Restart OpenCode sessions for the change to take effect.",
+                        "OpenCode 将直连该节点。重启 OpenCode 会话后生效。"
+                    ),
                 trailing: AnyView(
-                    Button(L("Deactivate", "停用")) { deactivate() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    HStack(spacing: 8) {
+                        if active.proxyEnabled, !proxyRuntime.isRunning {
+                            Button(L("Restart Proxy", "重启代理")) {
+                                Task { await proxyRuntime.restart() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.orange)
+                            .controlSize(.small)
+                        }
+                        Button(L("Deactivate", "停用")) { deactivate() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
                 )
             )
         } else {
@@ -98,6 +125,26 @@ struct OpenCodeManagementView: View {
                 message: L(
                     "OpenCode is using its own configuration. Activate a node to route OpenCode to that endpoint.",
                     "OpenCode 正在使用自身配置。激活某个节点后，OpenCode 将切换到该接入点。"
+                )
+            )
+        }
+    }
+
+    /// 代理进程异常（多次自动重启失败）时的提示。
+    @ViewBuilder
+    private var proxyErrorBanner: some View {
+        if store.activeNode?.proxyEnabled == true, let error = proxyRuntime.lastError {
+            banner(
+                icon: "bolt.trianglebadge.exclamationmark.fill",
+                tint: .red,
+                title: L("Local proxy error", "本地代理异常"),
+                message: error,
+                trailing: AnyView(
+                    Button(L("Restart Proxy", "重启代理")) {
+                        Task { await proxyRuntime.restart() }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 )
             )
         }
@@ -174,7 +221,7 @@ struct OpenCodeManagementView: View {
                 OpenCodeNodeCard(
                     node: node,
                     isActive: node.id == store.activeNodeId,
-                    activationDisabled: store.usesJSONC || !node.isComplete,
+                    activationDisabled: store.usesJSONC || !node.isComplete || activationInProgress,
                     onActivate: { activate(node) },
                     onDeactivate: { deactivate() },
                     onEdit: { editingNode = node },
@@ -193,8 +240,8 @@ struct OpenCodeManagementView: View {
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
             Text(L(
-                "Add an OpenAI-compatible endpoint (base URL + API key + models). Activating a node writes it into opencode.json so OpenCode talks to it directly — no local proxy involved.",
-                "添加一个 OpenAI 兼容接入点（Base URL + API Key + 模型）。激活节点会把它写入 opencode.json，OpenCode 直连该接入点，无需本地代理。"
+                "Add an OpenAI-compatible endpoint (base URL + API key + models). Activating a node writes it into opencode.json — directly, or through a local proxy when you want per-request logs.",
+                "添加一个 OpenAI 兼容接入点（Base URL + API Key + 模型）。激活节点会把它写入 opencode.json——默认直连；需要请求日志时可开启本地代理模式。"
             ))
             .font(.caption)
             .foregroundStyle(.tertiary)
@@ -216,10 +263,15 @@ struct OpenCodeManagementView: View {
     // MARK: - Actions
 
     private func activate(_ node: OpenCodeNode) {
-        do {
-            try store.activate(node)
-        } catch {
-            actionError = error.localizedDescription
+        guard !activationInProgress else { return }
+        activationInProgress = true
+        Task {
+            defer { activationInProgress = false }
+            do {
+                try await store.activate(node)
+            } catch {
+                actionError = error.localizedDescription
+            }
         }
     }
 
@@ -273,6 +325,18 @@ private struct OpenCodeNodeCard: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1.5)
                             .background(Capsule().fill(brand.opacity(0.14)))
+                    }
+                    if node.proxyEnabled {
+                        Text(L("Proxy", "代理"))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.purple)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1.5)
+                            .background(Capsule().fill(Color.purple.opacity(0.12)))
+                            .help(L(
+                                "Goes through the local passthrough proxy on port \(String(node.proxyPort)) for request logs.",
+                                "经端口 \(String(node.proxyPort)) 的本地透传代理访问上游，以获得请求日志。"
+                            ))
                     }
                 }
                 Text(node.baseURL.nilIfBlank ?? L("Base URL not set", "未设置 Base URL"))

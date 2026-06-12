@@ -45,6 +45,8 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     var proxyConfig: ClaudeProxyConfiguration?
     var codexProxyService: CodexProxyService?
     var codexConfig: CodexProxyConfiguration?
+    var openCodeProxyService: OpenCodeProxyService?
+    var openCodeConfig: OpenCodeProxyConfiguration?
     var httpsConfig: HTTPSConfig?
     private let lifecycleQueue = DispatchQueue(label: "com.aiusage.quotaserver.lifecycle")
     private var ipv4Listener: NWListener?
@@ -59,18 +61,23 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         port: Int,
         proxyConfig: ClaudeProxyConfiguration? = nil,
         codexConfig: CodexProxyConfiguration? = nil,
+        openCodeConfig: OpenCodeProxyConfiguration? = nil,
         httpsConfig: HTTPSConfig? = nil
     ) {
         self.host = host
         self.port = port
         self.proxyConfig = proxyConfig
         self.codexConfig = codexConfig
+        self.openCodeConfig = openCodeConfig
         self.httpsConfig = httpsConfig
         if let config = proxyConfig, config.enabled, config.mode == .openaiConvert {
             self.proxyService = try? ClaudeProxyService(configuration: config)
         }
         if let codexConfig, codexConfig.enabled, codexConfig.mode == .openaiConvert {
             self.codexProxyService = try? CodexProxyService(configuration: codexConfig)
+        }
+        if let openCodeConfig, openCodeConfig.enabled {
+            self.openCodeProxyService = try? OpenCodeProxyService(configuration: openCodeConfig)
         }
     }
 
@@ -300,6 +307,14 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             }
         }
 
+        if request.method == "POST", cleanPath == "/v1/chat/completions", openCodeProxyService != nil {
+            let isStreaming = (try? Self.requestDecoder.decode(StreamFlagProbe.self, from: request.body))?.stream ?? false
+            if isStreaming {
+                await handleOpenCodeStreamingProxy(connection, request: request)
+                return
+            }
+        }
+
         let response = await routeRequest(request)
         await sendResponse(connection, response: response)
         connection.cancel()
@@ -337,6 +352,14 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
         case ("GET", "/v1/models") where codexProxyService != nil:
             return await handleCodexModelsEndpoint(request: request, headers: corsHeaders)
+
+        // MARK: - OpenCode Proxy Endpoint
+
+        case ("POST", "/v1/chat/completions") where openCodeProxyService != nil:
+            return await handleOpenCodeChatEndpoint(request: request, headers: corsHeaders)
+
+        case ("GET", "/v1/models") where openCodeProxyService != nil:
+            return await handleOpenCodeModelsEndpoint(request: request, headers: corsHeaders)
 
         case ("POST", "/v1/messages/count_tokens"):
             return await handleCountTokensEndpoint(request: request, headers: corsHeaders)

@@ -2,8 +2,10 @@ import Foundation
 
 // MARK: - OpenCode Node
 // OpenCode 接入节点：一个 OpenAI 兼容上游（baseURL + API Key + 模型列表）。
-// 激活时由 OpenCodeConfigManager 注入 ~/.config/opencode/opencode.json 的受管 provider 块，
-// OpenCode 原生直连上游，无本地代理进程（与 Claude/Codex 代理节点体系相互独立）。
+// 激活时由 OpenCodeConfigManager 注入 ~/.config/opencode/opencode.json 的受管 provider 块。
+// 直连模式: OpenCode 原生直连上游，无本地代理进程。
+// 代理模式（路线 B）: 本地 QuotaServer(PROXY_TARGET=opencode) 透传 chat/completions，
+//   opencode.json 指向 127.0.0.1:<proxyPort>，借此获得请求级日志（仅观测，不参与计费）。
 // 持久化: ~/.config/aiusage/opencode-nodes.json（OpenCodeNodeStore）。
 
 struct OpenCodeNode: Identifiable, Codable, Equatable {
@@ -22,9 +24,15 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     var contextLimit: Int
     /// 写进每个模型 `limit.output` 的输出上限；0 = 不写。
     var outputLimit: Int
+    /// 代理模式：激活时启动本地透传代理并把 opencode.json 指向它（请求级日志）。
+    var proxyEnabled: Bool
+    /// 本地透传代理监听端口。
+    var proxyPort: Int
     var createdAt: Date
     var lastUsedAt: Date?
     var sortOrder: Int
+
+    static let defaultProxyPort = 4321
 
     init(
         id: String = UUID().uuidString,
@@ -36,6 +44,8 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         providerSlug: String? = nil,
         contextLimit: Int = 0,
         outputLimit: Int = 0,
+        proxyEnabled: Bool = false,
+        proxyPort: Int = OpenCodeNode.defaultProxyPort,
         createdAt: Date = Date(),
         lastUsedAt: Date? = nil,
         sortOrder: Int = Int.max
@@ -49,9 +59,30 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.providerSlug = providerSlug
         self.contextLimit = contextLimit
         self.outputLimit = outputLimit
+        self.proxyEnabled = proxyEnabled
+        self.proxyPort = proxyPort
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.sortOrder = sortOrder
+    }
+
+    /// 兼容旧档案（无 proxyEnabled/proxyPort 字段）的解码。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        baseURL = try c.decode(String.self, forKey: .baseURL)
+        apiKey = try c.decode(String.self, forKey: .apiKey)
+        models = try c.decode([String].self, forKey: .models)
+        defaultModel = try c.decode(String.self, forKey: .defaultModel)
+        providerSlug = try c.decodeIfPresent(String.self, forKey: .providerSlug)
+        contextLimit = try c.decode(Int.self, forKey: .contextLimit)
+        outputLimit = try c.decode(Int.self, forKey: .outputLimit)
+        proxyEnabled = try c.decodeIfPresent(Bool.self, forKey: .proxyEnabled) ?? false
+        proxyPort = try c.decodeIfPresent(Int.self, forKey: .proxyPort) ?? Self.defaultProxyPort
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        lastUsedAt = try c.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+        sortOrder = try c.decode(Int.self, forKey: .sortOrder)
     }
 
     /// 展示名：未命名时回退到 baseURL 的 host。
@@ -70,6 +101,11 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     /// 节点是否填齐了激活所需字段。
     var isComplete: Bool {
         baseURL.nilIfBlank != nil && effectiveDefaultModel != nil
+    }
+
+    /// 代理模式下写入 opencode.json 的本地 baseURL（OpenCode 在其后拼接 /chat/completions）。
+    var proxyLocalBaseURL: String {
+        "http://127.0.0.1:\(proxyPort)/v1"
     }
 
     // MARK: - Managed Provider Id

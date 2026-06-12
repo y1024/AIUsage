@@ -2,12 +2,15 @@ import Foundation
 import SwiftUI
 import Combine
 import os.log
+import QuotaBackend
 
 // MARK: - OpenCode Node Store
 // OpenCode 节点的持久化与激活状态。节点列表 + activeNodeId 存为单文件
 // ~/.config/aiusage/opencode-nodes.json（含 API Key，0600 权限）。
 // 激活/停用委托 OpenCodeConfigManager 写 opencode.json；启动时与配置文件实际状态对账
 // （用户手动改回 opencode.json 后自动视为未激活）。
+// 代理模式节点：激活前先经 OpenCodeProxyRuntime 拉起本地透传进程，opencode.json 指向
+// 127.0.0.1；App 重启后对账时自动恢复代理进程（否则 OpenCode 请求会失败）。
 
 private let openCodeStoreLog = Logger(subsystem: "com.aiusage.desktop", category: "OpenCodeNodeStore")
 
@@ -19,6 +22,7 @@ final class OpenCodeNodeStore: ObservableObject {
     @Published private(set) var activeNodeId: String?
 
     private let configManager = OpenCodeConfigManager.shared
+    private let proxyRuntime = OpenCodeProxyRuntime.shared
     private let fileManager = FileManager.default
 
     private struct StoreFile: Codable {
@@ -37,6 +41,7 @@ final class OpenCodeNodeStore: ObservableObject {
     init() {
         load()
         reconcileWithConfigFile()
+        restoreProxyIfNeeded()
     }
 
     // MARK: - Derived State
@@ -67,9 +72,11 @@ final class OpenCodeNodeStore: ObservableObject {
         }
         save()
 
-        // 编辑当前激活节点后立即重写 opencode.json，保持配置与节点一致。
+        // 编辑当前激活节点后立即重新激活（重写 opencode.json，代理模式下同步重启代理进程）。
         if updated.id == activeNodeId {
-            try? configManager.activate(node: updated)
+            Task { [weak self] in
+                try? await self?.activate(updated)
+            }
         }
     }
 
@@ -83,8 +90,20 @@ final class OpenCodeNodeStore: ObservableObject {
 
     // MARK: - Activation
 
-    func activate(_ node: OpenCodeNode) throws {
-        try configManager.activate(node: node)
+    func activate(_ node: OpenCodeNode) async throws {
+        if node.proxyEnabled {
+            // 代理模式：先拉起本地透传进程，再把 opencode.json 指向它；写配置失败则回收进程。
+            try await proxyRuntime.start(node: node)
+            do {
+                try configManager.activate(node: node, baseURLOverride: node.proxyLocalBaseURL)
+            } catch {
+                proxyRuntime.stop()
+                throw error
+            }
+        } else {
+            proxyRuntime.stop()
+            try configManager.activate(node: node)
+        }
         if let index = nodes.firstIndex(where: { $0.id == node.id }) {
             nodes[index].lastUsedAt = Date()
         }
@@ -93,6 +112,7 @@ final class OpenCodeNodeStore: ObservableObject {
     }
 
     func deactivate() throws {
+        proxyRuntime.stop()
         try configManager.restore()
         activeNodeId = nil
         save()
@@ -103,6 +123,19 @@ final class OpenCodeNodeStore: ObservableObject {
         if activeNodeId != nil, !configManager.isManaged {
             activeNodeId = nil
             save()
+        }
+    }
+
+    /// App 重启后恢复代理：激活中的代理模式节点其子进程已随上次退出而消亡，
+    /// 而 opencode.json 仍指向本地端口，必须重新拉起，否则 OpenCode 请求全部失败。
+    private func restoreProxyIfNeeded() {
+        guard let node = activeNode, node.proxyEnabled else { return }
+        Task { [proxyRuntime] in
+            do {
+                try await proxyRuntime.start(node: node)
+            } catch {
+                openCodeStoreLog.error("Failed to restore OpenCode proxy after relaunch: \(SensitiveDataRedactor.redactedMessage(for: error), privacy: .public)")
+            }
         }
     }
 

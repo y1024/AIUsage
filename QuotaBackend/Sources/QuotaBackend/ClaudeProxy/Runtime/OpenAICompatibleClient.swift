@@ -585,7 +585,10 @@ public actor OpenAICompatibleClient {
         if let contentType {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
-        request.setValue("Bearer \(configuration.upstreamAPIKey)", forHTTPHeaderField: "Authorization")
+        // 空密钥不发 Authorization 头（本地上游如 Ollama 无需鉴权；Claude/Codex 配置已校验非空，不受影响）。
+        if !configuration.upstreamAPIKey.isEmpty {
+            request.setValue("Bearer \(configuration.upstreamAPIKey)", forHTTPHeaderField: "Authorization")
+        }
         for (key, value) in configuration.customHeaders {
             request.setValue(value, forHTTPHeaderField: key)
         }
@@ -1032,14 +1035,16 @@ public actor OpenAICompatibleClient {
         return UInt64(ms) * 1_000_000
     }
 
-    /// 非流式原样转发，返回上游原始状态码 + 响应体。瞬时 5xx 自动重试。
-    func sendRawResponses(
+    /// 非流式原样转发到指定上游端点（如 "/responses"、"/chat/completions"），
+    /// 返回上游原始状态码 + 响应体。瞬时 5xx 自动重试。
+    func sendRaw(
+        path: String,
         bodyJSON: Data,
         extraHeaders: [String: String]
     ) async throws -> RawResponsesResult {
         let maxAttempts = Self.rawPassthroughMaxAttempts
         for attempt in 1...maxAttempts {
-            var request = try makeUpstreamRequest(path: "/responses", method: "POST", contentType: "application/json")
+            var request = try makeUpstreamRequest(path: path, method: "POST", contentType: "application/json")
             for (key, value) in extraHeaders {
                 request.setValue(value, forHTTPHeaderField: key)
             }
@@ -1090,12 +1095,13 @@ public actor OpenAICompatibleClient {
 
     /// 建立上游流式连接，瞬时 5xx 自动重试，直到拿到 200 或耗尽重试/不可重试状态。
     private func connectStreamWithRetry(
+        path: String,
         bodyJSON: Data,
         extraHeaders: [String: String],
         maxAttempts: Int
     ) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
         for attempt in 1...maxAttempts {
-            var request = try makeUpstreamRequest(path: "/responses", method: "POST", contentType: "application/json")
+            var request = try makeUpstreamRequest(path: path, method: "POST", contentType: "application/json")
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             for (key, value) in extraHeaders {
                 request.setValue(value, forHTTPHeaderField: key)
@@ -1130,6 +1136,7 @@ public actor OpenAICompatibleClient {
         // （客户端此时只收到了 200 响应头，仍在等待 SSE，延迟一点的成功流是无害的）。
         let maxAttempts = Self.rawPassthroughMaxAttempts
         let (bytes, httpResponse) = try await connectStreamWithRetry(
+            path: "/responses",
             bodyJSON: bodyJSON,
             extraHeaders: extraHeaders,
             maxAttempts: maxAttempts
@@ -1171,6 +1178,35 @@ public actor OpenAICompatibleClient {
         }
         // 末帧兜底（部分上游结尾不带空行）。
         try await flushFrame()
+    }
+
+    /// chat/completions 流式原样转发：每个 `data:` 行即一帧（含末尾的 `[DONE]`），逐帧回调原始文本。
+    /// chat.completions SSE 没有 `event:` 行，且 `AsyncBytes.lines` 会吞掉帧间空行，
+    /// 因此必须按 data 行切帧，避免多个 chunk 被拼成一帧导致客户端解析失败。
+    func streamRawChatCompletions(
+        bodyJSON: Data,
+        extraHeaders: [String: String],
+        onData: @escaping (_ data: String) async throws -> Void
+    ) async throws {
+        let (bytes, httpResponse) = try await connectStreamWithRetry(
+            path: "/chat/completions",
+            bodyJSON: bodyJSON,
+            extraHeaders: extraHeaders,
+            maxAttempts: Self.rawPassthroughMaxAttempts
+        )
+        guard httpResponse.statusCode == 200 else {
+            let errorBody = try await readUTF8TextPrefix(from: bytes, maxBytes: 4096)
+            upstreamLog.warning("Upstream raw chat streaming \(httpResponse.statusCode): \(String(errorBody.prefix(500)), privacy: .private)")
+            throw UpstreamError.httpError(
+                statusCode: httpResponse.statusCode,
+                message: errorBody.isEmpty ? "Upstream returned status \(httpResponse.statusCode)" : errorBody,
+                requestID: upstreamRequestID(from: httpResponse)
+            )
+        }
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data:") else { continue }
+            try await onData(String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces))
+        }
     }
 }
 

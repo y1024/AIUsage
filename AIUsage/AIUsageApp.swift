@@ -188,6 +188,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBar()
         requestNotificationPermission()
 
+        // 触发 OpenCode 节点 store 初始化：激活中的代理模式节点需要在启动时
+        // 恢复本地透传进程（opencode.json 指向本地端口，进程不在则 OpenCode 请求失败）。
+        _ = OpenCodeNodeStore.shared
+
         if UserDefaults.standard.bool(forKey: DefaultsKey.hideDockIcon) {
             NSApp.setActivationPolicy(.accessory)
         }

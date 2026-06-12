@@ -1,51 +1,16 @@
 import Foundation
 
-// MARK: - Codex Proxy Service
-// 入站: OpenAI Responses 请求 → Canonical → OpenAI 兼容上游 → Canonical → Responses 响应/SSE。
-// 复用 ClaudeProxy 的 Canonical 中间层与 OpenAICompatibleClient，仅出站构建器为新增。
+// MARK: - OpenCode Proxy Service
+// 入站: OpenAI chat/completions 请求 → 忠实透传 → OpenAI 兼容上游 → 原样回传。
+// 不改写请求体（包括 model 字段），仅附加上游鉴权与少量入站头；
+// 旁路解析 usage 用于请求日志展示（不参与计费，计费以 opencode.db 为准）。
+// 错误结构复用 CodexErrorResponse（即 OpenAI 风格 {"error":{...}}，与 Codex 入站共用同一形状）。
 
-public struct CodexProxyErrorResult: Sendable {
-    public let response: CodexErrorResponse
-    public let statusCode: Int
-
-    public init(response: CodexErrorResponse, statusCode: Int) {
-        self.response = response
-        self.statusCode = statusCode
-    }
-}
-
-public struct CodexErrorResponse: Codable, Sendable {
-    public struct Body: Codable, Sendable {
-        public let message: String
-        public let type: String
-        public let code: String?
-
-        public init(message: String, type: String, code: String? = nil) {
-            self.message = message
-            self.type = type
-            self.code = code
-        }
-    }
-
-    public let error: Body
-    /// 不参与编解码（仅入站透传时附带）。未列入 CodingKeys，故需默认值以满足 Decodable 合成。
-    public var requestID: String? = nil
-
-    enum CodingKeys: String, CodingKey {
-        case error
-    }
-
-    public init(error: Body, requestID: String? = nil) {
-        self.error = error
-        self.requestID = requestID
-    }
-}
-
-public actor CodexProxyService {
-    private let configuration: CodexProxyConfiguration
+public actor OpenCodeProxyService {
+    private let configuration: OpenCodeProxyConfiguration
     private let upstreamClient: OpenAICompatibleClient
 
-    public init(configuration: CodexProxyConfiguration) throws {
+    public init(configuration: OpenCodeProxyConfiguration) throws {
         try configuration.validate()
         self.configuration = configuration
         self.upstreamClient = OpenAICompatibleClient(
@@ -74,20 +39,11 @@ public actor CodexProxyService {
         return false
     }
 
-    public func mapModel(_ requestModel: String) -> String {
-        configuration.mapToUpstreamModel(requestModel)
-    }
-
-    // MARK: - Faithful Passthrough (Responses → Responses)
-    // Codex 恒走 Responses 忠实透传：不经过 Canonical 改写，直接转发原始请求体，
-    // 仅把 model 映射到上游模型、附加上游鉴权与入站关键头；旁路解析 usage 用于统计。
-    // 这样代理对 Codex 完全透明（= 直连），最大化兼容原生 instructions/reasoning/工具语义。
-    // 备注: chat-completions 上游 / Anthropic 上游接入 Codex 属 Phase 2，届时再引入 Canonical 转换层。
+    // MARK: - Faithful Passthrough (chat/completions → chat/completions)
 
     public struct PassthroughUsage: Sendable {
-        /// Non-cached input tokens. OpenAI Responses reports cached tokens as a
-        /// subset of `input_tokens`, so normalize before the value reaches
-        /// proxy logs or pricing.
+        /// Non-cached prompt tokens. OpenAI 把缓存命中计入 `prompt_tokens`，
+        /// 这里先扣除 `prompt_tokens_details.cached_tokens` 再写入日志。
         public let inputTokens: Int
         public let outputTokens: Int
         public let cachedTokens: Int
@@ -101,14 +57,13 @@ public actor CodexProxyService {
     }
 
     /// 非流式透传。
-    public func passthroughResponses(
+    public func passthroughChatCompletions(
         rawBody: Data,
         inboundHeaders: [String: String]
     ) async throws -> PassthroughResult {
-        let body = rewriteModel(in: rawBody)
         let result = try await upstreamClient.sendRaw(
-            path: "/responses",
-            bodyJSON: body,
+            path: "/chat/completions",
+            bodyJSON: rawBody,
             extraHeaders: Self.forwardableHeaders(from: inboundHeaders)
         )
         let usage = (200..<300).contains(result.statusCode)
@@ -122,60 +77,38 @@ public actor CodexProxyService {
         )
     }
 
-    /// 模型列表透传：Codex 启动时会 GET /v1/models 刷新可用模型，原样转发上游结果。
+    /// 模型列表透传：OpenCode/客户端可能 GET /v1/models 探测可用模型，原样转发上游结果。
     public func passthroughModels(inboundHeaders: [String: String]) async throws -> RawResponsesResult {
         try await upstreamClient.fetchRawModels(
             extraHeaders: Self.forwardableHeaders(from: inboundHeaders)
         )
     }
 
-    /// 流式透传：逐帧把上游 SSE 原样回调给入站层。
-    public func passthroughStreamingResponses(
+    /// 流式透传：逐 data 帧把上游 SSE 原样回调给入站层（含末尾 `[DONE]`）。
+    public func passthroughStreamingChatCompletions(
         rawBody: Data,
         inboundHeaders: [String: String],
-        onFrame: @escaping (_ event: String?, _ data: String) async throws -> Void
+        onData: @escaping (_ data: String) async throws -> Void
     ) async throws {
-        let body = rewriteModel(in: rawBody)
-        try await upstreamClient.streamRawResponses(
-            bodyJSON: body,
+        try await upstreamClient.streamRawChatCompletions(
+            bodyJSON: rawBody,
             extraHeaders: Self.forwardableHeaders(from: inboundHeaders),
-            onFrame: onFrame
+            onData: onData
         )
     }
 
-    /// 仅当配置了与请求不同的上游模型时改写 model 字段；否则保持原始字节不变。
-    private func rewriteModel(in rawBody: Data) -> Data {
-        guard let object = (try? JSONSerialization.jsonObject(with: rawBody)) as? [String: Any],
-              let requestModel = object["model"] as? String else {
-            return rawBody
-        }
-        let mapped = configuration.mapToUpstreamModel(requestModel)
-        guard mapped != requestModel else { return rawBody }
-        var mutated = object
-        mutated["model"] = mapped
-        return (try? JSONSerialization.data(withJSONObject: mutated)) ?? rawBody
-    }
-
-    /// 转发 Codex 客户端的关键头（剔除会与上游连接/鉴权冲突的头，鉴权由 makeUpstreamRequest 注入）。
-    private static let forwardableHeaderMap: [String: String] = [
-        "openai-beta": "OpenAI-Beta",
-        "originator": "originator",
-        "session_id": "session_id",
-        "conversation_id": "conversation_id",
-        "user-agent": "User-Agent"
-    ]
-
+    /// 转发入站关键头（鉴权由 makeUpstreamRequest 注入，剔除会冲突的头）。
     private static func forwardableHeaders(from inbound: [String: String]) -> [String: String] {
         var out: [String: String] = [:]
-        for (lowerKey, canonical) in forwardableHeaderMap {
-            if let value = inbound[lowerKey], !value.isEmpty {
-                out[canonical] = value
-            }
+        if let userAgent = inbound["user-agent"], !userAgent.isEmpty {
+            out["User-Agent"] = userAgent
         }
         return out
     }
 
-    /// 解析非流式响应体顶层 usage。
+    // MARK: - Usage Parsing
+
+    /// 解析非流式响应体顶层 usage（chat.completion 对象）。
     static func parseUsage(fromResponseBody data: Data) -> PassthroughUsage? {
         guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let usage = object["usage"] as? [String: Any] else {
@@ -184,30 +117,26 @@ public actor CodexProxyService {
         return makeUsage(usage)
     }
 
-    /// 从流式帧的 data 文本中解析 usage（response.completed 内含 response.usage）。
+    /// 从流式帧的 data 文本中解析 usage。
+    /// 注意: 部分上游每个 chunk 都带 `"usage": null`，仅最后一帧（stream_options.include_usage）
+    /// 才是对象，故 usage 非字典时返回 nil。
     public static func parseUsage(fromStreamFrame frameData: String) -> PassthroughUsage? {
         guard let data = frameData.data(using: .utf8),
-              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let usage = object["usage"] as? [String: Any] else {
             return nil
         }
-        if let response = object["response"] as? [String: Any],
-           let usage = response["usage"] as? [String: Any] {
-            return makeUsage(usage)
-        }
-        if let usage = object["usage"] as? [String: Any] {
-            return makeUsage(usage)
-        }
-        return nil
+        return makeUsage(usage)
     }
 
     private static func makeUsage(_ usage: [String: Any]) -> PassthroughUsage {
-        let rawInput = max(0, intValue(usage["input_tokens"]))
-        let output = max(0, intValue(usage["output_tokens"]))
+        let rawPrompt = max(0, intValue(usage["prompt_tokens"]))
+        let output = max(0, intValue(usage["completion_tokens"]))
         var cached = 0
-        if let details = usage["input_tokens_details"] as? [String: Any] {
-            cached = min(rawInput, max(0, intValue(details["cached_tokens"])))
+        if let details = usage["prompt_tokens_details"] as? [String: Any] {
+            cached = min(rawPrompt, max(0, intValue(details["cached_tokens"])))
         }
-        let input = rawInput - cached
+        let input = rawPrompt - cached
         return PassthroughUsage(inputTokens: input, outputTokens: output, cachedTokens: cached)
     }
 
@@ -232,16 +161,11 @@ public actor CodexProxyService {
             errorMessage = configError.localizedDescription
             statusCode = 400
 
-        case let conversionError as ConversionError:
-            errorType = "invalid_request_error"
-            errorMessage = conversionError.localizedDescription
-            statusCode = 400
-
         case let upstreamError as UpstreamError:
             switch upstreamError {
             case .httpError(let upstreamStatusCode, let upstreamMessage, let upstreamRequestID):
-                errorType = openAIErrorType(forHTTPStatus: upstreamStatusCode)
-                errorMessage = upstreamErrorMessage(from: upstreamMessage, statusCode: upstreamStatusCode)
+                errorType = Self.openAIErrorType(forHTTPStatus: upstreamStatusCode)
+                errorMessage = Self.upstreamErrorMessage(from: upstreamMessage, statusCode: upstreamStatusCode)
                 statusCode = upstreamStatusCode
                 requestID = upstreamRequestID
             case .invalidURL(let url):
@@ -277,7 +201,7 @@ public actor CodexProxyService {
         )
     }
 
-    private func openAIErrorType(forHTTPStatus statusCode: Int) -> String {
+    private static func openAIErrorType(forHTTPStatus statusCode: Int) -> String {
         switch statusCode {
         case 400:
             return "invalid_request_error"
@@ -296,7 +220,7 @@ public actor CodexProxyService {
         }
     }
 
-    private func upstreamErrorMessage(from rawMessage: String, statusCode: Int) -> String {
+    private static func upstreamErrorMessage(from rawMessage: String, statusCode: Int) -> String {
         if let data = rawMessage.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             if let errorObject = object["error"] as? [String: Any],
