@@ -13,9 +13,7 @@ struct CodexProxyEditorView: View {
 
     @State private var profile: NodeProfile
     @State private var isNew: Bool
-    @State private var availableModels: [String] = []
-    @State private var isFetchingModels = false
-    @State private var fetchModelsError: String?
+    @StateObject private var modelFetch = ModelFetchState()
     @State private var pricingCurrency: ProxyConfiguration.PricingCurrency
     @State private var extraTOMLCheck: TOMLCheckResult = .ok
 
@@ -206,29 +204,12 @@ struct CodexProxyEditorView: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            HStack(spacing: 8) {
-                Button { fetchModels() } label: {
-                    HStack(spacing: 4) {
-                        if isFetchingModels {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.down.circle")
-                        }
-                        Text(L("Fetch Models", "获取模型"))
-                    }
-                    .font(.caption.weight(.semibold))
-                }
-                .disabled(profile.metadata.proxy.normalizedUpstreamBaseURL.isEmpty
-                          || profile.metadata.proxy.upstreamAPIKey.isEmpty
-                          || isFetchingModels)
-
-                if !availableModels.isEmpty {
-                    Text(L("\(availableModels.count) models available", "已获取 \(availableModels.count) 个模型"))
-                        .font(.caption2).foregroundStyle(.green)
-                } else if let error = fetchModelsError {
-                    Text(error).font(.caption2).foregroundStyle(.red)
-                }
-            }
+            ModelFetchControls(
+                state: modelFetch,
+                baseURL: profile.metadata.proxy.normalizedUpstreamBaseURL,
+                apiKey: profile.metadata.proxy.upstreamAPIKey,
+                style: .openAICompatible
+            )
         }
     }
 
@@ -370,35 +351,7 @@ struct CodexProxyEditorView: View {
     }
 
     private func modelTextField(text: Binding<String>, placeholder: String) -> some View {
-        let suggestions = filteredModels(for: text.wrappedValue)
-        let showSuggestions = !availableModels.isEmpty && !text.wrappedValue.isEmpty && !suggestions.isEmpty
-            && !suggestions.contains(where: { $0 == text.wrappedValue })
-
-        return VStack(alignment: .leading, spacing: 0) {
-            TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
-
-            if showSuggestions {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(suggestions.prefix(8), id: \.self) { model in
-                            Button { text.wrappedValue = model } label: {
-                                Text(model)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                            .background(Color.primary.opacity(0.04))
-                        }
-                    }
-                }
-                .frame(maxHeight: 160)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.1)))
-            }
-        }
+        ModelSuggestionField(text: text, placeholder: placeholder, state: modelFetch)
     }
 
     private func pricingRow(pricing: Binding<ProxyConfiguration.ModelPricing>) -> some View {
@@ -452,46 +405,6 @@ struct CodexProxyEditorView: View {
             }
             dismiss()
         }
-    }
-
-    // MARK: - Model Fetching
-
-    private func fetchModels() {
-        let baseURL = profile.metadata.proxy.normalizedUpstreamBaseURL
-        let apiKey = profile.metadata.proxy.upstreamAPIKey
-        guard !baseURL.isEmpty, !apiKey.isEmpty else { return }
-
-        let urlString = baseURL.hasSuffix("/") ? baseURL + "v1/models" : baseURL + "/v1/models"
-        guard let url = URL(string: urlString) else { return }
-
-        isFetchingModels = true
-        fetchModelsError = nil
-        var request = URLRequest(url: url, timeoutInterval: 10)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        URLSession.shared.dataTask(with: request) { data, _, error in
-            defer { DispatchQueue.main.async { isFetchingModels = false } }
-            if let error = error {
-                DispatchQueue.main.async { fetchModelsError = error.localizedDescription }
-                return
-            }
-            guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let dataArr = json["data"] as? [[String: Any]] else {
-                DispatchQueue.main.async { fetchModelsError = "Invalid response" }
-                return
-            }
-            let models = dataArr.compactMap { $0["id"] as? String }.sorted()
-            DispatchQueue.main.async {
-                availableModels = models
-                fetchModelsError = models.isEmpty ? "No models found" : nil
-            }
-        }.resume()
-    }
-
-    private func filteredModels(for text: String) -> [String] {
-        guard !text.isEmpty else { return availableModels }
-        return availableModels.filter { $0.localizedCaseInsensitiveContains(text) }
     }
 
     private static let codexBrand = Color(red: 0.40, green: 0.52, blue: 0.92)

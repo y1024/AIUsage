@@ -16,6 +16,11 @@ struct OpenCodeManagementView: View {
     @State private var actionError: String?
     @State private var activationInProgress = false
 
+    // 手势驱动的「拖拽实时让位」重排状态（与 Claude/Codex 节点列表同一套手感）。
+    @State private var draggingNodeId: String?
+    @State private var dragTranslation: CGFloat = 0
+    @State private var nodeRowHeights: [String: CGFloat] = [:]
+
     static let brand = Color(red: 0.18, green: 0.83, blue: 0.75)
 
     var body: some View {
@@ -216,8 +221,13 @@ struct OpenCodeManagementView: View {
     // MARK: - Node List
 
     private var nodeList: some View {
-        VStack(spacing: 10) {
-            ForEach(store.nodes) { node in
+        let ids = store.nodes.map(\.id)
+        let srcIdx = draggingNodeId.flatMap { id in ids.firstIndex(of: id) }
+        let target = srcIdx.map { dragTarget(ids: ids, srcIdx: $0) }
+
+        return LazyVStack(spacing: Self.nodeRowSpacing) {
+            ForEach(Array(store.nodes.enumerated()), id: \.element.id) { index, node in
+                let isDragging = draggingNodeId == node.id
                 OpenCodeNodeCard(
                     node: node,
                     isActive: node.id == store.activeNodeId,
@@ -225,9 +235,103 @@ struct OpenCodeManagementView: View {
                     onActivate: { activate(node) },
                     onDeactivate: { deactivate() },
                     onEdit: { editingNode = node },
-                    onDelete: { pendingDeletion = node }
+                    onDelete: { pendingDeletion = node },
+                    onDragChanged: { translation in
+                        if draggingNodeId != node.id {
+                            draggingNodeId = node.id
+                        }
+                        dragTranslation = translation
+                    },
+                    onDragEnded: { commitNodeDrag() }
                 )
+                .background {
+                    if draggingNodeId != nil {
+                        rowHeightReader(for: node.id)
+                    }
+                }
+                .offset(y: rowOffset(index: index, id: node.id, srcIdx: srcIdx, target: target))
+                .scaleEffect(isDragging ? 1.02 : 1, anchor: .center)
+                .shadow(color: .black.opacity(isDragging ? 0.22 : 0),
+                        radius: isDragging ? 9 : 0, y: isDragging ? 5 : 0)
+                .zIndex(isDragging ? 1 : 0)
+                .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.82), value: target)
+                .animation(.interactiveSpring(response: 0.30, dampingFraction: 0.85), value: draggingNodeId)
             }
+        }
+        .onPreferenceChange(OpenCodeNodeRowHeightKey.self) { heights in
+            guard draggingNodeId != nil, nodeRowHeights != heights else { return }
+            nodeRowHeights = heights
+        }
+        .onChange(of: draggingNodeId) { _, id in
+            if id == nil, !nodeRowHeights.isEmpty {
+                nodeRowHeights.removeAll()
+            }
+        }
+    }
+
+    // MARK: - Drag Reorder Helpers
+
+    private static let nodeRowSpacing: CGFloat = 10
+    private static let nodeFallbackHeight: CGFloat = 84
+
+    private func rowHeightReader(for id: String) -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(key: OpenCodeNodeRowHeightKey.self, value: [id: geo.size.height])
+        }
+    }
+
+    private func rowStride(_ id: String) -> CGFloat {
+        (nodeRowHeights[id] ?? Self.nodeFallbackHeight) + Self.nodeRowSpacing
+    }
+
+    /// 各行在基础布局中的中心 Y（被拖行仍按原槽位计入），用于阈值判断。
+    private func rowBaseCenters(_ ids: [String]) -> [CGFloat] {
+        var centers: [CGFloat] = []
+        var top: CGFloat = 0
+        for id in ids {
+            let height = nodeRowHeights[id] ?? Self.nodeFallbackHeight
+            centers.append(top + height / 2)
+            top += height + Self.nodeRowSpacing
+        }
+        return centers
+    }
+
+    /// 由跟手位移推出被拖行应落入的目标条目下标。
+    private func dragTarget(ids: [String], srcIdx: Int) -> Int {
+        guard !ids.isEmpty, srcIdx < ids.count else { return srcIdx }
+        let centers = rowBaseCenters(ids)
+        let draggedCenter = centers[srcIdx] + dragTranslation
+        var target = srcIdx
+        while target < ids.count - 1 && draggedCenter > centers[target + 1] { target += 1 }
+        while target > 0 && draggedCenter < centers[target - 1] { target -= 1 }
+        return target
+    }
+
+    /// 单行 y 位移：被拖行跟手；其余行按「让位」规则平移一个被拖行步幅。
+    private func rowOffset(index: Int, id: String, srcIdx: Int?, target: Int?) -> CGFloat {
+        if id == draggingNodeId { return dragTranslation }
+        guard let srcIdx, let target, let dragId = draggingNodeId else { return 0 }
+        let step = rowStride(dragId)
+        if target > srcIdx, index > srcIdx, index <= target { return -step }
+        if target < srcIdx, index >= target, index < srcIdx { return step }
+        return 0
+    }
+
+    /// 松手时把被拖卡片落到目标下标并整表持久化顺序。
+    private func commitNodeDrag() {
+        let ids = store.nodes.map(\.id)
+        defer {
+            draggingNodeId = nil
+            dragTranslation = 0
+        }
+        guard let id = draggingNodeId, let srcIdx = ids.firstIndex(of: id) else { return }
+        let target = dragTarget(ids: ids, srcIdx: srcIdx)
+        guard target != srcIdx else { return }
+        var reordered = ids
+        reordered.remove(at: srcIdx)
+        reordered.insert(id, at: target)
+        withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.85)) {
+            store.applyOrder(ids: reordered)
         }
     }
 
@@ -303,6 +407,8 @@ private struct OpenCodeNodeCard: View {
     let onDeactivate: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+    var onDragChanged: (CGFloat) -> Void = { _ in }
+    var onDragEnded: () -> Void = {}
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -310,6 +416,18 @@ private struct OpenCodeNodeCard: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.quaternary)
+                .frame(width: 14, height: 30)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                        .onChanged { onDragChanged($0.translation.height) }
+                        .onEnded { _ in onDragEnded() }
+                )
+                .help(L("Drag to reorder", "拖拽排序"))
+
             ProviderIconView("opencode", size: 24)
                 .opacity(isActive ? 1 : 0.65)
 
@@ -408,6 +526,16 @@ private struct OpenCodeNodeCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture(count: 2, perform: onEdit)
+    }
+}
+
+// MARK: - Row Height Key
+// 测量节点卡片真实高度，供拖拽让位的阈值/步幅计算（与 Codex 订阅列表同一套手感）。
+
+private struct OpenCodeNodeRowHeightKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 

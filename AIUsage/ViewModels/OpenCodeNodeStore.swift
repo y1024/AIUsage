@@ -139,6 +139,18 @@ final class OpenCodeNodeStore: ObservableObject {
         }
     }
 
+    /// 拖拽重排：按展示顺序整表重写 sortOrder 并保存。
+    func applyOrder(ids: [String]) {
+        let rank = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($0.element, $0.offset) })
+        for index in nodes.indices {
+            if let order = rank[nodes[index].id] {
+                nodes[index].sortOrder = order
+            }
+        }
+        sortNodes()
+        save()
+    }
+
     /// 首次保存时生成稳定的节点 slug（统计归因键，改名不再变动）；同名冲突追加序号。
     private func ensureProviderSlug(_ node: inout OpenCodeNode) {
         guard node.providerSlug?.nilIfBlank == nil else { return }

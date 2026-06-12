@@ -53,13 +53,6 @@ struct ContentView: View {
                     .tag(AppSection.providers)
 
                 Label {
-                    Text(L("Claude Code Proxy", "Claude Code 代理", key: "nav.proxy_management"))
-                } icon: {
-                    ProviderIconView("claude", size: 18)
-                }
-                .tag(AppSection.proxyManagement)
-
-                Label {
                     Text(L("Codex Proxy", "Codex 代理", key: "nav.codex_proxy_management"))
                 } icon: {
                     ProviderIconView("codex", size: 18)
@@ -72,6 +65,13 @@ struct ContentView: View {
                     ProviderIconView("opencode", size: 18)
                 }
                 .tag(AppSection.opencodeManagement)
+
+                Label {
+                    Text(L("Claude Code Proxy", "Claude Code 代理", key: "nav.proxy_management"))
+                } icon: {
+                    ProviderIconView("claude", size: 18)
+                }
+                .tag(AppSection.proxyManagement)
 
                 navLabel(L("Usage Stats", "用量统计", key: "nav.cost_tracking"), systemImage: "chart.bar.xaxis", tint: .green)
                     .tag(AppSection.costTracking)

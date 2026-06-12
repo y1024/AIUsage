@@ -50,6 +50,7 @@
 		C1OE000C2FB0002000B26789 /* QuotaServerLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */; };
 		C1OE000E2FB0002000B26789 /* OpenCodeProxyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */; };
 		C1OE00102FB0002000B26789 /* OpenCodeRequestLogSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000F2FB0002000B26789 /* OpenCodeRequestLogSection.swift */; };
+		C1OE00122FB0003000B26789 /* ModelSuggestionField.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */; };
 		5EFAD77C2F87AFE700A15674 /* ProviderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD73E2F87AC7100A15674 /* ProviderModels.swift */; };
 		5EFAD77D2F87AFE700A15674 /* ProviderDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7512F87AC7200A15674 /* ProviderDetailView.swift */; };
 		5EFAD77E2F87AFE700A15674 /* ProviderIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7522F87AC7200A15674 /* ProviderIconView.swift */; };
@@ -174,6 +175,7 @@
 		C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaServerLocator.swift; sourceTree = "<group>"; };
 		C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeProxyRuntime.swift; sourceTree = "<group>"; };
 		C1OE000F2FB0002000B26789 /* OpenCodeRequestLogSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeRequestLogSection.swift; sourceTree = "<group>"; };
+		C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSuggestionField.swift; sourceTree = "<group>"; };
 		C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarAccountRow.swift; sourceTree = "<group>"; };
 		C1MB00072FB0000400B26789 /* MenuBarRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarRows.swift; sourceTree = "<group>"; };
 		C1MB00092FB0000400B26789 /* MenuBarSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSupport.swift; sourceTree = "<group>"; };
@@ -403,6 +405,7 @@
 				C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */,
 				C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */,
 				C1OE000F2FB0002000B26789 /* OpenCodeRequestLogSection.swift */,
+				C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */,
 				C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */,
 				C1MB00072FB0000400B26789 /* MenuBarRows.swift */,
 				C1MB00092FB0000400B26789 /* MenuBarSupport.swift */,
@@ -621,6 +624,7 @@
 				C1OE000C2FB0002000B26789 /* QuotaServerLocator.swift in Sources */,
 				C1OE000E2FB0002000B26789 /* OpenCodeProxyRuntime.swift in Sources */,
 				C1OE00102FB0002000B26789 /* OpenCodeRequestLogSection.swift in Sources */,
+				C1OE00122FB0003000B26789 /* ModelSuggestionField.swift in Sources */,
 				C1MB00062FB0000400B26789 /* MenuBarAccountRow.swift in Sources */,
 				C1MB00082FB0000400B26789 /* MenuBarRows.swift in Sources */,
 				C1MB000A2FB0000400B26789 /* MenuBarSupport.swift in Sources */,

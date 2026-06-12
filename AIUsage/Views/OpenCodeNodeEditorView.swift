@@ -1,8 +1,9 @@
 import SwiftUI
 
 // MARK: - OpenCode Node Editor
-// 新建/编辑 OpenCode 接入节点的 sheet：名称、Base URL、API Key、模型列表（每行一个）、
-// 默认模型与可选的上下文/输出上限。保存交由调用方落库；激活节点的编辑会即时重写 opencode.json。
+// 新建/编辑 OpenCode 接入节点的 sheet：名称、Base URL、API Key、模型列表（每行一个，
+// 支持从上游获取后逐个/批量添加）、连通性测试、默认模型与可选的上下文/输出上限。
+// 保存交由调用方落库；激活节点的编辑会即时重写 opencode.json。
 
 struct OpenCodeNodeEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -12,7 +13,16 @@ struct OpenCodeNodeEditorView: View {
     @State private var node: OpenCodeNode
     @State private var modelsText: String
     @State private var showAPIKey = false
+    @StateObject private var modelFetch = ModelFetchState()
+    @State private var connectivity: ConnectivityResult = .idle
     private let isNew: Bool
+
+    private enum ConnectivityResult: Equatable {
+        case idle
+        case testing
+        case success(ms: Int)
+        case failure(String)
+    }
 
     private static let brand = OpenCodeManagementView.brand
 
@@ -51,7 +61,7 @@ struct OpenCodeNodeEditorView: View {
             Divider()
             footer
         }
-        .frame(width: 480, height: 600)
+        .frame(width: 480, height: 640)
     }
 
     // MARK: - Sections
@@ -104,12 +114,119 @@ struct OpenCodeNodeEditorView: View {
                 .buttonStyle(.borderless)
                 .help(L("Show / hide key", "显示 / 隐藏密钥"))
             }
+
+            connectivityRow
         }
+    }
+
+    // MARK: - Connectivity Test
+
+    private var connectivityRow: some View {
+        HStack(spacing: 8) {
+            Button {
+                runConnectivityTest()
+            } label: {
+                HStack(spacing: 4) {
+                    if connectivity == .testing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "bolt.horizontal")
+                    }
+                    Text(L("Test Connection", "测试连通"))
+                }
+                .font(.caption.weight(.semibold))
+            }
+            .disabled(!canTestConnectivity || connectivity == .testing)
+            .help(L(
+                "Sends a 1-token chat request to the endpoint using the first model in the list.",
+                "用列表中的第一个模型向接入点发送一条 1 token 的对话请求。"
+            ))
+
+            switch connectivity {
+            case .idle, .testing:
+                EmptyView()
+            case .success(let ms):
+                Label(L("OK (\(ms) ms)", "连通正常（\(ms) ms）"), systemImage: "checkmark.circle.fill")
+                    .font(.caption2).foregroundStyle(.green)
+            case .failure(let message):
+                Text(message)
+                    .font(.caption2).foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var canTestConnectivity: Bool {
+        node.baseURL.trimmingCharacters(in: .whitespaces).nilIfBlank != nil && !parsedModels.isEmpty
+    }
+
+    private func runConnectivityTest() {
+        guard let model = parsedModels.first,
+              let url = Self.chatCompletionsURL(baseURL: node.baseURL) else { return }
+        connectivity = .testing
+        let apiKey = node.apiKey
+
+        Task {
+            var request = URLRequest(url: url, timeoutInterval: 15)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if !apiKey.isEmpty {
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            }
+            let body: [String: Any] = [
+                "model": model,
+                "messages": [["role": "user", "content": "ping"]],
+                "max_tokens": 1,
+                "stream": false,
+            ]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+            let start = Date()
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let elapsed = Int(Date().timeIntervalSince(start) * 1000)
+                if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                    connectivity = .success(ms: elapsed)
+                } else {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    let bodyText = String(data: data, encoding: .utf8)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    connectivity = .failure("HTTP \(status): \(String(bodyText.prefix(160)))")
+                }
+            } catch {
+                connectivity = .failure(String(error.localizedDescription.prefix(160)))
+            }
+        }
+    }
+
+    /// OpenAI 兼容 chat/completions 端点：base 末尾已含 /v1 则直接拼接，否则补 /v1。
+    private static func chatCompletionsURL(baseURL: String) -> URL? {
+        var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasSuffix("/") { trimmed.removeLast() }
+        guard !trimmed.isEmpty else { return nil }
+        let path = trimmed.lowercased().hasSuffix("/v1") ? "/chat/completions" : "/v1/chat/completions"
+        return URL(string: trimmed + path)
     }
 
     private var modelsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             fieldLabel(L("Models (one per line)", "模型列表（每行一个）"), required: true)
+
+            ModelFetchControls(
+                state: modelFetch,
+                baseURL: node.baseURL,
+                apiKey: node.apiKey,
+                style: .openAICompatible,
+                requiresAPIKey: false
+            )
+
+            FetchedModelAppendList(
+                state: modelFetch,
+                existingModels: Set(parsedModels),
+                onAppend: { appendModels([$0]) },
+                onAppendAll: { appendModels($0) }
+            )
+
             TextEditor(text: $modelsText)
                 .font(.system(size: 12, design: .monospaced))
                 .frame(height: 110)
@@ -235,6 +352,18 @@ struct OpenCodeNodeEditorView: View {
         if !models.contains(node.defaultModel) {
             node.defaultModel = models.first ?? ""
         }
+    }
+
+    /// 把获取到的模型追加进多行列表（跳过已有项，保持原有内容不动）。
+    private func appendModels(_ models: [String]) {
+        let existing = Set(parsedModels)
+        let additions = models.filter { !existing.contains($0) }
+        guard !additions.isEmpty else { return }
+        var text = modelsText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { text += "\n" }
+        text += additions.joined(separator: "\n")
+        modelsText = text
+        ensureDefaultModelValid()
     }
 
     private func save() {
