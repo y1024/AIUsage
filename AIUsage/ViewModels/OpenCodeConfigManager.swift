@@ -2,9 +2,11 @@ import Foundation
 import os.log
 
 // MARK: - OpenCode Config Manager
-// 管理 ~/.config/opencode/opencode.json：注入受管的 provider["aiusage"] 块
+// 管理 ~/.config/opencode/opencode.json：注入受管的 provider["aiusage-<节点>"] 块
 // （npm: @ai-sdk/openai-compatible + baseURL/apiKey/models），并把顶层 model 指向
-// "aiusage/<模型>"；停用时从备份完整还原原文。OpenCode 原生直连上游，无本地代理进程。
+// "aiusage-<节点>/<模型>"；停用时从备份完整还原原文。OpenCode 原生直连上游，无本地代理进程。
+// provider id 按节点区分（node.managedProviderId）——opencode.db 的消息会携带它作为
+// providerID，Phase 1 统计据此把用量/费用归因到具体节点。
 //
 // 数据来源/写入目标: $XDG_CONFIG_HOME/opencode/opencode.json（默认 ~/.config/opencode/）
 // 工作方式: 结构化 JSON 读写。激活前把「干净原文」备份到 opencode.json.aiusage.bak
@@ -52,8 +54,14 @@ enum OpenCodeConfigError: LocalizedError {
 final class OpenCodeConfigManager {
     static let shared = OpenCodeConfigManager()
 
-    /// 受管 provider id。OpenCode 内置 provider 无此名，不冲突。
-    static let providerId = "aiusage"
+    /// 受管 provider id 前缀。OpenCode 内置 provider 无此前缀，不冲突。
+    /// 实际键为 `aiusage-<节点 slug>`（兼容剥离早期固定的 `aiusage`）。
+    static let providerIdPrefix = "aiusage"
+
+    /// 是否为本应用注入的受管 provider 键。
+    static func isManagedProviderKey(_ key: String) -> Bool {
+        key == providerIdPrefix || key.hasPrefix(providerIdPrefix + "-")
+    }
 
     private let fileManager = FileManager.default
 
@@ -89,8 +97,8 @@ final class OpenCodeConfigManager {
     /// 当前 opencode.json 是否处于受管理（已注入节点）状态。
     var isManaged: Bool {
         guard let root = try? readConfigObjectIfExists() else { return false }
-        let provider = root["provider"] as? [String: Any]
-        return provider?[Self.providerId] != nil
+        guard let provider = root["provider"] as? [String: Any] else { return false }
+        return provider.keys.contains(where: Self.isManagedProviderKey)
     }
 
     /// 是否存在我们的备份（代表接管态/未正常还原）。
@@ -100,7 +108,7 @@ final class OpenCodeConfigManager {
 
     // MARK: - Activation
 
-    /// 注入节点配置：provider["aiusage"]（baseURL/apiKey/models）+ 顶层 model 指向受管 provider。
+    /// 注入节点配置：provider["aiusage-<节点>"]（baseURL/apiKey/models）+ 顶层 model 指向受管 provider。
     func activate(node: OpenCodeNode) throws {
         guard !usesJSONC else { throw OpenCodeConfigError.jsoncUnsupported }
         guard let defaultModel = node.effectiveDefaultModel, node.isComplete else {
@@ -121,7 +129,8 @@ final class OpenCodeConfigManager {
             pristine = [:]
         }
 
-        var root = pristine
+        // 防御性再剥离：备份理应是干净原文，但异常残留时也不会叠加多个受管块。
+        var root = stripManagedEntries(from: pristine)
         if root["$schema"] == nil {
             root["$schema"] = "https://opencode.ai/config.json"
         }
@@ -141,18 +150,19 @@ final class OpenCodeConfigManager {
             options["apiKey"] = apiKey
         }
 
+        let managedId = node.managedProviderId
         var provider = root["provider"] as? [String: Any] ?? [:]
-        provider[Self.providerId] = [
+        provider[managedId] = [
             "npm": "@ai-sdk/openai-compatible",
             "name": node.displayName,
             "options": options,
             "models": modelsBlock,
         ] as [String: Any]
         root["provider"] = provider
-        root["model"] = "\(Self.providerId)/\(defaultModel)"
+        root["model"] = "\(managedId)/\(defaultModel)"
 
         try writeObject(root, toPath: configPath, restrictPermissions: true)
-        openCodeConfigLog.info("opencode.json managed provider injected (node=\(node.id, privacy: .public), models=\(node.models.count))")
+        openCodeConfigLog.info("opencode.json managed provider injected (provider=\(managedId, privacy: .public), models=\(node.models.count))")
     }
 
     // MARK: - Deactivation
@@ -188,18 +198,22 @@ final class OpenCodeConfigManager {
 
     // MARK: - Transform
 
-    /// 剥离受管条目：provider["aiusage"]（空了则连 provider 键一起删）与指向它的顶层 model。
+    /// 剥离全部受管条目：`aiusage*` provider 键（空了则连 provider 键一起删）与指向它们的顶层 model。
     func stripManagedEntries(from root: [String: Any]) -> [String: Any] {
         var result = root
         if var provider = result["provider"] as? [String: Any] {
-            provider.removeValue(forKey: Self.providerId)
+            for key in provider.keys where Self.isManagedProviderKey(key) {
+                provider.removeValue(forKey: key)
+            }
             if provider.isEmpty {
                 result.removeValue(forKey: "provider")
             } else {
                 result["provider"] = provider
             }
         }
-        if let model = result["model"] as? String, model.hasPrefix("\(Self.providerId)/") {
+        if let model = result["model"] as? String,
+           let modelProvider = model.split(separator: "/", maxSplits: 1).first,
+           Self.isManagedProviderKey(String(modelProvider)) {
             result.removeValue(forKey: "model")
         }
         return result

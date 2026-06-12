@@ -290,6 +290,14 @@ private struct OpenCodeNodeCard: View {
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
+                    Text(node.managedProviderId)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .help(L(
+                            "Provider id written into opencode.json. Usage Stats attributes model usage to this node via the \"\(node.managedProviderId)/model\" label.",
+                            "写入 opencode.json 的 provider 标识。用量统计通过「\(node.managedProviderId)/模型」标签把用量归因到该节点。"
+                        ))
                 }
             }
 

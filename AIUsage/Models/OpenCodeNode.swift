@@ -15,6 +15,9 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     var models: [String]
     /// 顶层 `model` 指向的默认模型（必须在 models 中）。
     var defaultModel: String
+    /// 受管 provider 的节点标识（进 opencode.db 的 providerID，统计按它归因到节点）。
+    /// 首次保存时生成并保持稳定（改名不变，历史归因不断档）；旧档案缺省为 nil。
+    var providerSlug: String?
     /// 写进每个模型 `limit.context` 的上下文窗口；0 = 不写，由 OpenCode 取默认。
     var contextLimit: Int
     /// 写进每个模型 `limit.output` 的输出上限；0 = 不写。
@@ -30,6 +33,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         apiKey: String = "",
         models: [String] = [],
         defaultModel: String = "",
+        providerSlug: String? = nil,
         contextLimit: Int = 0,
         outputLimit: Int = 0,
         createdAt: Date = Date(),
@@ -42,6 +46,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.apiKey = apiKey
         self.models = models
         self.defaultModel = defaultModel
+        self.providerSlug = providerSlug
         self.contextLimit = contextLimit
         self.outputLimit = outputLimit
         self.createdAt = createdAt
@@ -65,5 +70,37 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     /// 节点是否填齐了激活所需字段。
     var isComplete: Bool {
         baseURL.nilIfBlank != nil && effectiveDefaultModel != nil
+    }
+
+    // MARK: - Managed Provider Id
+
+    /// 注入 opencode.json 的 provider 键，形如 `aiusage-deepseek`。
+    /// opencode.db 的每条消息会带上它作为 providerID，统计页据此区分节点。
+    var managedProviderId: String {
+        "aiusage-" + (providerSlug?.nilIfBlank ?? String(id.prefix(6)).lowercased())
+    }
+
+    /// 从名称/host 生成 slug（小写 ASCII 字母数字 + 连字符），不可用时返回 nil。
+    static func makeSlug(from source: String) -> String? {
+        var slug = ""
+        var previousWasHyphen = true // 抑制开头的连字符
+        for character in source.lowercased() {
+            if character.isASCII, character.isLetter || character.isNumber {
+                slug.append(character)
+                previousWasHyphen = false
+            } else if !previousWasHyphen {
+                slug.append("-")
+                previousWasHyphen = true
+            }
+        }
+        while slug.hasSuffix("-") { slug.removeLast() }
+        return slug.nilIfBlank
+    }
+
+    /// 为本节点生成首选 slug：名称 → baseURL host → 短 id。
+    func preferredSlug() -> String {
+        if let slug = Self.makeSlug(from: name) { return slug }
+        if let host = URL(string: baseURL)?.host, let slug = Self.makeSlug(from: host) { return slug }
+        return String(id.prefix(6)).lowercased()
     }
 }

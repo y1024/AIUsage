@@ -54,6 +54,7 @@ final class OpenCodeNodeStore: ObservableObject {
 
     func upsert(_ node: OpenCodeNode) {
         var updated = node
+        ensureProviderSlug(&updated)
         if let index = nodes.firstIndex(where: { $0.id == node.id }) {
             nodes[index] = updated
         } else {
@@ -105,6 +106,20 @@ final class OpenCodeNodeStore: ObservableObject {
         }
     }
 
+    /// 首次保存时生成稳定的节点 slug（统计归因键，改名不再变动）；同名冲突追加序号。
+    private func ensureProviderSlug(_ node: inout OpenCodeNode) {
+        guard node.providerSlug?.nilIfBlank == nil else { return }
+        let base = node.preferredSlug()
+        var candidate = base
+        var suffix = 2
+        let taken = Set(nodes.filter { $0.id != node.id }.compactMap { $0.providerSlug?.nilIfBlank })
+        while taken.contains(candidate) {
+            candidate = "\(base)-\(suffix)"
+            suffix += 1
+        }
+        node.providerSlug = candidate
+    }
+
     // MARK: - Persistence
 
     private func load() {
@@ -114,9 +129,22 @@ final class OpenCodeNodeStore: ObservableObject {
             nodes = file.nodes
             activeNodeId = file.activeNodeId
             sortNodes()
+            backfillProviderSlugs()
         } catch {
             openCodeStoreLog.error("Failed to load OpenCode nodes: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    /// 给早期版本（无 providerSlug 字段）落库的节点补齐稳定 slug。
+    private func backfillProviderSlugs() {
+        var changed = false
+        for index in nodes.indices where nodes[index].providerSlug?.nilIfBlank == nil {
+            var node = nodes[index]
+            ensureProviderSlug(&node)
+            nodes[index] = node
+            changed = true
+        }
+        if changed { save() }
     }
 
     private func save() {
