@@ -66,6 +66,13 @@ struct ContentView: View {
                 }
                 .tag(AppSection.codexProxyManagement)
 
+                Label {
+                    Text(L("OpenCode Proxy", "OpenCode 代理", key: "nav.opencode_management"))
+                } icon: {
+                    ProviderIconView("opencode", size: 18)
+                }
+                .tag(AppSection.opencodeManagement)
+
                 navLabel(L("Usage Stats", "用量统计", key: "nav.cost_tracking"), systemImage: "chart.bar.xaxis", tint: .green)
                     .tag(AppSection.costTracking)
 
@@ -101,6 +108,9 @@ struct ContentView: View {
                 case .codexProxyManagement:
                     CodexProxyManagementView()
                         .navigationTitle(L("Codex Proxy", "Codex 代理"))
+                case .opencodeManagement:
+                    OpenCodeManagementView()
+                        .navigationTitle(L("OpenCode Proxy", "OpenCode 代理"))
                 case .inbox:
                     InboxView()
                         .navigationTitle(L("Inbox", "消息"))

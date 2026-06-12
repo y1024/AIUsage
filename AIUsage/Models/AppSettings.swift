@@ -10,6 +10,7 @@ enum AppSection: String, Hashable {
     case costTracking
     case proxyManagement
     case codexProxyManagement
+    case opencodeManagement
     case inbox
     case settings
 }
