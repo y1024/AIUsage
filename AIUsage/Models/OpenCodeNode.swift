@@ -86,6 +86,9 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     var priceOutputPerMillion: Double
     var priceCacheReadPerMillion: Double
     var priceCacheWritePerMillion: Double
+    /// 通用配置合并策略（跟随全局/始终合并/从不合并，与 Claude 节点同一枚举）；
+    /// nil = 跟随全局。
+    var commonConfigMode: CommonConfigMode?
     var createdAt: Date
     var lastUsedAt: Date?
     var sortOrder: Int
@@ -113,6 +116,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         priceOutputPerMillion: Double = 0,
         priceCacheReadPerMillion: Double = 0,
         priceCacheWritePerMillion: Double = 0,
+        commonConfigMode: CommonConfigMode? = nil,
         createdAt: Date = Date(),
         lastUsedAt: Date? = nil,
         sortOrder: Int = Int.max
@@ -133,6 +137,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.priceOutputPerMillion = priceOutputPerMillion
         self.priceCacheReadPerMillion = priceCacheReadPerMillion
         self.priceCacheWritePerMillion = priceCacheWritePerMillion
+        self.commonConfigMode = commonConfigMode
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.sortOrder = sortOrder
@@ -157,6 +162,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         priceOutputPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceOutputPerMillion) ?? 0
         priceCacheReadPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheReadPerMillion) ?? 0
         priceCacheWritePerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheWritePerMillion) ?? 0
+        commonConfigMode = try c.decodeIfPresent(CommonConfigMode.self, forKey: .commonConfigMode)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         lastUsedAt = try c.decodeIfPresent(Date.self, forKey: .lastUsedAt)
         sortOrder = try c.decode(Int.self, forKey: .sortOrder)

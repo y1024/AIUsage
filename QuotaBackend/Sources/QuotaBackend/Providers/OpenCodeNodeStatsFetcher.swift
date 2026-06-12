@@ -53,6 +53,28 @@ public enum OpenCodeNodeStatsFetcher {
         public var generatedAt = Date()
     }
 
+    // MARK: - Change Detection
+
+    /// 轻量变更指纹：opencode.db / -wal 的 mtime+size 拼接。
+    /// 管理页轮询比对，仅在库真正变化时才触发整库快照扫描。
+    public static func databaseFingerprint(
+        homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        let provider = OpenCodeCostProvider(homeDirectory: homeDirectory, environment: environment)
+        guard let dataDirectory = provider.resolveDataDirectory() else { return nil }
+        let dbPath = (dataDirectory as NSString).appendingPathComponent(OpenCodeCostProvider.databaseFilename)
+
+        var parts: [String] = []
+        for path in [dbPath, dbPath + "-wal"] {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else { continue }
+            let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            let size = (attrs[.size] as? Int) ?? 0
+            parts.append("\(mtime):\(size)")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "|")
+    }
+
     // MARK: - Fetch
 
     /// 同步阻塞读取（调用方负责放后台任务）。opencode.db 不存在时返回 nil。

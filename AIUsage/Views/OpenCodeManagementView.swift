@@ -48,6 +48,7 @@ struct OpenCodeManagementView: View {
                         proxyErrorBanner
                         actionBar
                         OpenCodeOverviewStrip(store: store, statsStore: statsStore, proxyRuntime: proxyRuntime)
+                        OpenCodeGlobalConfigSection(store: store)
                         nodeListSection
                     }
                     .padding(20)
@@ -57,6 +58,10 @@ struct OpenCodeManagementView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             statsStore.refreshIfStale()
+            statsStore.startPolling()
+        }
+        .onDisappear {
+            statsStore.stopPolling()
         }
         .sheet(item: $editingNode) { node in
             OpenCodeNodeEditorView(node: node) { saved in
@@ -378,7 +383,10 @@ struct OpenCodeManagementView: View {
     /// 复制「不改全局配置即可启动」的命令（OPENCODE_CONFIG 指向导出的独立配置）。
     private func copyLaunchCommand(_ node: OpenCodeNode) {
         do {
-            let command = try OpenCodeConfigManager.shared.makeLaunchCommand(node: node)
+            let command = try OpenCodeConfigManager.shared.makeLaunchCommand(
+                node: node,
+                commonSettings: store.commonSettings(for: node)
+            )
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(command, forType: .string)

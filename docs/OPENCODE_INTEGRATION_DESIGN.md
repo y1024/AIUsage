@@ -326,6 +326,36 @@ template 渲染自适应明暗），替换此前的 SF Symbol 兜底。
 | `Views/OpenCodeManagementView+Toolbar.swift`（新） | 状态横幅 + 工具栏（opencode.json/导入/导出/新建），拆出以控规模 |
 | `Views/OpenCodeRequestLogSection.swift`（删除） | 页面级日志区被节点内联「最近请求」取代 |
 
+### 10.1 通用配置 + 分层预览 + 统计自动刷新（第四轮反馈）
+
+通用配置（CC 同款语义）：复用 `GlobalConfig`（深合并）与 `CommonConfigMode`
+（跟随全局/始终合并/从不合并）两个既有类型，零新模型。片段持久化于
+`~/.config/aiusage/opencode-global-config.json`，激活时合并顺序固定为
+**用户原文 ← 通用配置 ← 受管块**（受管键始终最终生效；通用片段先剥离误带的
+aiusage-* 受管键）。`OpenCodeNodeStore.commonSettings(for:)` 是激活/JSON 预览/
+启动命令三处共用的单一口径；保存通用配置或编辑活动节点都会即时重激活。
+节点级策略存 `OpenCodeNode.commonConfigMode`（可选，nil=跟随全局，旧档案兼容）。
+
+分层最终预览：编辑器「JSON 预览」加合并策略分段选择器 + 行级来源标注
+（复用 `JSONRawEditorView` 的 lineMarkers/C-N-O 三色高亮）：无标=用户原文、
+C=通用配置、N=节点受管、O=通用覆盖原文。标注算法独立于 CC 版
+（层语义不同：CC 是 通用/节点/覆盖，此处是 原文/通用/受管），见
+`Views/OpenCodeConfigLayering.swift`。
+
+统计自动刷新：此前仅「页面出现 + 30s 节流」，对话后必须离开再回来才更新。
+现 `OpenCodeNodeStatsStore` 在管理页可见期间每 3s 轮询 db 变更指纹
+（`OpenCodeNodeStatsFetcher.databaseFingerprint()`：opencode.db/-wal 的
+mtime+size），指纹变化才整库快照扫描——无对话时零扫库开销，有新消息秒级反映。
+
+| 文件 | 职责 |
+|------|------|
+| `Views/OpenCodeGlobalConfigSection.swift`（新） | 节点列表上方「通用配置」卡片（开关 + 语法高亮编辑 sheet） |
+| `Views/OpenCodeConfigLayering.swift`（新） | 分层行标计算（原文/通用/受管/覆盖 → lineMarkers） |
+| `OpenCodeNodeStore`（改） | globalConfig 加载/保存 + `commonSettings(for:)` 合并口径 + 变更即时重激活 |
+| `OpenCodeConfigManager`（改） | `activate/previewMergedConfig/makeLaunchCommand` 接 commonSettings；`pristineConfig`/`managedLayer` 供分层标注 |
+| `OpenCodeNodeStatsFetcher`（改） | `databaseFingerprint()` 轻量变更探测 |
+| `OpenCodeNodeStatsStore`（改） | 可见期 3s 指纹轮询，变化才刷新 |
+
 ## 11. 风险与缓解
 
 | 风险 | 缓解 |

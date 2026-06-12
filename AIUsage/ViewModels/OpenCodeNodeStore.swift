@@ -34,6 +34,9 @@ final class OpenCodeNodeStore: ObservableObject {
 
     @Published private(set) var nodes: [OpenCodeNode] = []
     @Published private(set) var activeNodeId: String?
+    /// 通用配置片段（与 Claude 页同构）：激活时按节点合并策略深合并进 opencode.json，
+    /// 受管块与用户原文之间的中间层。持久化于 ~/.config/aiusage/opencode-global-config.json。
+    @Published var globalConfig: GlobalConfig = .empty
 
     private let configManager = OpenCodeConfigManager.shared
     private let proxyRuntime = OpenCodeProxyRuntime.shared
@@ -52,8 +55,14 @@ final class OpenCodeNodeStore: ObservableObject {
         return (home as NSString).appendingPathComponent(".config/aiusage/opencode-nodes.json")
     }
 
+    static var globalConfigPath: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent(".config/aiusage/opencode-global-config.json")
+    }
+
     init() {
         load()
+        loadGlobalConfig()
         reconcileWithConfigFile()
         restoreProxyIfNeeded()
     }
@@ -128,9 +137,41 @@ final class OpenCodeNodeStore: ObservableObject {
         save()
     }
 
+    // MARK: - Common Config
+
+    /// 按节点合并策略给出通用配置片段（不合并时为 nil），激活/预览/启动命令共用同一口径。
+    func commonSettings(for node: OpenCodeNode) -> [String: Any]? {
+        let mode = node.commonConfigMode ?? .followGlobal
+        guard mode.shouldMerge(globalEnabled: globalConfig.enabled),
+              !globalConfig.settings.isEmpty else { return nil }
+        return globalConfig.settings
+    }
+
+    private func loadGlobalConfig() {
+        guard let data = fileManager.contents(atPath: Self.globalConfigPath),
+              let config = try? GlobalConfig.fromFileData(data) else { return }
+        globalConfig = config
+    }
+
+    func saveGlobalConfig() {
+        do {
+            let data = try globalConfig.toFileData()
+            let dir = (Self.globalConfigPath as NSString).deletingLastPathComponent
+            try fileManager.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try data.write(to: URL(fileURLWithPath: Self.globalConfigPath), options: .atomic)
+        } catch {
+            openCodeStoreLog.error("Failed to save OpenCode global config: \(String(describing: error), privacy: .public)")
+        }
+        // 通用配置变化即时反映到生效中的节点。
+        if let node = activeNode {
+            Task { try? await activate(node) }
+        }
+    }
+
     // MARK: - Activation
 
     func activate(_ node: OpenCodeNode) async throws {
+        let common = commonSettings(for: node)
         if node.proxyEnabled {
             // Codex 轨道（responses 透传）启动时强制要求 Key，缺失会让 QuotaServer
             // 静默不挂载代理路由，请求全 404——提前拦截给出可读错误。
@@ -140,14 +181,14 @@ final class OpenCodeNodeStore: ObservableObject {
             // 代理模式：先拉起本地透传进程，再把 opencode.json 指向它；写配置失败则回收进程。
             try await proxyRuntime.start(node: node)
             do {
-                try configManager.activate(node: node, baseURLOverride: node.proxyLocalBaseURL)
+                try configManager.activate(node: node, baseURLOverride: node.proxyLocalBaseURL, commonSettings: common)
             } catch {
                 proxyRuntime.stop()
                 throw error
             }
         } else {
             proxyRuntime.stop()
-            try configManager.activate(node: node)
+            try configManager.activate(node: node, commonSettings: common)
         }
         if let index = nodes.firstIndex(where: { $0.id == node.id }) {
             nodes[index].lastUsedAt = Date()

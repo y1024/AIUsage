@@ -112,7 +112,9 @@ final class OpenCodeConfigManager {
     /// 注入节点配置：provider["aiusage-<节点>"]（baseURL/apiKey/models）+ 顶层 model 指向受管 provider。
     /// - Parameter baseURLOverride: 代理模式下指向本地透传代理（如 http://127.0.0.1:4321/v1），
     ///   上游真实 baseURL/Key 由代理进程持有，不再出现在 opencode.json。
-    func activate(node: OpenCodeNode, baseURLOverride: String? = nil) throws {
+    /// - Parameter commonSettings: 通用配置片段（按节点合并策略由调用方决定传入与否）。
+    ///   合并顺序：用户原文 ← 通用配置 ← 受管块（受管键始终最终生效）。
+    func activate(node: OpenCodeNode, baseURLOverride: String? = nil, commonSettings: [String: Any]? = nil) throws {
         guard !usesJSONC else { throw OpenCodeConfigError.jsoncUnsupported }
         guard let defaultModel = node.effectiveDefaultModel, node.isComplete else {
             throw OpenCodeConfigError.nodeIncomplete
@@ -134,7 +136,7 @@ final class OpenCodeConfigManager {
 
         // 防御性再剥离：备份理应是干净原文，但异常残留时也不会叠加多个受管块。
         let root = injectManagedEntries(
-            into: stripManagedEntries(from: pristine),
+            into: mergedBase(pristine: stripManagedEntries(from: pristine), commonSettings: commonSettings),
             node: node,
             defaultModel: defaultModel,
             baseURLOverride: baseURLOverride
@@ -142,6 +144,12 @@ final class OpenCodeConfigManager {
 
         try writeObject(root, toPath: configPath, restrictPermissions: true)
         openCodeConfigLog.info("opencode.json managed provider injected (provider=\(node.managedProviderId, privacy: .public), models=\(node.models.count))")
+    }
+
+    /// 用户原文 + 通用配置片段的深合并（通用片段优先，剥离其中可能误带的受管键）。
+    private func mergedBase(pristine: [String: Any], commonSettings: [String: Any]?) -> [String: Any] {
+        guard let common = commonSettings, !common.isEmpty else { return pristine }
+        return GlobalConfig.deepMerge(base: pristine, override: stripManagedEntries(from: common))
     }
 
     // MARK: - Managed Block Building
@@ -205,21 +213,35 @@ final class OpenCodeConfigManager {
         return root
     }
 
-    /// 编辑器 JSON 预览：激活该节点后 opencode.json 的完整内容（基于备份/当前原文合成，不落盘）。
-    /// 节点缺默认模型时顶层 model 留空字符串占位，仅供预览。
-    func previewMergedConfig(node: OpenCodeNode, baseURLOverride: String? = nil) -> [String: Any] {
+    /// 当前的干净原文（备份优先；未接管时为现行文件剥离受管键），供预览/分层标注。
+    func pristineConfig() -> [String: Any] {
         let pristine: [String: Any]
         if hasBackup {
             pristine = (try? readObject(atPath: backupPath)) ?? [:]
         } else {
             pristine = (try? readConfigObjectIfExists()) ?? [:]
         }
-        return injectManagedEntries(
-            into: stripManagedEntries(from: pristine),
+        return stripManagedEntries(from: pristine)
+    }
+
+    /// 编辑器 JSON 预览：激活该节点后 opencode.json 的完整内容（基于备份/当前原文合成，不落盘）。
+    /// 节点缺默认模型时顶层 model 留空字符串占位，仅供预览。
+    func previewMergedConfig(node: OpenCodeNode, baseURLOverride: String? = nil, commonSettings: [String: Any]? = nil) -> [String: Any] {
+        injectManagedEntries(
+            into: mergedBase(pristine: pristineConfig(), commonSettings: commonSettings),
             node: node,
             defaultModel: node.effectiveDefaultModel ?? "",
             baseURLOverride: baseURLOverride
         )
+    }
+
+    /// 受管层独立成块（分层标注用）：$schema/model/provider[managedId]。
+    func managedLayer(node: OpenCodeNode, baseURLOverride: String? = nil) -> [String: Any] {
+        [
+            "$schema": "https://opencode.ai/config.json",
+            "model": "\(node.managedProviderId)/\(node.effectiveDefaultModel ?? "")",
+            "provider": [node.managedProviderId: managedProviderEntry(node: node, baseURLOverride: baseURLOverride)],
+        ]
     }
 
     // MARK: - Launch Command Export
@@ -227,11 +249,12 @@ final class OpenCodeConfigManager {
     /// 「复制启动命令」：导出与激活完全同口径的合并配置（不碰全局 opencode.json），
     /// 写到 ~/.config/aiusage/opencode-configs/<slug>.json（0600），返回
     /// `OPENCODE_CONFIG="<path>" opencode`。代理模式节点指向本地代理（需代理在运行）。
-    func makeLaunchCommand(node: OpenCodeNode) throws -> String {
+    func makeLaunchCommand(node: OpenCodeNode, commonSettings: [String: Any]? = nil) throws -> String {
         guard node.isComplete else { throw OpenCodeConfigError.nodeIncomplete }
         let merged = previewMergedConfig(
             node: node,
-            baseURLOverride: node.proxyEnabled ? node.proxyLocalBaseURL : nil
+            baseURLOverride: node.proxyEnabled ? node.proxyLocalBaseURL : nil,
+            commonSettings: commonSettings
         )
         let home = fileManager.homeDirectoryForCurrentUser.path
         let dir = (home as NSString).appendingPathComponent(".config/aiusage/opencode-configs")

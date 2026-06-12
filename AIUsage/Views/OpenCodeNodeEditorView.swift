@@ -150,20 +150,47 @@ struct OpenCodeNodeEditorView: View {
     }
 
     // MARK: - JSON Preview Tab
+    // 分层最终预览（与 Claude 编辑器「最终 JSON」同款）：合并策略选择器 +
+    // 行级来源标注（无标=用户原文 / C=通用 / N=受管 / O=通用覆盖原文）。
+
+    /// 草稿节点的合并策略下，应并入的通用配置片段（nil = 不合并）。
+    private var draftCommonSettings: [String: Any]? {
+        let store = OpenCodeNodeStore.shared
+        let mode = node.commonConfigMode ?? .followGlobal
+        guard mode.shouldMerge(globalEnabled: store.globalConfig.enabled),
+              !store.globalConfig.settings.isEmpty else { return nil }
+        return store.globalConfig.settings
+    }
 
     private var jsonPreviewTab: some View {
-        let merged = OpenCodeConfigManager.shared.previewMergedConfig(
+        let manager = OpenCodeConfigManager.shared
+        let baseURLOverride = node.proxyEnabled ? node.proxyLocalBaseURL : nil
+        let common = draftCommonSettings
+        let merged = manager.previewMergedConfig(
             node: draftNode,
-            baseURLOverride: node.proxyEnabled ? node.proxyLocalBaseURL : nil
+            baseURLOverride: baseURLOverride,
+            commonSettings: common
         )
         let jsonText = OpenCodeConfigManager.jsonString(merged)
+        let markers = OpenCodeConfigLayering.lineMarkers(
+            text: jsonText,
+            pristine: manager.pristineConfig(),
+            common: common ?? [:],
+            managed: manager.managedLayer(node: draftNode, baseURLOverride: baseURLOverride)
+        )
 
         return VStack(alignment: .leading, spacing: 10) {
+            mergePolicySection
+
             HStack(spacing: 8) {
                 Text(L("opencode.json after activation", "激活后的 opencode.json"))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                sourceLegend(L("Original", "用户原文"), .secondary.opacity(0.35))
+                sourceLegend(L("Common", "通用配置"), .blue)
+                sourceLegend(L("Managed", "节点受管"), .green)
+                sourceLegend(L("Override", "通用覆盖"), .orange)
                 Button {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
@@ -179,7 +206,8 @@ struct OpenCodeNodeEditorView: View {
                 error: .constant(nil),
                 title: "opencode.json",
                 isEditable: false,
-                showsActions: false
+                showsActions: false,
+                lineMarkers: markers
             )
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
@@ -200,6 +228,51 @@ struct OpenCodeNodeEditorView: View {
             .foregroundStyle(.tertiary)
         }
         .padding(18)
+    }
+
+    private var mergePolicySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(L("Common Config", "通用配置"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Image(systemName: OpenCodeNodeStore.shared.globalConfig.enabled ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 10))
+                    .foregroundStyle(OpenCodeNodeStore.shared.globalConfig.enabled ? .green : .secondary)
+                Text(OpenCodeNodeStore.shared.globalConfig.enabled
+                     ? L("Global switch on", "全局开关已开启")
+                     : L("Global switch off", "全局开关已关闭"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+            Picker("", selection: Binding(
+                get: { node.commonConfigMode ?? .followGlobal },
+                set: { node.commonConfigMode = $0 }
+            )) {
+                ForEach(CommonConfigMode.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text((node.commonConfigMode ?? .followGlobal).description)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    private func sourceLegend(_ label: String, _ color: Color) -> some View {
+        HStack(spacing: 3) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color.opacity(0.25))
+                .frame(width: 16, height: 8)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
     }
 
     private var basicSection: some View {
