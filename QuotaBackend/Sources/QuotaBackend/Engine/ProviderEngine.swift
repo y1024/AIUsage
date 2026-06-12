@@ -14,6 +14,9 @@ public actor ProviderEngine {
     // 经常不够用、被整体超时打断后表现为「不可用」。给它一个更宽裕但仍有上限的预算，
     // 正常情况首个请求即返回、远用不到这个上限，只在网络退化时作为兜底天花板。
     static let droidTimeoutSeconds: Double = 45
+    // OpenCode 首次全量导入要复制整库并扫描全部 message 行，大库时 15s 不够；
+    // 之后的窗口扫描通常毫秒级，远用不到这个上限。
+    static let openCodeTimeoutSeconds: Double = 60
 
     public init() {}
 
@@ -154,6 +157,7 @@ public actor ProviderEngine {
         switch provider.id {
         case "codex-cost": return codexCostTimeoutSeconds
         case "droid": return droidTimeoutSeconds
+        case "opencode": return openCodeTimeoutSeconds
         default: return timeoutSeconds
         }
     }

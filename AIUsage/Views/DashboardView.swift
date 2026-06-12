@@ -33,7 +33,7 @@ struct DashboardView: View {
     private var isAwaitingLocalStats: Bool {
         !refreshCoordinator.hasCompletedInitialLoad
             && costTrackingProviders.isEmpty
-            && appState.selectedProviderIds.contains(where: { $0 == "claude" || $0 == "codex-cost" })
+            && appState.selectedProviderIds.contains(where: { $0 == "claude" || $0 == "codex-cost" || $0 == "opencode" })
     }
 
     // MARK: - Overview Section
@@ -216,49 +216,70 @@ struct DashboardView: View {
         costTrackingProviders.filter { $0.baseProviderId == "codex-cost" }
     }
 
-    /// 顶部活动热力图：按工具拆成 Claude Code 与 Codex 两块（仅展示有数据的一块），
-    /// 各自带上自家品牌色——Claude Code 橙、Codex 靛蓝，与卡片/图标/菜单栏口径一致。
-    /// 数据源统一为本地 costSummary：Claude 来自代理归档，Codex 来自代理归档 + 非代理 token 日志。
+    private var opencodeLocalProviders: [ProviderData] {
+        costTrackingProviders.filter { $0.baseProviderId == "opencode" }
+    }
+
+    /// 顶部活动热力图：按工具（Claude Code / Codex / OpenCode）拆块展示，
+    /// 各自带上自家品牌色，与卡片/图标/菜单栏口径一致。
+    /// 数据源统一为本地 costSummary：Claude 来自代理归档，Codex 来自代理归档 + 非代理 token 日志，
+    /// OpenCode 来自本地会话库归档。
     private var dashboardHeatmapWeeks: Int { 26 }
 
-    private var claudeHeatmap: some View {
+    /// 单块热力图描述：数据驱动取代家族二元硬编码，新增本地 cost 工具时只需补一行。
+    private struct HeatmapSpec: Identifiable {
+        let id: String
+        let providers: [ProviderData]
+        let label: String
+        let asset: String
+        let accent: Color
+    }
+
+    private var heatmapSpecs: [HeatmapSpec] {
+        [
+            HeatmapSpec(id: "claude", providers: claudeLocalProviders, label: "Claude Code", asset: "claude", accent: Color(red: 0.85, green: 0.47, blue: 0.26)),
+            HeatmapSpec(id: "codex-cost", providers: codexLocalProviders, label: "Codex", asset: "codex", accent: .indigo),
+            HeatmapSpec(id: "opencode", providers: opencodeLocalProviders, label: "OpenCode", asset: "opencode", accent: Color(red: 0.18, green: 0.83, blue: 0.75))
+        ].filter { !$0.providers.isEmpty }
+    }
+
+    private func heatmap(for spec: HeatmapSpec) -> some View {
         LocalTokenUsageHeatmap(
-            providers: claudeLocalProviders,
-            brandLabel: "Claude Code",
-            brandAsset: "claude",
-            accent: Color(red: 0.85, green: 0.47, blue: 0.26),
+            providers: spec.providers,
+            brandLabel: spec.label,
+            brandAsset: spec.asset,
+            accent: spec.accent,
             weeks: dashboardHeatmapWeeks
         )
     }
 
-    private var codexHeatmap: some View {
-        LocalTokenUsageHeatmap(
-            providers: codexLocalProviders,
-            brandLabel: "Codex",
-            brandAsset: "codex",
-            accent: .indigo,
-            weeks: dashboardHeatmapWeeks
-        )
-    }
-
-    /// 仪表盘热力图：半年口径，Claude Code 与 Codex 左右两列并排；
-    /// 仅一方有数据时占满整行。
+    /// 仪表盘热力图：半年口径，有数据的工具按每行两列排布。
+    /// 末行落单时用透明占位补齐右半列，保证每块热力图等宽（避免单块占满整行显得比上排大）；
+    /// 仅有一块数据源时才占满整行。
     @ViewBuilder
     private var heatmapSection: some View {
-        let showClaude = !claudeLocalProviders.isEmpty
-        let showCodex = !codexLocalProviders.isEmpty
-
-        if showClaude && showCodex {
-            HStack(alignment: .top, spacing: 16) {
-                claudeHeatmap.frame(maxWidth: .infinity)
-                codexHeatmap.frame(maxWidth: .infinity)
+        let specs = heatmapSpecs
+        VStack(spacing: 16) {
+            ForEach(Array(stride(from: 0, to: specs.count, by: 2)), id: \.self) { start in
+                let row = Array(specs[start..<min(start + 2, specs.count)])
+                if row.count == 2 {
+                    HStack(alignment: .top, spacing: 16) {
+                        heatmap(for: row[0]).frame(maxWidth: .infinity)
+                        heatmap(for: row[1]).frame(maxWidth: .infinity)
+                    }
+                } else if specs.count == 1 {
+                    heatmap(for: row[0])
+                } else {
+                    HStack(alignment: .top, spacing: 16) {
+                        heatmap(for: row[0]).frame(maxWidth: .infinity)
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 0)
+                    }
+                }
             }
-            .zIndex(1)
-        } else if showClaude {
-            claudeHeatmap.zIndex(1)
-        } else if showCodex {
-            codexHeatmap.zIndex(1)
         }
+        .zIndex(1)
     }
 
 

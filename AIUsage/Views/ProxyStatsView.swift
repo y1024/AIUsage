@@ -25,13 +25,14 @@ struct ProxyStatsView: View {
     enum StatMetric: String, CaseIterable { case cost, tokens }
 
     enum SourceFamily: String, CaseIterable {
-        case all, claude, codex
+        case all, claude, codex, opencode
 
         var adapterFamily: StatsDataAdapter.SourceFamily {
             switch self {
-            case .all:    return .all
-            case .claude: return .claude
-            case .codex:  return .codex
+            case .all:      return .all
+            case .claude:   return .claude
+            case .codex:    return .codex
+            case .opencode: return .opencode
             }
         }
     }
@@ -50,6 +51,10 @@ struct ProxyStatsView: View {
 
     var codexLocalProviders: [ProviderData] {
         localProviders.filter { $0.baseProviderId == "codex-cost" }
+    }
+
+    var opencodeLocalProviders: [ProviderData] {
+        localProviders.filter { $0.baseProviderId == "opencode" }
     }
 
     var sourceFamily: SourceFamily {
@@ -149,8 +154,8 @@ struct ProxyStatsView: View {
             Text(L("No usage data", "暂无用量数据"))
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
-            Text(L("Usage data will appear once Claude Code or Codex starts generating local logs.",
-                   "当 Claude Code 或 Codex 开始产生本地日志后，用量数据将自动展示。"))
+            Text(L("Usage data will appear once Claude Code, Codex or OpenCode starts generating local logs.",
+                   "当 Claude Code、Codex 或 OpenCode 开始产生本地日志后，用量数据将自动展示。"))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -226,6 +231,7 @@ struct ProxyStatsView: View {
                 case .all: return L("Combined", "综合")
                 case .claude: return "Claude Code"
                 case .codex: return "Codex"
+                case .opencode: return "OpenCode"
                 }
             }
 
@@ -280,8 +286,9 @@ struct ProxyStatsView: View {
 
     @ViewBuilder
     var heatmapSection: some View {
-        let showClaude = sourceFamily != .codex
-        let showCodex = sourceFamily != .claude
+        let showClaude = sourceFamily == .all || sourceFamily == .claude
+        let showCodex = sourceFamily == .all || sourceFamily == .codex
+        let showOpenCode = sourceFamily == .all || sourceFamily == .opencode
 
         VStack(spacing: 16) {
             if showClaude && !claudeLocalProviders.isEmpty {
@@ -300,6 +307,14 @@ struct ProxyStatsView: View {
                     brandAsset: "codex",
                     accent: .indigo,
                     track: effectiveTrack
+                )
+            }
+            if showOpenCode && !opencodeLocalProviders.isEmpty {
+                LocalTokenUsageHeatmap(
+                    providers: opencodeLocalProviders,
+                    brandLabel: "OpenCode",
+                    brandAsset: "opencode",
+                    accent: Color(red: 0.18, green: 0.83, blue: 0.75)
                 )
             }
         }

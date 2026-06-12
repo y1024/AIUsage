@@ -19,6 +19,7 @@ final class ProviderRegistryTests: XCTestCase {
                 "kimi",
                 "kiro",
                 "minimax",
+                "opencode",
                 "warp"
             ]
         )

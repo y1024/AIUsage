@@ -14,6 +14,7 @@ struct CostTrackingCard: View {
         switch provider.providerId {
         case "claude": return .orange
         case "codex-cost": return .indigo
+        case "opencode": return Color(red: 0.18, green: 0.83, blue: 0.75)
         default: return .blue
         }
     }

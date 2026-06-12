@@ -58,6 +58,7 @@ public enum UsageNormalizer {
         "kimi":    ThemeInfo(accent: "blue",   glow: "#1783ff"),
         "kiro":    ThemeInfo(accent: "violet", glow: "#9046ff"),
         "minimax": ThemeInfo(accent: "magenta",glow: "#e2167e"),
+        "opencode": ThemeInfo(accent: "teal",  glow: "#2dd4bf"),
         "warp":    ThemeInfo(accent: "rose",   glow: "#ff7eb2")
     ]
 
@@ -113,6 +114,7 @@ public enum UsageNormalizer {
         case "kimi":    return normalizeKimi(base: &base, usage: usage)
         case "kiro":    return normalizeKiro(base: &base, usage: usage)
         case "minimax": return normalizeMiniMax(base: &base, usage: usage)
+        case "opencode": return normalizeOpenCode(base: &base, usage: usage)
         case "cursor":  return normalizeCursor(base: &base, usage: usage)
         case "droid":   return normalizeDroid(base: &base, usage: usage)
         default:
@@ -494,6 +496,7 @@ public enum UsageNormalizer {
             "claude-proxy-usage": "Proxy usage ledger",
             "codex-session-logs": "Local Codex logs",
             "codex-proxy-non-proxy": "Proxy + non-proxy ledger",
+            "opencode-session-db": "Local OpenCode sessions",
             "gemini-cli": "Gemini CLI OAuth",
             "kiro-ide-auth-file": "Kiro IDE session",
             "pasted-cookie": "Pasted cookie",
@@ -506,7 +509,7 @@ public enum UsageNormalizer {
         switch providerId {
         case "cursor", "copilot", "kiro", "antigravity", "warp":
             return "ide"
-        case "claude", "codex-cost":
+        case "claude", "codex-cost", "opencode":
             return "local"
         default:
             return "cli"
@@ -523,6 +526,8 @@ public enum UsageNormalizer {
             return "Copilot"
         case "gemini":
             return "Gemini CLI"
+        case "opencode":
+            return "OpenCode"
         default:
             return fallback
         }

@@ -12,13 +12,14 @@ final class StatsDataAdapter {
     // MARK: - Family Filter
 
     enum SourceFamily: String, CaseIterable {
-        case all, claude, codex
+        case all, claude, codex, opencode
 
         func matches(_ provider: ProviderData) -> Bool {
             switch self {
-            case .all:    return true
-            case .claude: return provider.baseProviderId == "claude"
-            case .codex:  return provider.baseProviderId == "codex-cost"
+            case .all:      return true
+            case .claude:   return provider.baseProviderId == "claude"
+            case .codex:    return provider.baseProviderId == "codex-cost"
+            case .opencode: return provider.baseProviderId == "opencode"
             }
         }
     }

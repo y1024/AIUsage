@@ -29,6 +29,7 @@ enum MenuBarColors {
         case "codex": return .indigo
         case "droid": return .yellow
         case "minimax": return Color(red: 0.886, green: 0.087, blue: 0.494)
+        case "opencode": return Color(red: 0.18, green: 0.83, blue: 0.75)
         case "warp": return .pink
         default: return .gray
         }

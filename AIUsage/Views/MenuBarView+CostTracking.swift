@@ -2,19 +2,20 @@ import SwiftUI
 import QuotaBackend
 
 // MARK: - MenuBarView Cost Tracking Section
-// Claude Code / Codex 各自的「费用 + 用量」汇总（今日 / 本月 / 总计）。
+// 各本地 cost 工具（Claude Code / Codex / OpenCode）的「费用 + 用量」汇总（今日 / 本月 / 总计）。
 // 数据源统一为对应本地 cost provider 的 costSummary（refreshCoordinator 已聚合）：
 //   · Claude：来自代理用量永久归档（费用与 token 同源）。
 //   · Codex：费用 = 代理轨（代理归档）；token = 代理 + 非代理合计，
 //     这样非代理用量在费用看不出时也能从 token 列直接看到。
+//   · OpenCode：来自本地会话库归档（cost 为 models.dev 定价冻结值，订阅渠道为 0）。
 // 「总计」口径 = 归档全历史（比旧的代理保留窗求和更完整）。
 
 extension MenuBarView {
 
     @ViewBuilder
     var costTrackingSection: some View {
-        let families = costFamilyProviders
-        if !families.isEmpty {
+        let rows = costSourceRows
+        if !rows.isEmpty {
             Divider()
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
@@ -26,8 +27,8 @@ extension MenuBarView {
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(families) { item in
-                    familyCostRow(item.family, summary: item.summary)
+                ForEach(rows) { row in
+                    costSourceRow(row)
                 }
             }
             .padding(.horizontal, 16)
@@ -35,44 +36,54 @@ extension MenuBarView {
         }
     }
 
-    /// 一个家族的费用/用量数据（供 ForEach 稳定标识）。
-    struct FamilyCost: Identifiable {
-        let family: ProxyNodeFamily
+    /// 一个本地 cost 工具的费用/用量行（数据驱动，新增工具时只需补 descriptor）。
+    struct CostSourceRow: Identifiable {
+        let id: String
+        let label: String
+        let iconAsset: String
+        let tint: Color
         let summary: CostSummary
-        var id: Bool { family.isCodex }
     }
 
-    /// 有费用/用量数据的家族（Claude / Codex）及其 costSummary。
-    /// 改用 cost provider 而非代理节点判定，故仅有非代理 Codex 用量（无代理节点）也会展示。
-    var costFamilyProviders: [FamilyCost] {
+    /// 各工具的展示描述：provider id → 品牌名 / 图标 / 配色。
+    private static let costSourceDescriptors: [(providerId: String, label: String, iconAsset: String, tint: Color)] = [
+        ("claude", "Claude Code", "claude", Color(red: 0.85, green: 0.45, blue: 0.25)),
+        ("codex-cost", "Codex", "codex", Color(red: 0.40, green: 0.52, blue: 0.92)),
+        ("opencode", "OpenCode", "opencode", Color(red: 0.18, green: 0.83, blue: 0.75))
+    ]
+
+    /// 有费用/用量数据的本地 cost 工具及其 costSummary。
+    /// 用 cost provider 而非代理节点判定，故仅有非代理用量（无代理节点）也会展示。
+    var costSourceRows: [CostSourceRow] {
         let providers = appState.localCostProviders(from: refreshCoordinator.providers)
-        var result: [FamilyCost] = []
-        if let summary = providers.first(where: { $0.baseProviderId == "claude" })?.costSummary {
-            result.append(FamilyCost(family: .claude, summary: summary))
+        return Self.costSourceDescriptors.compactMap { descriptor in
+            guard let summary = providers.first(where: { $0.baseProviderId == descriptor.providerId })?.costSummary else {
+                return nil
+            }
+            return CostSourceRow(
+                id: descriptor.providerId,
+                label: descriptor.label,
+                iconAsset: descriptor.iconAsset,
+                tint: descriptor.tint,
+                summary: summary
+            )
         }
-        if let summary = providers.first(where: { $0.baseProviderId == "codex-cost" })?.costSummary {
-            result.append(FamilyCost(family: .codex, summary: summary))
-        }
-        return result
     }
 
-    private func familyCostRow(_ family: ProxyNodeFamily, summary: CostSummary) -> some View {
-        let tint = family.isCodex
-            ? Color(red: 0.40, green: 0.52, blue: 0.92)   // Codex 靛蓝
-            : Color(red: 0.85, green: 0.45, blue: 0.25)   // Claude 橙
-        return VStack(alignment: .leading, spacing: 6) {
+    private func costSourceRow(_ row: CostSourceRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                ProviderIconView(family.isCodex ? "codex" : "claude", size: 14)
-                Text(family.isCodex ? "Codex" : "Claude Code")
+                ProviderIconView(row.iconAsset, size: 14)
+                Text(row.label)
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
             }
 
-            // 今日 / 本月 / 总计：三枚等宽胶囊卡片，两家族上下对齐。
+            // 今日 / 本月 / 总计：三枚等宽胶囊卡片，各工具上下对齐。
             HStack(spacing: 6) {
-                metricChip(L("Today", "今日"), cost: summary.today?.usd, tokens: summary.today?.tokens, tint: tint)
-                metricChip(L("Month", "本月"), cost: summary.month?.usd, tokens: summary.month?.tokens, tint: tint)
-                metricChip(L("Total", "总计"), cost: summary.overall?.usd, tokens: summary.overall?.tokens, tint: tint)
+                metricChip(L("Today", "今日"), cost: row.summary.today?.usd, tokens: row.summary.today?.tokens, tint: row.tint)
+                metricChip(L("Month", "本月"), cost: row.summary.month?.usd, tokens: row.summary.month?.tokens, tint: row.tint)
+                metricChip(L("Total", "总计"), cost: row.summary.overall?.usd, tokens: row.summary.overall?.tokens, tint: row.tint)
             }
         }
     }

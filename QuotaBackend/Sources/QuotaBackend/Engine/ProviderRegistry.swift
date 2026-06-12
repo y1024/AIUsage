@@ -17,6 +17,7 @@ public enum ProviderRegistry {
         KimiProvider(),
         KiroProvider(),
         MiniMaxProvider(),
+        OpenCodeCostProvider(),
         WarpProvider()
     ]
 
