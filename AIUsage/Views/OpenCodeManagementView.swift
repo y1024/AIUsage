@@ -22,6 +22,7 @@ struct OpenCodeManagementView: View {
     @State private var pendingDeletion: OpenCodeNode?
     @State var actionError: String?
     @State var importSummary: String?
+    @State var isSyncingCCSwitch = false
     /// opencode.json 内嵌编辑器（语法高亮，与 Claude 页 settings.json 同款）。
     @State var showConfigFileEditor = false
     @State private var activationInProgress = false
@@ -200,6 +201,7 @@ struct OpenCodeManagementView: View {
         OpenCodeNodeCard(
             node: node,
             isActive: node.id == store.activeNodeId,
+            isProxyOnlyRunning: store.proxyOnlyNodeIds.contains(node.id),
             isSelected: isSelected,
             isBusy: activationInProgress,
             activationDisabled: store.usesJSONC || !node.isComplete,
@@ -217,6 +219,7 @@ struct OpenCodeManagementView: View {
             onDragEnded: { commitNodeDrag() },
             onToggleActivation: { toggleActivation(node) },
             onToggleProxyMode: { toggleProxyMode(node) },
+            onToggleProxyOnly: { toggleProxyOnly(node) },
             onTestConnectivity: { testConnectivity(node) },
             onCopyLaunchCommand: { copyLaunchCommand(node) },
             onSelectDefaultModel: { selectDefaultModel(node, model: $0) },
@@ -315,14 +318,35 @@ struct OpenCodeManagementView: View {
             .multilineTextAlignment(.center)
             .frame(maxWidth: 420)
 
-            Button {
-                editingNode = OpenCodeNode()
-            } label: {
-                Label(L("Add Node", "添加节点"), systemImage: "plus")
+            HStack(spacing: 10) {
+                Button {
+                    editingNode = OpenCodeNode()
+                } label: {
+                    Label(L("Add Node", "添加节点"), systemImage: "plus")
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .tint(Self.brand)
+
+                Button {
+                    syncCCSwitch()
+                } label: {
+                    if isSyncingCCSwitch {
+                        Label { Text(L("Importing cc-switch", "正在导入 cc-switch")) } icon: {
+                            ProgressView().controlSize(.small)
+                        }
+                    } else {
+                        Label(L("Import cc-switch", "导入 cc-switch"), systemImage: "tray.and.arrow.down.fill")
+                    }
+                }
+                .controlSize(.large)
+                .buttonStyle(.bordered)
+                .disabled(isSyncingCCSwitch)
+                .help(L(
+                    "Mirror-sync OpenCode providers from cc-switch.",
+                    "从 cc-switch 镜像同步 OpenCode 供应商。"
+                ))
             }
-            .controlSize(.large)
-            .buttonStyle(.borderedProminent)
-            .tint(Self.brand)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -368,6 +392,20 @@ struct OpenCodeManagementView: View {
             updated.proxyPort = OpenCodeNode.defaultProxyPort
         }
         store.upsert(updated)
+    }
+
+    /// 「仅代理」启停：拉起/停止本地透传进程但不接管 opencode.json（配合启动命令使用）。
+    private func toggleProxyOnly(_ node: OpenCodeNode) {
+        guard !activationInProgress else { return }
+        activationInProgress = true
+        Task {
+            defer { activationInProgress = false }
+            do {
+                try await store.toggleProxyOnly(node)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
     }
 
     /// 卡片上的默认模型快速切换：保存即生效（激活中节点由 upsert 自动重写 opencode.json）。

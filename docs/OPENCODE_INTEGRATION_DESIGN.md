@@ -373,11 +373,49 @@ opencode.db 的费用口径是 USD，折算策略与 Claude 节点一致）。
 右键「默认模型」子菜单，保存即生效（激活中节点由 upsert 自动重写 opencode.json）。
 
 三页一致性：
-- 卡片配色对齐 CC/Codex 的「紫 = 代理」语义：激活的代理模式节点整卡紫色调
-  （边条/描边/开关同色），未激活但开代理模式的节点淡紫描边；直连激活保持品牌色。
+- 卡片配色对齐 CC/Codex 的「紫 = 代理」语义（第六轮已改为 §10.3 的「仅代理运行」口径）。
 - 抽共享 `SecureKeyField`（带眼睛显隐的密钥输入框，源自 OpenCode 编辑器）：
   CC 编辑器两处（Anthropic Key / 上游 Key）与 Codex 编辑器上游 Key 接入。
 - 编辑器窗口统一为 750（设置）/ 1100（JSON 预览）× 800，与 CC/Codex 同尺寸。
+
+### 10.3 仅代理 + 菜单栏切换器 + cc-switch 同步（第六轮反馈）
+
+**卡片状态语义改为与 CC/Codex 完全一致**：品牌色 = 激活，紫色 = 「仅代理」运行中；
+「代理模式」本身只是节点类型（徽章表达 Proxy/Direct），不再给卡片染色——
+此前激活的代理节点整卡紫色，与「仅代理」视觉无法区分。天线按钮从「切换代理模式」
+改为「仅代理启停」（代理模式节点专属；激活期间置灰，代理随激活运行）；
+模式切换移到右键菜单/编辑器。
+
+**仅代理（proxy-only）**：`OpenCodeNodeStore.proxyOnlyNodeIds: Set<String>`
+（随 StoreFile 持久化，重启自动恢复）。拉起本地透传进程暴露端口，但不接管
+opencode.json，配合「复制启动命令」独立接入。`OpenCodeProxyRuntime` 重构为
+**多进程模型**（与 Claude/Codex 的 ProxyRuntimeService 同语义）：每节点一个独立
+子进程、各占一端口，可同时运行多个仅代理节点 + 一个激活节点；同端口启动报可读
+错误（运行时先做实例间端口冲突检查，避免 killStaleProcesses 误杀自己的子进程）。
+激活某节点时该节点退出仅代理集合（代理随激活运行，进程参数没变则原地复用）。
+
+**横幅闪现修复**：`OpenCodeProxyRuntime.start` 幂等化——同节点且代理相关参数
+（协议/上游/Key/端口）未变时复用现有进程。此前切换通用配置触发重新激活会让
+代理闪断一拍，顶部「本地代理未在运行」横幅闪现。横幅改为列出所有「应运行而
+未运行」节点的端口，重启按钮拉起全部停摆实例。
+
+**菜单栏切换器**：控制台新增 OpenCode 轨道（Codex → OpenCode → Claude Code，
+与侧边栏同序），节点列表勾选当前生效、点击激活/还原 opencode.json；
+三轨道共用 `trackSwitcherLabel` 外观。
+
+**cc-switch 同步**（`OpenCodeNodeStore+CCSwitchSync.swift`）：cc-switch v3.x 把
+OpenCode 供应商存在 `~/.cc-switch/cc-switch.db` providers 表（app_type='opencode'），
+`settings_config` 即 opencode.json 的 provider 片段 `{npm, options{baseURL,apiKey}, models{...}}`。
+映射：npm 包名 → 协议类型（openai-compatible/anthropic/openai→responses）、
+models 的 `cost` 块（USD/百万）→ 每模型定价、`limit` → 上下文/输出上限。
+节点 id 由行 id + 盐派生确定性 UUID，重复同步 upsert 同一批节点（保留本地代理设置、
+归因 slug、排序）。cc-switch 对 OpenCode 无通用配置（其源码显式不适用），故只同步供应商。
+
+**数据库定位（CCSwitchLocator，三处同步共用）**：cc-switch 支持自定义配置目录，
+覆盖路径存于 `~/Library/Application Support/com.ccswitch.desktop/app_paths.json`
+的 `app_config_dir_override` 键（Tauri store）；未设置时默认 `~/.cc-switch`。
+此前 Claude/Codex/OpenCode 三处同步都硬编码默认路径，用户迁移过配置目录后
+会读到陈旧库——`NodeProfileStore` 与 OpenCode 同步现统一走 `CCSwitchLocator.databasePath()`。
 
 ## 11. 风险与缓解
 

@@ -27,10 +27,21 @@ extension OpenCodeManagementView {
         }
     }
 
-    /// 代理进程异常：崩溃多次自动重启失败，或激活的代理节点进程未在运行。
+    /// 持有本地代理进程的节点：激活的代理节点 + 全部「仅代理」运行中的节点。
+    private var proxyOwnerNodes: [OpenCodeNode] {
+        var owners: [OpenCodeNode] = []
+        if let active = store.activeNode, active.proxyEnabled { owners.append(active) }
+        owners += store.nodes.filter {
+            store.proxyOnlyNodeIds.contains($0.id) && $0.id != store.activeNodeId
+        }
+        return owners
+    }
+
+    /// 代理进程异常：崩溃多次自动重启失败，或持有进程的节点（激活/仅代理）进程未在运行。
     @ViewBuilder
     var proxyErrorBanner: some View {
-        if store.activeNode?.proxyEnabled == true, let error = proxyRuntime.lastError {
+        let stopped = proxyOwnerNodes.filter { !proxyRuntime.runningNodeIds.contains($0.id) }
+        if !proxyOwnerNodes.isEmpty, let error = proxyRuntime.lastError {
             banner(
                 icon: "bolt.trianglebadge.exclamationmark.fill",
                 tint: .red,
@@ -38,14 +49,15 @@ extension OpenCodeManagementView {
                 message: error,
                 trailing: AnyView(restartProxyButton)
             )
-        } else if let active = store.activeNode, active.proxyEnabled, !proxyRuntime.isRunning {
+        } else if !stopped.isEmpty {
+            let ports = stopped.map { "127.0.0.1:\(String($0.proxyPort))" }.joined(separator: ", ")
             banner(
                 icon: "bolt.trianglebadge.exclamationmark.fill",
                 tint: .orange,
                 title: L("Local proxy is not running", "本地代理未在运行"),
                 message: L(
-                    "OpenCode requests via 127.0.0.1:\(String(active.proxyPort)) will fail until the proxy is restarted.",
-                    "重启代理前，OpenCode 经 127.0.0.1:\(String(active.proxyPort)) 的请求将失败。"
+                    "Requests via \(ports) will fail until the proxy is restarted.",
+                    "重启代理前，经 \(ports) 的请求将失败。"
                 ),
                 trailing: AnyView(restartProxyButton)
             )
@@ -54,7 +66,7 @@ extension OpenCodeManagementView {
 
     private var restartProxyButton: some View {
         Button(L("Restart Proxy", "重启代理")) {
-            Task { await proxyRuntime.restart() }
+            Task { await proxyRuntime.restartStopped() }
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
@@ -94,6 +106,7 @@ extension OpenCodeManagementView {
     var actionBar: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
+                ccSwitchSyncButton
                 configFileButton
                 Spacer(minLength: 16)
                 importNodesButton
@@ -103,6 +116,7 @@ extension OpenCodeManagementView {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
+                    ccSwitchSyncButton
                     configFileButton
                     Spacer(minLength: 0)
                 }
@@ -136,6 +150,21 @@ extension OpenCodeManagementView {
         ) {
             showConfigFileEditor = true
         }
+    }
+
+    private var ccSwitchSyncButton: some View {
+        actionBarButton(
+            title: isSyncingCCSwitch ? L("Importing", "导入中") : L("Import cc-switch", "导入 cc-switch"),
+            icon: "tray.and.arrow.down.fill",
+            role: .secondary,
+            help: L(
+                "Mirror-sync OpenCode providers from cc-switch (repeat syncs update the same nodes).",
+                "从 cc-switch 镜像同步 OpenCode 供应商（重复同步更新同一批节点，不产生重复）。"
+            )
+        ) {
+            syncCCSwitch()
+        }
+        .disabled(isSyncingCCSwitch)
     }
 
     private var importNodesButton: some View {
@@ -233,6 +262,31 @@ extension OpenCodeManagementView {
         case .primary: return Color.white.opacity(colorScheme == .dark ? 0.18 : 0.12)
         case .file: return Color.blue.opacity(colorScheme == .dark ? 0.30 : 0.18)
         case .secondary: return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08)
+        }
+    }
+
+    // MARK: - cc-switch Sync
+
+    func syncCCSwitch() {
+        guard !isSyncingCCSwitch else { return }
+        isSyncingCCSwitch = true
+        Task { @MainActor in
+            let result = await store.importCCSwitchOpenCodeNodes()
+            isSyncingCCSwitch = false
+            if result.imported == 0, result.updated == 0 {
+                actionError = result.errors.first.map { error in
+                    L("cc-switch sync failed: \(error)", "cc-switch 同步失败：\(error)")
+                } ?? L("No cc-switch OpenCode providers found.", "未在 cc-switch 中找到 OpenCode 供应商。")
+            } else {
+                var summary = L(
+                    "Synced from cc-switch: \(result.imported) new, \(result.updated) updated.",
+                    "已从 cc-switch 同步：新增 \(result.imported) 个，更新 \(result.updated) 个。"
+                )
+                if result.failed > 0 {
+                    summary += L(" \(result.failed) failed.", " 失败 \(result.failed) 个。")
+                }
+                importSummary = summary
+            }
         }
     }
 

@@ -9,6 +9,7 @@ struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @ObservedObject var proxyVM = ProxyViewModel.shared
+    @ObservedObject var openCodeStore = OpenCodeNodeStore.shared
     @ObservedObject private var settings = AppSettings.shared
     @State private var activationMessage: String?
     @State private var activationSuccess = true
@@ -28,13 +29,16 @@ struct MenuBarView: View {
         .background(VisualEffectBlur())
     }
 
+    // 轨道顺序与侧边栏一致：Codex → OpenCode → Claude Code。
     private var controlDeck: some View {
         HStack(spacing: 0) {
             compactAccountsBadge
                 .frame(maxWidth: .infinity)
-            proxyTrackSwitcher(family: .claude)
-                .frame(maxWidth: .infinity)
             proxyTrackSwitcher(family: .codex)
+                .frame(maxWidth: .infinity)
+            openCodeTrackSwitcher()
+                .frame(maxWidth: .infinity)
+            proxyTrackSwitcher(family: .claude)
                 .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 8)

@@ -11,7 +11,8 @@ import QuotaBackend
 //   anthropic         → PROXY_MODE=passthrough（/v1/messages，Anthropic 透传）
 // 三条轨道都向 stdout 发同构的 PROXY_LOG 行，统一解析为请求级日志
 // （仅观测展示，不参与计费——用量成本仍以 opencode.db 为准，避免双重计账）。
-// 单进程模型: 同一时刻最多一个 OpenCode 节点生效，因此只维护一个子进程。
+// 多进程模型（与 Claude/Codex 的 ProxyRuntimeService 同语义）: 每个节点一个独立子进程、
+// 各占一个端口，可同时运行多个「仅代理」节点 + 一个激活节点；同端口启动会得到可读错误。
 
 private let openCodeProxyLog = Logger(subsystem: "com.aiusage.desktop", category: "OpenCodeProxyRuntime")
 
@@ -19,9 +20,10 @@ private let openCodeProxyLog = Logger(subsystem: "com.aiusage.desktop", category
 final class OpenCodeProxyRuntime: ObservableObject {
     static let shared = OpenCodeProxyRuntime()
 
-    @Published private(set) var isRunning = false
-    @Published private(set) var runningNodeId: String?
-    /// 最近请求日志，新→旧，最多保留 500 条；落盘持久化（成本恒 0，仅观测不计费）。
+    /// 进程正在运行的节点 id 集合。
+    @Published private(set) var runningNodeIds: Set<String> = []
+    /// 最近请求日志（全部节点共享环形缓冲，按 configId=节点 id 区分），新→旧，
+    /// 最多保留 500 条；落盘持久化（成本恒 0，仅观测不计费）。
     @Published private(set) var requestLogs: [ProxyRequestLog] = []
     @Published private(set) var lastError: String?
 
@@ -32,10 +34,15 @@ final class OpenCodeProxyRuntime: ObservableObject {
     private static let restartBaseDelayNanos: UInt64 = 1_000_000_000
     private static let logsSaveDebounceNanos: UInt64 = 2_000_000_000
 
-    private var process: Process?
-    /// 期望保持运行的节点（手动 stop 时清空；崩溃重启据此判断）。
-    private var expectedNode: OpenCodeNode?
-    private var restartAttempts = 0
+    /// 单个节点的进程实例（期望保持运行；手动 stop 移除，崩溃重启据此判断）。
+    private final class Instance {
+        var node: OpenCodeNode
+        var process: Process?
+        var restartAttempts = 0
+        init(node: OpenCodeNode) { self.node = node }
+    }
+
+    private var instances: [String: Instance] = [:]
     private var pendingLogsSave: Task<Void, Never>?
 
     private static var logsFilePath: String {
@@ -49,34 +56,59 @@ final class OpenCodeProxyRuntime: ObservableObject {
 
     // MARK: - Lifecycle
 
+    func isRunning(nodeId: String) -> Bool {
+        runningNodeIds.contains(nodeId)
+    }
+
     func start(node: OpenCodeNode) async throws {
-        // 切换节点/重复激活：先停掉旧进程。
-        stopProcessOnly()
-        expectedNode = node
+        // 幂等：同节点且代理相关参数（协议/上游/Key/端口）未变时复用现有进程。
+        // 否则编辑无关字段（通用配置、定价、模型）触发的重新激活会让代理闪断一拍。
+        if let instance = instances[node.id], instance.process?.isRunning == true,
+           Self.proxyParametersEqual(instance.node, node) {
+            instance.node = node
+            return
+        }
+        // 端口被其它运行中节点占用：直接报可读错误（否则 killStaleProcesses 会误杀它）。
+        if let conflict = instances.values.first(where: {
+            $0.node.id != node.id && $0.process?.isRunning == true && $0.node.proxyPort == node.proxyPort
+        }) {
+            throw ProxyRuntimeError.proxyStartFailed(AppSettings.shared.t(
+                "Port \(node.proxyPort) is already in use by node \"\(conflict.node.displayName)\". Change the port in node settings first.",
+                "端口 \(node.proxyPort) 已被节点「\(conflict.node.displayName)」占用，请先在节点设置中修改端口。"
+            ))
+        }
+
+        stopProcess(nodeId: node.id)
+        let instance = Instance(node: node)
+        instances[node.id] = instance
         lastError = nil
 
         do {
-            try await launch(node: node)
-            restartAttempts = 0
+            try await launch(instance: instance)
+            instance.restartAttempts = 0
         } catch {
-            expectedNode = nil
+            instances.removeValue(forKey: node.id)
             throw error
         }
     }
 
-    func stop() {
-        expectedNode = nil
-        stopProcessOnly()
-        lastError = nil
+    func stop(nodeId: String) {
+        guard let instance = instances.removeValue(forKey: nodeId) else { return }
+        terminate(instance)
+        runningNodeIds.remove(nodeId)
+        if instances.isEmpty { lastError = nil }
     }
 
-    /// 用户在错误横幅上手动重启。
-    func restart() async {
-        guard let node = expectedNode else { return }
-        do {
-            try await start(node: node)
-        } catch {
-            lastError = SensitiveDataRedactor.redactedMessage(for: error)
+    /// 用户在错误横幅上手动重启：拉起所有「期望运行但进程不在」的实例。
+    func restartStopped() async {
+        lastError = nil
+        for instance in instances.values where instance.process?.isRunning != true {
+            do {
+                instance.restartAttempts = 0
+                try await launch(instance: instance)
+            } catch {
+                lastError = SensitiveDataRedactor.redactedMessage(for: error)
+            }
         }
     }
 
@@ -90,20 +122,33 @@ final class OpenCodeProxyRuntime: ObservableObject {
         requestLogs.filter { $0.configId == nodeId }
     }
 
-    private func stopProcessOnly() {
-        guard let process else { return }
-        self.process = nil
+    /// 代理进程的环境是否等价（决定 start 是否可以跳过重启）。
+    private static func proxyParametersEqual(_ a: OpenCodeNode, _ b: OpenCodeNode) -> Bool {
+        a.protocolType == b.protocolType
+            && a.baseURL == b.baseURL
+            && a.apiKey == b.apiKey
+            && a.proxyPort == b.proxyPort
+    }
+
+    private func stopProcess(nodeId: String) {
+        guard let instance = instances[nodeId] else { return }
+        terminate(instance)
+        runningNodeIds.remove(nodeId)
+    }
+
+    private func terminate(_ instance: Instance) {
+        guard let process = instance.process else { return }
+        instance.process = nil
         if process.isRunning {
             process.terminationHandler = nil
             process.terminate()
         }
-        isRunning = false
-        runningNodeId = nil
     }
 
     // MARK: - Launch
 
-    private func launch(node: OpenCodeNode) async throws {
+    private func launch(instance: Instance) async throws {
+        let node = instance.node
         killStaleProcesses(port: node.proxyPort)
 
         guard let executablePath = await QuotaServerLocator.find() else {
@@ -176,52 +221,51 @@ final class OpenCodeProxyRuntime: ObservableObject {
                 : ProxyRuntimeError.proxyStartFailed(error.localizedDescription)
         }
 
-        self.process = process
-        isRunning = true
-        runningNodeId = node.id
+        instance.process = process
+        runningNodeIds.insert(node.id)
         openCodeProxyLog.info("OpenCode proxy started for node \(node.displayName, privacy: .public) on 127.0.0.1:\(node.proxyPort, privacy: .public) pid=\(process.processIdentifier, privacy: .public)")
 
         process.terminationHandler = { [weak self] proc in
             openCodeProxyLog.notice("OpenCode proxy process exited code=\(proc.terminationStatus, privacy: .public)")
             Task { @MainActor [weak self] in
-                self?.handleUnexpectedTermination(of: proc)
+                self?.handleUnexpectedTermination(of: proc, nodeId: nodeId)
             }
         }
     }
 
     // MARK: - Crash Recovery
 
-    private func handleUnexpectedTermination(of proc: Process) {
-        guard process === proc else { return }
-        process = nil
-        isRunning = false
-        runningNodeId = nil
-        scheduleRestart()
+    private func handleUnexpectedTermination(of proc: Process, nodeId: String) {
+        guard let instance = instances[nodeId], instance.process === proc else { return }
+        instance.process = nil
+        runningNodeIds.remove(nodeId)
+        scheduleRestart(nodeId: nodeId)
     }
 
-    private func scheduleRestart() {
-        guard let node = expectedNode else { return }
+    private func scheduleRestart(nodeId: String) {
+        guard let instance = instances[nodeId] else { return }
 
-        restartAttempts += 1
-        guard restartAttempts <= Self.maxRestartAttempts else {
+        instance.restartAttempts += 1
+        guard instance.restartAttempts <= Self.maxRestartAttempts else {
             lastError = AppSettings.shared.t(
-                "The local proxy keeps exiting. OpenCode requests will fail until it is restarted.",
-                "本地代理持续退出，OpenCode 请求将失败，请手动重启代理。"
+                "The local proxy for node \"\(instance.node.displayName)\" keeps exiting. Requests through it will fail until it is restarted.",
+                "节点「\(instance.node.displayName)」的本地代理持续退出，经由它的请求将失败，请手动重启代理。"
             )
-            openCodeProxyLog.error("OpenCode proxy restart attempts exhausted for node \(node.displayName, privacy: .public)")
+            openCodeProxyLog.error("OpenCode proxy restart attempts exhausted for node \(instance.node.displayName, privacy: .public)")
             return
         }
 
-        let attempt = restartAttempts
+        let attempt = instance.restartAttempts
         openCodeProxyLog.notice("Scheduling OpenCode proxy restart attempt \(attempt, privacy: .public)")
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.restartBaseDelayNanos * UInt64(attempt))
-            guard let self, let current = self.expectedNode, current.id == node.id, !self.isRunning else { return }
+            guard let self, let current = self.instances[nodeId],
+                  current.process?.isRunning != true else { return }
             do {
-                try await self.launch(node: current)
-                self.restartAttempts = 0
+                try await self.launch(instance: current)
+                current.restartAttempts = 0
             } catch {
-                self.scheduleRestart()
+                self.scheduleRestart(nodeId: nodeId)
             }
         }
     }
@@ -307,6 +351,7 @@ final class OpenCodeProxyRuntime: ObservableObject {
     // MARK: - Helpers
 
     /// 清掉残留占用端口的旧代理进程（上次未正常退出时）。
+    /// 调用前已确认没有别的受管实例占用该端口，不会误杀自己的子进程。
     private func killStaleProcesses(port: Int) {
         let lsof = Process()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")

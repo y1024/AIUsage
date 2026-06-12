@@ -77,48 +77,124 @@ extension MenuBarView {
                 .disabled(activeId == nil)
             }
         } label: {
-            HStack(spacing: 8) {
-                ProviderIconView(brandAsset, size: 16)
-                    .opacity(isOn ? 1.0 : 0.55)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(title)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(isOn ? accent : .secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-
-                        if isOn {
-                            Circle()
-                                .fill(Color(red: 0.20, green: 0.84, blue: 0.42))
-                                .frame(width: 5, height: 5)
-                        }
-                    }
-                    Text(activeLabel)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(isOn ? .primary : .secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .minimumScaleFactor(0.75)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isOn ? accent.opacity(0.10) : Color.primary.opacity(0.04))
+            trackSwitcherLabel(
+                title: title,
+                brandAsset: brandAsset,
+                accent: accent,
+                isOn: isOn,
+                activeLabel: activeLabel
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(isOn ? accent.opacity(0.30) : Color.clear, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+    }
+
+    // MARK: - OpenCode Track Switcher
+    // OpenCode 节点切换器：节点列表（勾选当前生效）+ 还原 opencode.json。
+    // 与 Claude/Codex 切换器同一套外观；激活/还原委托 OpenCodeNodeStore（代理模式
+    // 节点会顺带拉起/回收本地透传进程）。
+
+    func openCodeTrackSwitcher() -> some View {
+        let activeNode = openCodeStore.activeNode
+        let isOn = activeNode != nil
+        let accent = OpenCodeManagementView.brand
+
+        return Menu {
+            if openCodeStore.nodes.isEmpty {
+                Text(L("No OpenCode nodes", "暂无 OpenCode 节点"))
+            } else {
+                ForEach(openCodeStore.nodes) { openCodeNodeMenuItem($0) }
+            }
+
+            if isOn {
+                Divider()
+                Button {
+                    try? openCodeStore.deactivate()
+                } label: {
+                    Label(L("Restore opencode.json", "还原 opencode.json"), systemImage: "stop.circle")
+                }
+            }
+        } label: {
+            trackSwitcherLabel(
+                title: "OpenCode",
+                brandAsset: "opencode",
+                accent: accent,
+                isOn: isOn,
+                activeLabel: activeNode?.displayName ?? L("Off", "未启用")
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+    }
+
+    @ViewBuilder
+    private func openCodeNodeMenuItem(_ node: OpenCodeNode) -> some View {
+        let isActive = openCodeStore.activeNodeId == node.id
+        Button {
+            if isActive {
+                try? openCodeStore.deactivate()
+            } else {
+                Task { try? await openCodeStore.activate(node) }
+            }
+        } label: {
+            Label {
+                Text(node.displayName)
+            } icon: {
+                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+            }
+        }
+        .disabled(openCodeStore.usesJSONC || !node.isComplete)
+    }
+
+    // MARK: - Shared Label Chrome
+
+    /// 三个轨道切换器共用的标签外观（品牌图标 + 标题 + 当前生效名）。
+    private func trackSwitcherLabel(
+        title: String,
+        brandAsset: String,
+        accent: Color,
+        isOn: Bool,
+        activeLabel: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            ProviderIconView(brandAsset, size: 16)
+                .opacity(isOn ? 1.0 : 0.55)
+
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(isOn ? accent : .secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    if isOn {
+                        Circle()
+                            .fill(Color(red: 0.20, green: 0.84, blue: 0.42))
+                            .frame(width: 5, height: 5)
+                    }
+                }
+                Text(activeLabel)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isOn ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.75)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isOn ? accent.opacity(0.10) : Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(isOn ? accent.opacity(0.30) : Color.clear, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
     }
 
     /// Codex 订阅账号菜单项：点击激活（写 auth.json，自动停用代理节点），已激活打勾。

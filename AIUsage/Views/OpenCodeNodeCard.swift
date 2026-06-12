@@ -11,6 +11,8 @@ import QuotaBackend
 struct OpenCodeNodeCard: View, Equatable {
     let node: OpenCodeNode
     let isActive: Bool
+    /// 「仅代理」运行中（本地代理进程在跑但未接管 opencode.json）。
+    let isProxyOnlyRunning: Bool
     let isSelected: Bool
     let isBusy: Bool
     /// 激活开关不可用（jsonc 接管被禁 / 节点字段不完整）。
@@ -25,6 +27,7 @@ struct OpenCodeNodeCard: View, Equatable {
     var onDragEnded: () -> Void = {}
     var onToggleActivation: () -> Void = {}
     var onToggleProxyMode: () -> Void = {}
+    var onToggleProxyOnly: () -> Void = {}
     var onTestConnectivity: () -> Void = {}
     var onCopyLaunchCommand: () -> Void = {}
     var onSelectDefaultModel: (String) -> Void = { _ in }
@@ -41,6 +44,7 @@ struct OpenCodeNodeCard: View, Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.node == rhs.node &&
         lhs.isActive == rhs.isActive &&
+        lhs.isProxyOnlyRunning == rhs.isProxyOnlyRunning &&
         lhs.isSelected == rhs.isSelected &&
         lhs.isBusy == rhs.isBusy &&
         lhs.activationDisabled == rhs.activationDisabled &&
@@ -111,23 +115,29 @@ struct OpenCodeNodeCard: View, Equatable {
                         get: { isActive },
                         set: { newValue in if newValue != isActive { onToggleActivation() } }
                     ))
-                    .toggleStyle(ProxyActivationToggleStyle(brandColor: statusColor, isBusy: isBusy))
+                    .toggleStyle(ProxyActivationToggleStyle(brandColor: brand, isBusy: isBusy))
                     .disabled(isBusy || (!isActive && activationDisabled))
                     .help(isActive
                           ? L("Restore opencode.json", "还原 opencode.json")
                           : L("Apply to OpenCode", "接入 OpenCode"))
 
-                    Button(action: onToggleProxyMode) {
-                        Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.system(size: 14))
-                            .foregroundStyle(node.proxyEnabled ? .purple : .gray.opacity(0.55))
-                            .frame(width: 20, height: 20)
+                    // 仅代理开关（与 Claude/Codex 卡片同语义）：代理模式节点专属；
+                    // 激活期间代理随激活运行，按钮置灰。
+                    if node.proxyEnabled {
+                        Button(action: onToggleProxyOnly) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 14))
+                                .foregroundStyle(isActive ? .gray.opacity(0.4) : isProxyOnlyRunning ? .orange : .purple)
+                                .frame(width: 20, height: 20)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isBusy || isActive)
+                        .help(isActive
+                              ? L("Unavailable while applied to OpenCode (the proxy runs with activation)", "接入 OpenCode 时不可用（代理随激活运行）")
+                              : isProxyOnlyRunning
+                              ? L("Stop Proxy", "停止代理")
+                              : L("Start the proxy on 127.0.0.1:\(String(node.proxyPort)) without touching opencode.json", "仅启动本地代理（127.0.0.1:\(String(node.proxyPort))），不接管 opencode.json"))
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isBusy)
-                    .help(node.proxyEnabled
-                          ? L("Proxy mode on: requests go through 127.0.0.1:\(String(node.proxyPort)) for request logs. Click to switch to direct.", "代理模式已开：请求经 127.0.0.1:\(String(node.proxyPort)) 以获得请求日志。点击切回直连。")
-                          : L("Direct mode: click to route through a local proxy for request logs.", "直连模式：点击改走本地代理以获得请求日志。"))
 
                     Button(action: onCopyLaunchCommand) {
                         Image(systemName: "doc.on.clipboard")
@@ -175,7 +185,8 @@ struct OpenCodeNodeCard: View, Equatable {
                 .fill(cardBackgroundColor)
         )
         .overlay(alignment: .leading) {
-            if isActive {
+            if isActive || isProxyOnlyRunning {
+                let statusColor: Color = isActive ? brand : .purple
                 Capsule()
                     .fill(statusColor)
                     .frame(width: 3)
@@ -186,7 +197,7 @@ struct OpenCodeNodeCard: View, Equatable {
         }
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(cardBorderColor, lineWidth: isActive ? 1.5 : 1)
+                .stroke(cardBorderColor, lineWidth: (isActive || isProxyOnlyRunning) ? 1.5 : 1)
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: onToggleSelection)
@@ -194,24 +205,19 @@ struct OpenCodeNodeCard: View, Equatable {
     }
 
     // MARK: - Card Styling
-    // 配色与 Claude/Codex 卡片同语言：品牌色 = 激活（直连），紫色 = 代理
-    // （激活的代理节点整卡紫色调；未激活但开了代理模式的节点带淡紫描边提示）。
-
-    /// 激活状态主色：代理模式紫色，直连品牌色。
-    private var statusColor: Color {
-        node.proxyEnabled ? .purple : brand
-    }
+    // 配色与 Claude/Codex 卡片同语言：品牌色 = 激活，紫色 = 仅代理运行中。
+    // 「代理模式」只是节点类型（徽章表达），不再单独给卡片染色。
 
     private var cardBackgroundColor: Color {
-        if isActive { return statusColor.opacity(0.06) }
-        if node.proxyEnabled { return Color.purple.opacity(0.03) }
+        if isActive { return brand.opacity(0.06) }
+        if isProxyOnlyRunning { return Color.purple.opacity(0.04) }
         if isSelected { return brand.opacity(0.04) }
         return Color(nsColor: .controlBackgroundColor).opacity(0.5)
     }
 
     private var cardBorderColor: Color {
-        if isActive { return statusColor.opacity(0.5) }
-        if node.proxyEnabled { return Color.purple.opacity(0.3) }
+        if isActive { return brand.opacity(0.5) }
+        if isProxyOnlyRunning { return Color.purple.opacity(0.4) }
         if isSelected { return brand.opacity(0.25) }
         return Color.primary.opacity(0.06)
     }
@@ -415,10 +421,20 @@ struct OpenCodeNodeCard: View, Equatable {
         }
         .disabled(isBusy || (!isActive && activationDisabled))
 
+        if node.proxyEnabled {
+            Button { onToggleProxyOnly() } label: {
+                Label(
+                    isProxyOnlyRunning ? L("Stop Proxy", "停止代理") : L("Start Proxy Only", "仅启动代理"),
+                    systemImage: "antenna.radiowaves.left.and.right"
+                )
+            }
+            .disabled(isBusy || isActive)
+        }
+
         Button { onToggleProxyMode() } label: {
             Label(
                 node.proxyEnabled ? L("Switch to Direct", "切回直连") : L("Enable Proxy Mode", "开启代理模式"),
-                systemImage: "antenna.radiowaves.left.and.right"
+                systemImage: node.proxyEnabled ? "bolt.horizontal" : "bolt.shield"
             )
         }
         .disabled(isBusy)

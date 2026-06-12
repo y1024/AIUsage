@@ -685,9 +685,10 @@ class NodeProfileStore: ObservableObject {
         var openFailed: Bool = false
     }
 
+    /// cc-switch 数据库路径：尊重 cc-switch 的自定义配置目录（CCSwitchLocator），
+    /// 否则用户迁移过目录后这里会读到陈旧库。
     private static var defaultCCSwitchDBPath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return (home as NSString).appendingPathComponent(".cc-switch/cc-switch.db")
+        CCSwitchLocator.databasePath()
     }
 
     /// 在后台线程执行：打开只读库、读取原始行与通用配置文本。不触碰任何主线程状态。
