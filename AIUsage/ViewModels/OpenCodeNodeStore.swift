@@ -102,6 +102,32 @@ final class OpenCodeNodeStore: ObservableObject {
         save()
     }
 
+    /// 复制节点：新 id/slug（归因独立），插在原节点之后；代理端口避让已占用端口。
+    func duplicate(_ node: OpenCodeNode) {
+        var copy = node
+        copy.id = UUID().uuidString
+        copy.name = node.displayName + " " + AppSettings.shared.t("(Copy)", "(副本)")
+        copy.providerSlug = nil
+        copy.createdAt = Date()
+        copy.lastUsedAt = nil
+        if copy.proxyEnabled {
+            let usedPorts = Set(nodes.filter(\.proxyEnabled).map(\.proxyPort))
+            while usedPorts.contains(copy.proxyPort) && copy.proxyPort < 65_535 {
+                copy.proxyPort += 1
+            }
+        }
+        ensureProviderSlug(&copy)
+        if let index = nodes.firstIndex(where: { $0.id == node.id }) {
+            nodes.insert(copy, at: index + 1)
+        } else {
+            nodes.append(copy)
+        }
+        for index in nodes.indices {
+            nodes[index].sortOrder = index
+        }
+        save()
+    }
+
     // MARK: - Activation
 
     func activate(_ node: OpenCodeNode) async throws {
@@ -168,6 +194,58 @@ final class OpenCodeNodeStore: ObservableObject {
         }
         sortNodes()
         save()
+    }
+
+    // MARK: - Import / Export
+
+    /// 导出文件结构（与 StoreFile 区分：不带激活状态，便于跨机分享）。
+    private struct ExportFile: Codable {
+        var version: Int
+        var nodes: [OpenCodeNode]
+    }
+
+    /// 导出全部节点为 JSON（含 API Key，与 Claude/Codex 节点导出同语义）。
+    func exportNodes() throws -> Data {
+        let file = ExportFile(version: Self.storeVersion, nodes: nodes)
+        return try JSONEncoder.profileEncoder.encode(file)
+    }
+
+    /// 从导出 JSON 导入节点。重复判定：同 baseURL + 协议 + API Key 视为已存在并跳过。
+    /// 返回 (导入数, 跳过数)。
+    func importNodes(from data: Data) throws -> (imported: Int, skipped: Int) {
+        let decoded: [OpenCodeNode]
+        if let file = try? JSONDecoder.profileDecoder.decode(ExportFile.self, from: data) {
+            decoded = file.nodes
+        } else {
+            // 容忍裸数组格式。
+            decoded = try JSONDecoder.profileDecoder.decode([OpenCodeNode].self, from: data)
+        }
+
+        var imported = 0
+        var skipped = 0
+        for var node in decoded {
+            let exists = nodes.contains {
+                $0.baseURL == node.baseURL && $0.protocolType == node.protocolType && $0.apiKey == node.apiKey
+            }
+            if exists {
+                skipped += 1
+                continue
+            }
+            // 新身份落库：避免跨机 id/slug 冲突，归因 slug 按本机已有节点重新生成。
+            node.id = UUID().uuidString
+            node.providerSlug = nil
+            node.createdAt = Date()
+            node.lastUsedAt = nil
+            node.sortOrder = (nodes.map(\.sortOrder).max() ?? 0) + 1
+            ensureProviderSlug(&node)
+            nodes.append(node)
+            imported += 1
+        }
+        if imported > 0 {
+            sortNodes()
+            save()
+        }
+        return (imported, skipped)
     }
 
     /// 首次保存时生成稳定的节点 slug（统计归因键，改名不再变动）；同名冲突追加序号。

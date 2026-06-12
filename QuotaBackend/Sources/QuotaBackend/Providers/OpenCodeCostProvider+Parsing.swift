@@ -22,11 +22,18 @@ extension OpenCodeCostProvider {
             let cache: Cache?
         }
 
+        struct TimeInfo: Decodable {
+            let created: Int64?
+            let completed: Int64?
+        }
+
         let role: String?
         let providerID: String?
         let modelID: String?
         let cost: Double?
         let tokens: Tokens?
+        /// created/completed epoch 毫秒；二者齐备时可得单条请求耗时（节点统计页用）。
+        let time: TimeInfo?
     }
 
     /// 解析一行 message；非 assistant、零用量或无法解码的行返回 nil。

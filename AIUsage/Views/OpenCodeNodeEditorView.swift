@@ -1,9 +1,30 @@
 import SwiftUI
 
 // MARK: - OpenCode Node Editor
-// 新建/编辑 OpenCode 接入节点的 sheet：名称、Base URL、API Key、模型列表（每行一个，
-// 支持从上游获取后逐个/批量添加）、连通性测试、默认模型与可选的上下文/输出上限。
+// 新建/编辑 OpenCode 接入节点的 sheet，与 Claude/Codex 编辑器同款 Tab 结构：
+// 「节点设置」（名称/协议/Base URL/Key/模型/上限/代理模式）+「JSON 预览」
+// （激活后 opencode.json 的最终内容，只读，便于核对受管块）。
 // 保存交由调用方落库；激活节点的编辑会即时重写 opencode.json。
+
+/// 编辑器顶部标签页（避免与 Claude 编辑器的全局 EditorTab 重名）。
+enum OpenCodeEditorTab: CaseIterable {
+    case settings
+    case jsonPreview
+
+    var label: String {
+        switch self {
+        case .settings: return L("Settings", "节点设置")
+        case .jsonPreview: return L("JSON Preview", "JSON 预览")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .settings: return "slider.horizontal.3"
+        case .jsonPreview: return "curlybraces"
+        }
+    }
+}
 
 struct OpenCodeNodeEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -15,6 +36,7 @@ struct OpenCodeNodeEditorView: View {
     @State private var showAPIKey = false
     @StateObject private var modelFetch = ModelFetchState()
     @State private var connectivity: ConnectivityResult = .idle
+    @State private var selectedTab: OpenCodeEditorTab = .settings
     private let isNew: Bool
 
     private enum ConnectivityResult: Equatable {
@@ -45,23 +67,42 @@ struct OpenCodeNodeEditorView: View {
         node.baseURL.trimmingCharacters(in: .whitespaces).nilIfBlank != nil
     }
 
+    /// 编辑中的草稿节点（模型列表来自文本框的即时解析），供连通性测试与 JSON 预览。
+    private var draftNode: OpenCodeNode {
+        var draft = node
+        draft.models = parsedModels
+        return draft
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    basicSection
-                    modelsSection
-                    limitsSection
-                    proxySection
+            tabBar
+            Divider()
+
+            Group {
+                switch selectedTab {
+                case .settings:
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            basicSection
+                            modelsSection
+                            limitsSection
+                            proxySection
+                        }
+                        .padding(18)
+                    }
+                case .jsonPreview:
+                    jsonPreviewTab
                 }
-                .padding(18)
             }
+            .frame(maxHeight: .infinity)
+
             Divider()
             footer
         }
-        .frame(width: 480, height: 640)
+        .frame(width: selectedTab == .jsonPreview ? 720 : 480, height: 640)
     }
 
     // MARK: - Sections
@@ -75,6 +116,92 @@ struct OpenCodeNodeEditorView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 13)
+    }
+
+    // MARK: - Tab Bar (Claude/Codex 编辑器同款)
+
+    private var tabBar: some View {
+        HStack(spacing: 2) {
+            ForEach(OpenCodeEditorTab.allCases, id: \.self) { tab in
+                Button {
+                    selectedTab = tab
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(tab.label)
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundStyle(selectedTab == tab ? Color.white : .secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule().fill(selectedTab == tab ? Self.brand : Color.clear)
+                    )
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - JSON Preview Tab
+
+    private var jsonPreviewTab: some View {
+        let merged = OpenCodeConfigManager.shared.previewMergedConfig(
+            node: draftNode,
+            baseURLOverride: node.proxyEnabled ? node.proxyLocalBaseURL : nil
+        )
+        let jsonText = OpenCodeConfigManager.jsonString(merged)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(L("opencode.json after activation", "激活后的 opencode.json"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(jsonText, forType: .string)
+                } label: {
+                    Label(L("Copy", "复制"), systemImage: "doc.on.doc")
+                }
+                .controlSize(.small)
+            }
+
+            ScrollView([.vertical, .horizontal]) {
+                Text(jsonText)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+            )
+
+            Text(node.proxyEnabled
+                 ? L(
+                     "Read-only preview, merged with your existing config. Proxy mode: baseURL points to the local proxy and the real key stays in the proxy process.",
+                     "只读预览，已与现有配置合并。代理模式：baseURL 指向本地代理，真实 Key 保留在代理进程内。"
+                 )
+                 : L(
+                     "Read-only preview, merged with your existing config (managed provider block + top-level model).",
+                     "只读预览，已与现有配置合并（受管 provider 块 + 顶层 model 指向）。"
+                 ))
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(18)
     }
 
     private var basicSection: some View {
@@ -180,80 +307,19 @@ struct OpenCodeNodeEditorView: View {
         node.baseURL.trimmingCharacters(in: .whitespaces).nilIfBlank != nil && !parsedModels.isEmpty
     }
 
+    /// 委托共享的 OpenCodeConnectivityTester（与管理页卡片同一套协议分支）。
     private func runConnectivityTest() {
-        guard let model = parsedModels.first,
-              let url = Self.testEndpointURL(baseURL: node.baseURL, protocolType: node.protocolType) else { return }
         connectivity = .testing
-        let apiKey = node.apiKey
-        let protocolType = node.protocolType
-
+        let draft = draftNode
         Task {
-            var request = URLRequest(url: url, timeoutInterval: 15)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            if !apiKey.isEmpty {
-                if protocolType == .anthropic {
-                    request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-                    request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-                } else {
-                    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                }
+            let state = await OpenCodeConnectivityTester.test(node: draft)
+            if state.lastSucceeded == true {
+                connectivity = .success(ms: state.latencyMs ?? 0)
+            } else {
+                let prefix = state.statusCode.map { "HTTP \($0): " } ?? ""
+                let detail = state.message ?? L("Unknown error", "未知错误")
+                connectivity = .failure(String((prefix + detail).prefix(200)))
             }
-            request.httpBody = try? JSONSerialization.data(withJSONObject: Self.testBody(model: model, protocolType: protocolType))
-
-            let start = Date()
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                let elapsed = Int(Date().timeIntervalSince(start) * 1000)
-                if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                    connectivity = .success(ms: elapsed)
-                } else {
-                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    let bodyText = String(data: data, encoding: .utf8)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    connectivity = .failure("HTTP \(status): \(String(bodyText.prefix(160)))")
-                }
-            } catch {
-                connectivity = .failure(String(error.localizedDescription.prefix(160)))
-            }
-        }
-    }
-
-    /// 连通性测试端点：base 末尾已含 /v1 则直接拼协议路径，否则补 /v1。
-    private static func testEndpointURL(baseURL: String, protocolType: OpenCodeProtocol) -> URL? {
-        var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        while trimmed.hasSuffix("/") { trimmed.removeLast() }
-        guard !trimmed.isEmpty else { return nil }
-        let path = trimmed.lowercased().hasSuffix("/v1")
-            ? protocolType.requestPath
-            : "/v1" + protocolType.requestPath
-        return URL(string: trimmed + path)
-    }
-
-    /// 各协议最小可行的 1-token 探测请求体。
-    private static func testBody(model: String, protocolType: OpenCodeProtocol) -> [String: Any] {
-        switch protocolType {
-        case .openAICompatible:
-            return [
-                "model": model,
-                "messages": [["role": "user", "content": "ping"]],
-                "max_tokens": 1,
-                "stream": false,
-            ]
-        case .anthropic:
-            return [
-                "model": model,
-                "messages": [["role": "user", "content": "ping"]],
-                "max_tokens": 1,
-            ]
-        case .openAIResponses:
-            // Responses API 要求 max_output_tokens ≥ 16。
-            return [
-                "model": model,
-                "input": "ping",
-                "max_output_tokens": 16,
-                "stream": false,
-            ]
         }
     }
 

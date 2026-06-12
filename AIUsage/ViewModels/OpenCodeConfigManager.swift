@@ -133,11 +133,21 @@ final class OpenCodeConfigManager {
         }
 
         // 防御性再剥离：备份理应是干净原文，但异常残留时也不会叠加多个受管块。
-        var root = stripManagedEntries(from: pristine)
-        if root["$schema"] == nil {
-            root["$schema"] = "https://opencode.ai/config.json"
-        }
+        let root = injectManagedEntries(
+            into: stripManagedEntries(from: pristine),
+            node: node,
+            defaultModel: defaultModel,
+            baseURLOverride: baseURLOverride
+        )
 
+        try writeObject(root, toPath: configPath, restrictPermissions: true)
+        openCodeConfigLog.info("opencode.json managed provider injected (provider=\(node.managedProviderId, privacy: .public), models=\(node.models.count))")
+    }
+
+    // MARK: - Managed Block Building
+
+    /// 受管 provider 条目（写进 provider[managedProviderId] 的值）。激活与编辑器 JSON 预览共用。
+    func managedProviderEntry(node: OpenCodeNode, baseURLOverride: String? = nil) -> [String: Any] {
         var modelsBlock: [String: Any] = [:]
         for modelId in node.models where !modelId.isEmpty {
             var entry: [String: Any] = ["name": modelId]
@@ -157,19 +167,57 @@ final class OpenCodeConfigManager {
             options["apiKey"] = apiKey
         }
 
-        let managedId = node.managedProviderId
-        var provider = root["provider"] as? [String: Any] ?? [:]
-        provider[managedId] = [
+        return [
             "npm": node.protocolType.npmPackage,
             "name": node.displayName,
             "options": options,
             "models": modelsBlock,
-        ] as [String: Any]
+        ]
+    }
+
+    /// 把受管块注入干净原文：provider[managedId] + 顶层 model 指向（含 $schema 补齐）。
+    private func injectManagedEntries(
+        into cleanRoot: [String: Any],
+        node: OpenCodeNode,
+        defaultModel: String,
+        baseURLOverride: String?
+    ) -> [String: Any] {
+        var root = cleanRoot
+        if root["$schema"] == nil {
+            root["$schema"] = "https://opencode.ai/config.json"
+        }
+        let managedId = node.managedProviderId
+        var provider = root["provider"] as? [String: Any] ?? [:]
+        provider[managedId] = managedProviderEntry(node: node, baseURLOverride: baseURLOverride)
         root["provider"] = provider
         root["model"] = "\(managedId)/\(defaultModel)"
+        return root
+    }
 
-        try writeObject(root, toPath: configPath, restrictPermissions: true)
-        openCodeConfigLog.info("opencode.json managed provider injected (provider=\(managedId, privacy: .public), models=\(node.models.count))")
+    /// 编辑器 JSON 预览：激活该节点后 opencode.json 的完整内容（基于备份/当前原文合成，不落盘）。
+    /// 节点缺默认模型时顶层 model 留空字符串占位，仅供预览。
+    func previewMergedConfig(node: OpenCodeNode, baseURLOverride: String? = nil) -> [String: Any] {
+        let pristine: [String: Any]
+        if hasBackup {
+            pristine = (try? readObject(atPath: backupPath)) ?? [:]
+        } else {
+            pristine = (try? readConfigObjectIfExists()) ?? [:]
+        }
+        return injectManagedEntries(
+            into: stripManagedEntries(from: pristine),
+            node: node,
+            defaultModel: node.effectiveDefaultModel ?? "",
+            baseURLOverride: baseURLOverride
+        )
+    }
+
+    /// 预览用的稳定序列化（与落盘格式一致：pretty + sortedKeys + 不转义斜杠）。
+    static func jsonString(_ object: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
     }
 
     // MARK: - Deactivation

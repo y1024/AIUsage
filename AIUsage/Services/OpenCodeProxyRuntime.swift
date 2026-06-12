@@ -21,20 +21,31 @@ final class OpenCodeProxyRuntime: ObservableObject {
 
     @Published private(set) var isRunning = false
     @Published private(set) var runningNodeId: String?
-    /// 最近请求日志，新→旧，最多保留 200 条（仅内存，不落盘）。
+    /// 最近请求日志，新→旧，最多保留 500 条；落盘持久化（成本恒 0，仅观测不计费）。
     @Published private(set) var requestLogs: [ProxyRequestLog] = []
     @Published private(set) var lastError: String?
 
-    private static let maxLogEntries = 200
+    private static let maxLogEntries = 500
     private static let startupTimeout: TimeInterval = 5
     private static let startupProbeIntervalNanos: UInt64 = 100_000_000
     private static let maxRestartAttempts = 3
     private static let restartBaseDelayNanos: UInt64 = 1_000_000_000
+    private static let logsSaveDebounceNanos: UInt64 = 2_000_000_000
 
     private var process: Process?
     /// 期望保持运行的节点（手动 stop 时清空；崩溃重启据此判断）。
     private var expectedNode: OpenCodeNode?
     private var restartAttempts = 0
+    private var pendingLogsSave: Task<Void, Never>?
+
+    private static var logsFilePath: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent(".config/aiusage/opencode-proxy-logs.json")
+    }
+
+    private init() {
+        loadPersistedLogs()
+    }
 
     // MARK: - Lifecycle
 
@@ -71,6 +82,12 @@ final class OpenCodeProxyRuntime: ObservableObject {
 
     func clearLogs() {
         requestLogs = []
+        persistLogsSoon()
+    }
+
+    /// 单个节点的日志切片（节点详情统计用）。
+    func logs(forNodeId nodeId: String) -> [ProxyRequestLog] {
+        requestLogs.filter { $0.configId == nodeId }
     }
 
     private func stopProcessOnly() {
@@ -248,6 +265,42 @@ final class OpenCodeProxyRuntime: ObservableObject {
         requestLogs.insert(log, at: 0)
         if requestLogs.count > Self.maxLogEntries {
             requestLogs.removeLast(requestLogs.count - Self.maxLogEntries)
+        }
+        persistLogsSoon()
+    }
+
+    // MARK: - Log Persistence
+
+    private func loadPersistedLogs() {
+        guard let data = FileManager.default.contents(atPath: Self.logsFilePath) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let logs = try? decoder.decode([ProxyRequestLog].self, from: data) {
+            requestLogs = Array(logs.prefix(Self.maxLogEntries))
+        }
+    }
+
+    /// 防抖落盘：日志多为突发（流式回合结束），合并 2 秒窗口内的写入。
+    private func persistLogsSoon() {
+        pendingLogsSave?.cancel()
+        pendingLogsSave = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.logsSaveDebounceNanos)
+            guard !Task.isCancelled else { return }
+            self?.persistLogsNow()
+        }
+    }
+
+    private func persistLogsNow() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(requestLogs) else { return }
+        let path = Self.logsFilePath
+        let dir = (path as NSString).deletingLastPathComponent
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch {
+            openCodeProxyLog.warning("Failed to persist OpenCode proxy logs: \(String(describing: error), privacy: .public)")
         }
     }
 

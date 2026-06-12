@@ -1,0 +1,318 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+// MARK: - OpenCodeManagementView Banners & Toolbar
+// 状态横幅（接管态/JSONC/代理异常）与顶部工具栏（opencode.json/导入/导出/新建）。
+// 与 Claude/Codex 页的工具栏同款容器按钮组视觉。拆出以控制单文件规模；
+// 依赖主视图的 internal @State / store。
+
+extension OpenCodeManagementView {
+
+    // MARK: - Status Banner
+
+    @ViewBuilder
+    var statusBanner: some View {
+        if store.usesJSONC {
+            banner(
+                icon: "exclamationmark.triangle.fill",
+                tint: .orange,
+                title: L("opencode.jsonc detected", "检测到 opencode.jsonc"),
+                message: L(
+                    "AIUsage cannot safely rewrite JSONC (comments would be lost). Migrate it to opencode.json to enable node switching.",
+                    "AIUsage 无法安全改写 JSONC（注释会丢失）。请先迁移为 opencode.json 再使用节点切换。"
+                )
+            )
+        } else if let active = store.activeNode {
+            banner(
+                icon: "checkmark.circle.fill",
+                tint: Self.brand,
+                title: L("Managing opencode.json — \(active.displayName)", "已接管 opencode.json — \(active.displayName)"),
+                message: active.proxyEnabled
+                    ? (proxyRuntime.isRunning
+                        ? L(
+                            "OpenCode goes through the local proxy at 127.0.0.1:\(String(active.proxyPort)) — request logs appear in the node's detail. Restart OpenCode sessions for the change to take effect.",
+                            "OpenCode 经本地代理 127.0.0.1:\(String(active.proxyPort)) 访问上游，请求日志见节点详情。重启 OpenCode 会话后生效。"
+                        )
+                        : L(
+                            "Local proxy is not running — OpenCode requests will fail until it is restarted.",
+                            "本地代理未在运行——重启代理前 OpenCode 请求将失败。"
+                        ))
+                    : L(
+                        "OpenCode now talks to this node directly. Restart OpenCode sessions for the change to take effect.",
+                        "OpenCode 将直连该节点。重启 OpenCode 会话后生效。"
+                    ),
+                trailing: AnyView(
+                    HStack(spacing: 8) {
+                        if active.proxyEnabled, !proxyRuntime.isRunning {
+                            Button(L("Restart Proxy", "重启代理")) {
+                                Task { await proxyRuntime.restart() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.orange)
+                            .controlSize(.small)
+                        }
+                        Button(L("Deactivate", "停用")) { deactivate() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                )
+            )
+        } else {
+            banner(
+                icon: "circle.dashed",
+                tint: .secondary,
+                title: L("Not managing opencode.json", "未接管 opencode.json"),
+                message: L(
+                    "OpenCode is using its own configuration. Activate a node to route OpenCode to that endpoint.",
+                    "OpenCode 正在使用自身配置。激活某个节点后，OpenCode 将切换到该接入点。"
+                )
+            )
+        }
+    }
+
+    /// 代理进程异常（多次自动重启失败）时的提示。
+    @ViewBuilder
+    var proxyErrorBanner: some View {
+        if store.activeNode?.proxyEnabled == true, let error = proxyRuntime.lastError {
+            banner(
+                icon: "bolt.trianglebadge.exclamationmark.fill",
+                tint: .red,
+                title: L("Local proxy error", "本地代理异常"),
+                message: error,
+                trailing: AnyView(
+                    Button(L("Restart Proxy", "重启代理")) {
+                        Task { await proxyRuntime.restart() }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                )
+            )
+        }
+    }
+
+    private func banner(icon: String, tint: Color, title: String, message: String, trailing: AnyView? = nil) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundStyle(tint)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if let trailing { trailing }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(tint.opacity(colorScheme == .dark ? 0.12 : 0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(tint.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Action Bar (Claude/Codex 页同款容器按钮组)
+
+    var actionBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                configFileButton
+                Spacer(minLength: 16)
+                importNodesButton
+                exportNodesButton
+                newNodeButton
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    configFileButton
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 10) {
+                    importNodesButton
+                    exportNodesButton
+                    Spacer(minLength: 8)
+                    newNodeButton
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.78 : 0.94))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.06), lineWidth: 1)
+        )
+    }
+
+    private var configFileButton: some View {
+        actionBarButton(
+            title: "opencode.json",
+            icon: "doc.text.magnifyingglass",
+            role: .file,
+            help: L("Reveal the live opencode.json in Finder.", "在访达中显示当前生效的 opencode.json。")
+        ) {
+            revealConfigFile()
+        }
+    }
+
+    private var importNodesButton: some View {
+        actionBarButton(
+            title: L("Import Nodes", "导入节点"),
+            icon: "square.and.arrow.down",
+            role: .secondary,
+            help: L("Import node profiles from a JSON file.", "从 JSON 文件导入节点配置。")
+        ) {
+            importNodesFromFile()
+        }
+    }
+
+    private var exportNodesButton: some View {
+        actionBarButton(
+            title: L("Export Nodes", "导出节点"),
+            icon: "square.and.arrow.up",
+            role: .secondary,
+            help: L("Export all nodes to a JSON file (includes API keys).", "把全部节点导出为 JSON 文件（含 API Key）。")
+        ) {
+            exportNodesToFile()
+        }
+        .disabled(store.nodes.isEmpty)
+    }
+
+    private var newNodeButton: some View {
+        actionBarButton(
+            title: L("New Node", "新建节点"),
+            icon: "plus.circle.fill",
+            role: .primary,
+            help: L("Create a new OpenCode node.", "新建一个 OpenCode 节点。")
+        ) {
+            editingNode = OpenCodeNode()
+        }
+        .keyboardShortcut("n", modifiers: [.command])
+    }
+
+    private enum ActionBarButtonRole {
+        case secondary
+        case file
+        case primary
+    }
+
+    private func actionBarButton(
+        title: String,
+        icon: String,
+        role: ActionBarButtonRole,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 14)
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(actionButtonForeground(role))
+            .padding(.horizontal, 11)
+            .frame(minHeight: 32)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(actionButtonBackground(role))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(actionButtonBorder(role), lineWidth: 0.5)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func actionButtonForeground(_ role: ActionBarButtonRole) -> Color {
+        switch role {
+        case .primary: return .white
+        case .file: return .blue
+        case .secondary: return .primary
+        }
+    }
+
+    private func actionButtonBackground(_ role: ActionBarButtonRole) -> Color {
+        switch role {
+        case .primary: return Color.accentColor
+        case .file: return Color.blue.opacity(colorScheme == .dark ? 0.18 : 0.10)
+        case .secondary: return colorScheme == .dark ? Color.white.opacity(0.075) : Color.primary.opacity(0.045)
+        }
+    }
+
+    private func actionButtonBorder(_ role: ActionBarButtonRole) -> Color {
+        switch role {
+        case .primary: return Color.white.opacity(colorScheme == .dark ? 0.18 : 0.12)
+        case .file: return Color.blue.opacity(colorScheme == .dark ? 0.30 : 0.18)
+        case .secondary: return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08)
+        }
+    }
+
+    // MARK: - File Actions
+
+    func revealConfigFile() {
+        let path = store.configPath
+        if FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+        } else {
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: (path as NSString).deletingLastPathComponent)
+        }
+    }
+
+    // MARK: - Import / Export
+
+    func importNodesFromFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.message = L("Choose an exported OpenCode nodes JSON file", "选择导出的 OpenCode 节点 JSON 文件")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let result = try store.importNodes(from: data)
+            importSummary = L(
+                "Imported \(result.imported) node(s), skipped \(result.skipped) duplicate(s).",
+                "已导入 \(result.imported) 个节点，跳过 \(result.skipped) 个重复项。"
+            )
+        } catch {
+            actionError = L(
+                "Import failed: the file is not a valid OpenCode nodes export.",
+                "导入失败：文件不是有效的 OpenCode 节点导出。"
+            )
+        }
+    }
+
+    func exportNodesToFile() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "opencode-nodes.json"
+        panel.message = L("Exported file includes API keys — keep it safe.", "导出文件包含 API Key，请妥善保管。")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try store.exportNodes()
+            try data.write(to: url, options: .atomic)
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+}
