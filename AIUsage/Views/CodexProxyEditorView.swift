@@ -200,8 +200,7 @@ struct CodexProxyEditorView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("API Key").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                SecureField("sk-...", text: $profile.metadata.proxy.upstreamAPIKey)
-                    .textFieldStyle(.roundedBorder)
+                SecureKeyField("sk-...", text: $profile.metadata.proxy.upstreamAPIKey)
             }
 
             ModelFetchControls(

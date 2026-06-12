@@ -32,12 +32,18 @@ struct OpenCodeNodeEditorView: View {
     let onSave: (OpenCodeNode) -> Void
 
     @State private var node: OpenCodeNode
-    @State private var modelsText: String
-    @State private var showAPIKey = false
+    /// 行式模型编辑。模型 ID 可编辑，不能充当 ForEach 身份（打字即重建行、丢焦点），
+    /// 故用稳定 UUID 行号包装。
+    @State private var modelRows: [ModelRow]
     @StateObject private var modelFetch = ModelFetchState()
     @State private var connectivity: ConnectivityResult = .idle
     @State private var selectedTab: OpenCodeEditorTab = .settings
     private let isNew: Bool
+
+    struct ModelRow: Identifiable {
+        let id = UUID()
+        var entry: OpenCodeModelEntry
+    }
 
     private enum ConnectivityResult: Equatable {
         case idle
@@ -51,26 +57,31 @@ struct OpenCodeNodeEditorView: View {
     init(node: OpenCodeNode, onSave: @escaping (OpenCodeNode) -> Void) {
         self.onSave = onSave
         _node = State(initialValue: node)
-        _modelsText = State(initialValue: node.models.joined(separator: "\n"))
-        isNew = node.name.isEmpty && node.baseURL.isEmpty && node.models.isEmpty
+        _modelRows = State(initialValue: node.modelEntries.map { ModelRow(entry: $0) })
+        isNew = node.name.isEmpty && node.baseURL.isEmpty && node.modelEntries.isEmpty
     }
 
-    private var parsedModels: [String] {
+    /// 行内容 → 模型条目（去空白、去重、保持顺序）。
+    private var parsedEntries: [OpenCodeModelEntry] {
         var seen = Set<String>()
-        return modelsText
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && seen.insert($0).inserted }
+        return modelRows.compactMap { row in
+            var entry = row.entry
+            entry.id = entry.id.trimmingCharacters(in: .whitespaces)
+            guard !entry.id.isEmpty, seen.insert(entry.id).inserted else { return nil }
+            return entry
+        }
     }
+
+    private var parsedModels: [String] { parsedEntries.map(\.id) }
 
     private var canSave: Bool {
         node.baseURL.trimmingCharacters(in: .whitespaces).nilIfBlank != nil
     }
 
-    /// 编辑中的草稿节点（模型列表来自文本框的即时解析），供连通性测试与 JSON 预览。
+    /// 编辑中的草稿节点（模型来自行编辑的即时解析），供连通性测试与 JSON 预览。
     private var draftNode: OpenCodeNode {
         var draft = node
-        draft.models = parsedModels
+        draft.modelEntries = parsedEntries
         return draft
     }
 
@@ -89,7 +100,6 @@ struct OpenCodeNodeEditorView: View {
                             basicSection
                             modelsSection
                             limitsSection
-                            pricingSection
                             proxySection
                         }
                         .padding(18)
@@ -103,7 +113,8 @@ struct OpenCodeNodeEditorView: View {
             Divider()
             footer
         }
-        .frame(width: selectedTab == .jsonPreview ? 720 : 480, height: 640)
+        // 与 Claude/Codex 编辑器同尺寸（设置 750、JSON 预览 1100，高 800）。
+        .frame(width: selectedTab == .jsonPreview ? 1100 : 750, height: 800)
     }
 
     // MARK: - Sections
@@ -305,25 +316,7 @@ struct OpenCodeNodeEditorView: View {
             .foregroundStyle(.tertiary)
 
             fieldLabel(L("API Key", "API Key"), required: false)
-            HStack(spacing: 6) {
-                Group {
-                    if showAPIKey {
-                        TextField("sk-...", text: $node.apiKey)
-                    } else {
-                        SecureField("sk-...", text: $node.apiKey)
-                    }
-                }
-                .textFieldStyle(.roundedBorder)
-                .autocorrectionDisabled()
-
-                Button {
-                    showAPIKey.toggle()
-                } label: {
-                    Image(systemName: showAPIKey ? "eye.slash" : "eye")
-                }
-                .buttonStyle(.borderless)
-                .help(L("Show / hide key", "显示 / 隐藏密钥"))
-            }
+            SecureKeyField("sk-...", text: $node.apiKey)
 
             connectivityRow
         }
@@ -394,9 +387,40 @@ struct OpenCodeNodeEditorView: View {
         }
     }
 
+    // MARK: - Models（行式：单选默认模型 + 每模型独立定价）
+
+    private var showsPriceColumns: Bool { node.pricingCurrency != .none }
+
     private var modelsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            fieldLabel(L("Models (one per line)", "模型列表（每行一个）"), required: true)
+            HStack {
+                fieldLabel(L("Models & Pricing", "模型与定价"), required: true)
+                Spacer()
+                if showsPriceColumns {
+                    Button {
+                        autoFillCachePrices()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "wand.and.stars")
+                            Text(L("Auto-fill Cache (1.25× / 0.1×)", "自动填充缓存（1.25×/0.1×）"))
+                        }
+                        .font(.caption.weight(.medium))
+                    }
+                    .buttonStyle(.borderless)
+                    .help(L(
+                        "Set cache-write = 1.25× input and cache-read = 0.1× input for every model with an input price.",
+                        "为所有已填输入价的模型按 ×1.25 / ×0.1 计算缓存写入与读取单价。"
+                    ))
+                }
+                Picker("", selection: $node.pricingCurrency) {
+                    ForEach(OpenCodePricingCurrency.allCases, id: \.self) { currency in
+                        Text(currency.label).tag(currency)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+                .labelsHidden()
+            }
 
             ModelFetchControls(
                 state: modelFetch,
@@ -413,32 +437,111 @@ struct OpenCodeNodeEditorView: View {
                 onAppendAll: { appendModels($0) }
             )
 
-            TextEditor(text: $modelsText)
-                .font(.system(size: 12, design: .monospaced))
-                .frame(height: 110)
-                .scrollContentBackground(.hidden)
-                .padding(6)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color(nsColor: .textBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
-                )
-
-            if !parsedModels.isEmpty {
-                fieldLabel(L("Default Model", "默认模型"), required: false)
-                Picker("", selection: $node.defaultModel) {
-                    ForEach(parsedModels, id: \.self) { model in
-                        Text(model).tag(model)
-                    }
+            if !modelRows.isEmpty {
+                modelColumnHeaders
+                ForEach($modelRows) { $row in
+                    modelRowView($row)
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .onAppear(perform: ensureDefaultModelValid)
-                .onChange(of: modelsText) { _, _ in ensureDefaultModelValid() }
+                .onChange(of: modelRows.map(\.entry.id)) { _, _ in ensureDefaultModelValid() }
             }
+
+            Button {
+                modelRows.append(ModelRow(entry: OpenCodeModelEntry(id: "")))
+            } label: {
+                Label(L("Add Model", "添加模型"), systemImage: "plus.circle")
+                    .font(.caption.weight(.medium))
+            }
+            .buttonStyle(.borderless)
+
+            Text(showsPriceColumns
+                 ? L(
+                     "Pick the default model with the radio button — switchable from the node card anytime. Prices are per million tokens (\(node.pricingCurrency == .cny ? "CNY, converted to USD at ≈7.3 when written" : "USD")); OpenCode records real spend per message.",
+                     "单选钮选默认模型——节点卡片上也可随时切换。单价为每百万 token（\(node.pricingCurrency == .cny ? "人民币，写入时按 ≈7.3 折算为美元" : "美元")），OpenCode 据此逐条记录真实消费。"
+                 )
+                 : L(
+                     "Pick the default model with the radio button — switchable from the node card anytime. Pricing is off (cost stays $0); choose USD/CNY to price each model.",
+                     "单选钮选默认模型——节点卡片上也可随时切换。当前不计价（费用恒为 $0）；选择 USD/CNY 后可为每个模型单独定价。"
+                 ))
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var modelColumnHeaders: some View {
+        HStack(spacing: 6) {
+            Text(L("Default", "默认")).frame(width: 30)
+            Text(L("Model ID", "模型 ID")).frame(maxWidth: .infinity, alignment: .leading)
+            if showsPriceColumns {
+                Group {
+                    Text(L("Input", "输入"))
+                    Text(L("Output", "输出"))
+                    Text(L("Cache W", "缓存写"))
+                    Text(L("Cache R", "缓存读"))
+                }
+                .frame(width: 64, alignment: .leading)
+            }
+            Spacer().frame(width: 20)
+        }
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(.tertiary)
+    }
+
+    private func modelRowView(_ row: Binding<OpenCodeNodeEditorView.ModelRow>) -> some View {
+        let modelId = row.wrappedValue.entry.id.trimmingCharacters(in: .whitespaces)
+        let isDefault = !modelId.isEmpty && node.defaultModel == modelId
+        return HStack(spacing: 6) {
+            Button {
+                guard !modelId.isEmpty else { return }
+                node.defaultModel = modelId
+            } label: {
+                Image(systemName: isDefault ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(isDefault ? Self.brand : Color.secondary.opacity(0.5))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 30)
+            .help(L("Use as default model", "设为默认模型"))
+
+            TextField("deepseek-chat", text: row.entry.id)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(maxWidth: .infinity)
+                .autocorrectionDisabled()
+
+            if showsPriceColumns {
+                priceField(row.entry.priceInputPerMillion)
+                priceField(row.entry.priceOutputPerMillion)
+                priceField(row.entry.priceCacheWritePerMillion)
+                priceField(row.entry.priceCacheReadPerMillion)
+            }
+
+            Button {
+                modelRows.removeAll { $0.id == row.wrappedValue.id }
+                ensureDefaultModelValid()
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.red.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 20)
+            .help(L("Remove model", "移除模型"))
+        }
+    }
+
+    private func priceField(_ value: Binding<Double>) -> some View {
+        TextField("0", value: value, format: .number.precision(.fractionLength(0...4)))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 11, design: .monospaced))
+            .frame(width: 64)
+    }
+
+    private func autoFillCachePrices() {
+        for index in modelRows.indices where modelRows[index].entry.priceInputPerMillion > 0 {
+            let input = modelRows[index].entry.priceInputPerMillion
+            modelRows[index].entry.priceCacheWritePerMillion = input * OpenCodeNode.cacheWriteMultiplier
+            modelRows[index].entry.priceCacheReadPerMillion = input * OpenCodeNode.cacheReadMultiplier
         }
     }
 
@@ -456,66 +559,6 @@ struct OpenCodeNodeEditorView: View {
             .font(.caption2)
             .foregroundStyle(.tertiary)
         }
-    }
-
-    // MARK: - Pricing (CC 编辑器同款定价区)
-
-    /// 单价写入受管块每个模型的 `cost` 字段（USD/百万 token），OpenCode 据此把费用
-    /// 算进 opencode.db，统计页与卡片金额随之变为真实消费。
-    private var pricingSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                fieldLabel(L("Pricing (USD / M tokens)", "定价（USD / 百万 token）"), required: false)
-                Spacer()
-                Button {
-                    guard node.priceInputPerMillion > 0 else { return }
-                    node.priceCacheWritePerMillion = node.priceInputPerMillion * OpenCodeNode.cacheWriteMultiplier
-                    node.priceCacheReadPerMillion = node.priceInputPerMillion * OpenCodeNode.cacheReadMultiplier
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wand.and.stars")
-                        Text(L("Auto-fill Cache (1.25× / 0.1×)", "自动填充缓存（1.25×/0.1×）"))
-                    }
-                    .font(.caption.weight(.medium))
-                }
-                .buttonStyle(.borderless)
-                .disabled(node.priceInputPerMillion <= 0)
-                .help(L(
-                    "Set cache-write = 1.25× input and cache-read = 0.1× input.",
-                    "按输入价格自动计算缓存写入（×1.25）与缓存读取（×0.1）单价。"
-                ))
-            }
-
-            HStack(spacing: 0) {
-                Text(L("Input", "输入")).frame(maxWidth: .infinity, alignment: .leading)
-                Text(L("Output", "输出")).frame(maxWidth: .infinity, alignment: .leading)
-                Text(L("Cache Write", "缓存写入")).frame(maxWidth: .infinity, alignment: .leading)
-                Text(L("Cache Read", "缓存读取")).frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .font(.system(size: 10, weight: .medium)).foregroundStyle(.tertiary)
-
-            HStack(spacing: 6) {
-                pricingField($node.priceInputPerMillion)
-                pricingField($node.priceOutputPerMillion)
-                pricingField($node.priceCacheWritePerMillion)
-                pricingField($node.priceCacheReadPerMillion)
-            }
-
-            Text(L(
-                "Written into each model's cost block — OpenCode then records real spend per message, which feeds the node statistics. 0 = unpriced (subscription / local models).",
-                "写入每个模型的 cost 块——OpenCode 据此逐条记录真实消费，节点统计随之显示金额。0 = 不计价（订阅 / 本地模型）。"
-            ))
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func pricingField(_ value: Binding<Double>) -> some View {
-        TextField("0", value: value, format: .number.precision(.fractionLength(0...4)))
-            .textFieldStyle(.roundedBorder)
-            .font(.system(size: 12, design: .monospaced))
-            .frame(maxWidth: .infinity)
     }
 
     // MARK: - Proxy
@@ -617,15 +660,12 @@ struct OpenCodeNodeEditorView: View {
         }
     }
 
-    /// 把获取到的模型追加进多行列表（跳过已有项，保持原有内容不动）。
+    /// 把获取到的模型追加为新行（跳过已有项，保持原有行不动）。
     private func appendModels(_ models: [String]) {
         let existing = Set(parsedModels)
         let additions = models.filter { !existing.contains($0) }
         guard !additions.isEmpty else { return }
-        var text = modelsText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty { text += "\n" }
-        text += additions.joined(separator: "\n")
-        modelsText = text
+        modelRows.append(contentsOf: additions.map { ModelRow(entry: OpenCodeModelEntry(id: $0)) })
         ensureDefaultModelValid()
     }
 
@@ -634,17 +674,20 @@ struct OpenCodeNodeEditorView: View {
         saved.name = node.name.trimmingCharacters(in: .whitespaces)
         saved.baseURL = node.baseURL.trimmingCharacters(in: .whitespaces)
         saved.apiKey = node.apiKey.trimmingCharacters(in: .whitespaces)
-        saved.models = parsedModels
+        saved.modelEntries = parsedEntries.map { entry in
+            var clamped = entry
+            clamped.priceInputPerMillion = max(0, clamped.priceInputPerMillion)
+            clamped.priceOutputPerMillion = max(0, clamped.priceOutputPerMillion)
+            clamped.priceCacheReadPerMillion = max(0, clamped.priceCacheReadPerMillion)
+            clamped.priceCacheWritePerMillion = max(0, clamped.priceCacheWritePerMillion)
+            return clamped
+        }
         if !saved.models.contains(saved.defaultModel) {
             saved.defaultModel = saved.models.first ?? ""
         }
         if !(1...65_535).contains(saved.proxyPort) {
             saved.proxyPort = OpenCodeNode.defaultProxyPort
         }
-        saved.priceInputPerMillion = max(0, saved.priceInputPerMillion)
-        saved.priceOutputPerMillion = max(0, saved.priceOutputPerMillion)
-        saved.priceCacheReadPerMillion = max(0, saved.priceCacheReadPerMillion)
-        saved.priceCacheWritePerMillion = max(0, saved.priceCacheWritePerMillion)
         onSave(saved)
         dismiss()
     }

@@ -219,6 +219,7 @@ struct OpenCodeManagementView: View {
             onToggleProxyMode: { toggleProxyMode(node) },
             onTestConnectivity: { testConnectivity(node) },
             onCopyLaunchCommand: { copyLaunchCommand(node) },
+            onSelectDefaultModel: { selectDefaultModel(node, model: $0) },
             onEdit: { editingNode = node },
             onDuplicate: { store.duplicate(node) },
             onDelete: { pendingDeletion = node },
@@ -366,6 +367,14 @@ struct OpenCodeManagementView: View {
         if !(1...65_535).contains(updated.proxyPort) {
             updated.proxyPort = OpenCodeNode.defaultProxyPort
         }
+        store.upsert(updated)
+    }
+
+    /// 卡片上的默认模型快速切换：保存即生效（激活中节点由 upsert 自动重写 opencode.json）。
+    private func selectDefaultModel(_ node: OpenCodeNode, model: String) {
+        guard node.models.contains(model), node.defaultModel != model else { return }
+        var updated = node
+        updated.defaultModel = model
         store.upsert(updated)
     }
 

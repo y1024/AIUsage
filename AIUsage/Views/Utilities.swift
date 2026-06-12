@@ -263,6 +263,42 @@ struct StatsLegendChip: View {
     }
 }
 
+// MARK: - Secure Key Field
+// 带「眼睛」显隐开关的密钥输入框（三个代理编辑器共用，源自 OpenCode 编辑器）。
+
+struct SecureKeyField: View {
+    let placeholder: String
+    @Binding var text: String
+    @State private var revealed = false
+
+    init(_ placeholder: String = "sk-...", text: Binding<String>) {
+        self.placeholder = placeholder
+        _text = text
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Group {
+                if revealed {
+                    TextField(placeholder, text: $text)
+                } else {
+                    SecureField(placeholder, text: $text)
+                }
+            }
+            .textFieldStyle(.roundedBorder)
+            .autocorrectionDisabled()
+
+            Button {
+                revealed.toggle()
+            } label: {
+                Image(systemName: revealed ? "eye.slash" : "eye")
+            }
+            .buttonStyle(.borderless)
+            .help(L("Show / hide key", "显示 / 隐藏密钥"))
+        }
+    }
+}
+
 func parseISO8601(_ value: String) -> Date? {
     SharedFormatters.parseISO8601(value)
 }

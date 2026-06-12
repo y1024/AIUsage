@@ -27,6 +27,7 @@ struct OpenCodeNodeCard: View, Equatable {
     var onToggleProxyMode: () -> Void = {}
     var onTestConnectivity: () -> Void = {}
     var onCopyLaunchCommand: () -> Void = {}
+    var onSelectDefaultModel: (String) -> Void = { _ in }
     var onEdit: () -> Void = {}
     var onDuplicate: () -> Void = {}
     var onDelete: () -> Void = {}
@@ -110,7 +111,7 @@ struct OpenCodeNodeCard: View, Equatable {
                         get: { isActive },
                         set: { newValue in if newValue != isActive { onToggleActivation() } }
                     ))
-                    .toggleStyle(ProxyActivationToggleStyle(brandColor: brand, isBusy: isBusy))
+                    .toggleStyle(ProxyActivationToggleStyle(brandColor: statusColor, isBusy: isBusy))
                     .disabled(isBusy || (!isActive && activationDisabled))
                     .help(isActive
                           ? L("Restore opencode.json", "还原 opencode.json")
@@ -176,11 +177,11 @@ struct OpenCodeNodeCard: View, Equatable {
         .overlay(alignment: .leading) {
             if isActive {
                 Capsule()
-                    .fill(brand)
+                    .fill(statusColor)
                     .frame(width: 3)
                     .padding(.vertical, 10)
                     .padding(.leading, 3)
-                    .shadow(color: brand.opacity(0.4), radius: 4, x: 0, y: 0)
+                    .shadow(color: statusColor.opacity(0.4), radius: 4, x: 0, y: 0)
             }
         }
         .overlay(
@@ -193,15 +194,24 @@ struct OpenCodeNodeCard: View, Equatable {
     }
 
     // MARK: - Card Styling
+    // 配色与 Claude/Codex 卡片同语言：品牌色 = 激活（直连），紫色 = 代理
+    // （激活的代理节点整卡紫色调；未激活但开了代理模式的节点带淡紫描边提示）。
+
+    /// 激活状态主色：代理模式紫色，直连品牌色。
+    private var statusColor: Color {
+        node.proxyEnabled ? .purple : brand
+    }
 
     private var cardBackgroundColor: Color {
-        if isActive { return brand.opacity(0.06) }
+        if isActive { return statusColor.opacity(0.06) }
+        if node.proxyEnabled { return Color.purple.opacity(0.03) }
         if isSelected { return brand.opacity(0.04) }
         return Color(nsColor: .controlBackgroundColor).opacity(0.5)
     }
 
     private var cardBorderColor: Color {
-        if isActive { return brand.opacity(0.5) }
+        if isActive { return statusColor.opacity(0.5) }
+        if node.proxyEnabled { return Color.purple.opacity(0.3) }
         if isSelected { return brand.opacity(0.25) }
         return Color.primary.opacity(0.06)
     }
@@ -423,6 +433,25 @@ struct OpenCodeNodeCard: View, Equatable {
         }
         .disabled(isBusy || connectivityState?.isTesting == true)
 
+        if node.models.count > 1 {
+            Menu {
+                ForEach(node.models, id: \.self) { model in
+                    Button {
+                        onSelectDefaultModel(model)
+                    } label: {
+                        if model == node.effectiveDefaultModel {
+                            Label(model, systemImage: "checkmark")
+                        } else {
+                            Text(model)
+                        }
+                    }
+                }
+            } label: {
+                Label(L("Default Model", "默认模型"), systemImage: "cpu")
+            }
+            .disabled(isBusy)
+        }
+
         Divider()
 
         Button { onEdit() } label: {
@@ -454,22 +483,11 @@ struct OpenCodeNodeCard: View, Equatable {
                 label: L("Protocol", "协议"),
                 value: "\(node.protocolType.displayName) (\(node.protocolType.requestPath))"
             )
-            detailItem(
-                label: L("Models", "模型"),
-                value: node.models.isEmpty
-                    ? "—"
-                    : L("\(node.models.count) models, default \(node.effectiveDefaultModel ?? "—")",
-                        "\(node.models.count) 个，默认 \(node.effectiveDefaultModel ?? "—")")
-            )
+            defaultModelRow
             detailItem(label: "Provider ID", value: node.managedProviderId)
             detailItem(
                 label: L("Pricing", "定价"),
-                value: node.hasPricing
-                    ? L(
-                        "$\(Self.priceText(node.priceInputPerMillion)) in / $\(Self.priceText(node.priceOutputPerMillion)) out per M tokens",
-                        "输入 $\(Self.priceText(node.priceInputPerMillion)) / 输出 $\(Self.priceText(node.priceOutputPerMillion)) 每百万 token"
-                    )
-                    : L("Unpriced (cost stays $0)", "未计价（费用恒为 $0）")
+                value: pricingSummary
             )
             if node.proxyEnabled {
                 detailItem(label: L("Local Proxy", "本地代理"), value: "http://127.0.0.1:\(String(node.proxyPort))")
@@ -479,6 +497,56 @@ struct OpenCodeNodeCard: View, Equatable {
             }
         }
         .font(.caption)
+    }
+
+    /// 默认模型行：多模型时内联单选切换（保存即生效，激活中节点自动重写 opencode.json）。
+    @ViewBuilder
+    private var defaultModelRow: some View {
+        if node.models.count > 1 {
+            HStack(spacing: 8) {
+                Text(L("Default Model", "默认模型"))
+                    .foregroundStyle(.secondary)
+                Picker("", selection: Binding(
+                    get: { node.effectiveDefaultModel ?? "" },
+                    set: { onSelectDefaultModel($0) }
+                )) {
+                    ForEach(node.models, id: \.self) { model in
+                        Text(model).tag(model)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .fixedSize()
+                .disabled(isBusy)
+                Text(L("(\(node.models.count) models)", "（共 \(node.models.count) 个）"))
+                    .foregroundStyle(.tertiary)
+            }
+        } else {
+            detailItem(
+                label: L("Models", "模型"),
+                value: node.models.isEmpty
+                    ? "—"
+                    : node.effectiveDefaultModel ?? "—"
+            )
+        }
+    }
+
+    /// 定价摘要：默认模型的单价 + 已计价模型数。
+    private var pricingSummary: String {
+        guard node.pricingCurrency != .none else {
+            return L("Unpriced (cost stays $0)", "未计价（费用恒为 $0）")
+        }
+        let symbol = node.pricingCurrency == .cny ? "¥" : "$"
+        let pricedCount = node.modelEntries.filter(\.hasPricing).count
+        if let defaultEntry = node.modelEntries.first(where: { $0.id == node.effectiveDefaultModel }),
+           defaultEntry.hasPricing {
+            return L(
+                "\(symbol)\(Self.priceText(defaultEntry.priceInputPerMillion)) in / \(symbol)\(Self.priceText(defaultEntry.priceOutputPerMillion)) out per M (\(pricedCount)/\(node.modelEntries.count) priced)",
+                "默认模型 输入 \(symbol)\(Self.priceText(defaultEntry.priceInputPerMillion)) / 输出 \(symbol)\(Self.priceText(defaultEntry.priceOutputPerMillion)) 每百万（\(pricedCount)/\(node.modelEntries.count) 个已计价）"
+            )
+        }
+        return L("\(pricedCount)/\(node.modelEntries.count) models priced", "\(pricedCount)/\(node.modelEntries.count) 个模型已计价")
     }
 
     /// 单价展示：去掉无意义的尾零（如 3.0 → 3，0.14 → 0.14）。

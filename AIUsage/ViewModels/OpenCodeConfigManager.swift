@@ -156,25 +156,30 @@ final class OpenCodeConfigManager {
 
     /// 受管 provider 条目（写进 provider[managedProviderId] 的值）。激活与编辑器 JSON 预览共用。
     func managedProviderEntry(node: OpenCodeNode, baseURLOverride: String? = nil) -> [String: Any] {
-        // 定价（USD/百万 token）写入每个模型的 cost 块，OpenCode 据此把费用算进
-        // opencode.db——金额单一来源，统计页直接呈现，不在本地重复计费。
-        var costBlock: [String: Any] = [:]
-        if node.hasPricing {
-            costBlock["input"] = node.priceInputPerMillion
-            costBlock["output"] = node.priceOutputPerMillion
-            if node.priceCacheReadPerMillion > 0 { costBlock["cache_read"] = node.priceCacheReadPerMillion }
-            if node.priceCacheWritePerMillion > 0 { costBlock["cache_write"] = node.priceCacheWritePerMillion }
-        }
-
+        // 每模型独立定价写入各自的 cost 块（USD/百万 token，CNY 录入按近似汇率折算），
+        // OpenCode 据此把费用算进 opencode.db——金额单一来源，不在本地重复计费。
         var modelsBlock: [String: Any] = [:]
-        for modelId in node.models where !modelId.isEmpty {
-            var entry: [String: Any] = ["name": modelId]
+        for model in node.modelEntries where !model.id.isEmpty {
+            var entry: [String: Any] = ["name": model.id]
             var limit: [String: Any] = [:]
             if node.contextLimit > 0 { limit["context"] = node.contextLimit }
             if node.outputLimit > 0 { limit["output"] = node.outputLimit }
             if !limit.isEmpty { entry["limit"] = limit }
-            if !costBlock.isEmpty { entry["cost"] = costBlock }
-            modelsBlock[modelId] = entry
+            if node.pricingCurrency != .none, model.hasPricing {
+                let currency = node.pricingCurrency
+                var costBlock: [String: Any] = [
+                    "input": currency.toUSD(model.priceInputPerMillion),
+                    "output": currency.toUSD(model.priceOutputPerMillion),
+                ]
+                if model.priceCacheReadPerMillion > 0 {
+                    costBlock["cache_read"] = currency.toUSD(model.priceCacheReadPerMillion)
+                }
+                if model.priceCacheWritePerMillion > 0 {
+                    costBlock["cache_write"] = currency.toUSD(model.priceCacheWritePerMillion)
+                }
+                entry["cost"] = costBlock
+            }
+            modelsBlock[model.id] = entry
         }
 
         var options: [String: Any] = ["baseURL": baseURLOverride ?? node.baseURL]

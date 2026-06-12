@@ -287,8 +287,7 @@ struct ProxyConfigEditorView: View {
                 Text("API Key")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                SecureField("sk-ant-...", text: $profile.metadata.proxy.anthropicAPIKey)
-                    .textFieldStyle(.roundedBorder)
+                SecureKeyField("sk-ant-...", text: $profile.metadata.proxy.anthropicAPIKey)
             }
 
             Divider()
@@ -443,8 +442,7 @@ struct ProxyConfigEditorView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("API Key").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                SecureField("sk-...", text: $profile.metadata.proxy.upstreamAPIKey)
-                    .textFieldStyle(.roundedBorder)
+                SecureKeyField("sk-...", text: $profile.metadata.proxy.upstreamAPIKey)
             }
 
             ModelFetchControls(

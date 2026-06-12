@@ -10,6 +10,57 @@ import Foundation
 //   借此获得请求级日志（仅观测，不参与计费）。
 // 持久化: ~/.config/aiusage/opencode-nodes.json（OpenCodeNodeStore）。
 
+/// 定价币种。none = 不计价（不写 cost 块）；CNY 录入时按近似汇率折算成 USD 写入
+/// cost 块（opencode.db 的费用口径是 USD，与 Claude 节点的折算策略一致）。
+enum OpenCodePricingCurrency: String, Codable, CaseIterable {
+    case none
+    case usd
+    case cny
+
+    var label: String {
+        switch self {
+        case .none: return AppSettings.shared.t("None", "无")
+        case .usd: return "USD ($)"
+        case .cny: return "CNY (¥)"
+        }
+    }
+
+    /// 与 ProxyConfiguration.ModelPricing 同一近似汇率（仅用于把录入价折算为 USD）。
+    static let approximateUsdToCnyRate: Double = 7.3
+
+    func toUSD(_ value: Double) -> Double {
+        self == .cny ? value / Self.approximateUsdToCnyRate : value
+    }
+}
+
+/// 节点内单个模型：模型 ID + 独立定价（录入币种由节点的 pricingCurrency 决定）。
+struct OpenCodeModelEntry: Codable, Equatable, Identifiable {
+    var id: String
+    var priceInputPerMillion: Double
+    var priceOutputPerMillion: Double
+    var priceCacheReadPerMillion: Double
+    var priceCacheWritePerMillion: Double
+
+    init(
+        id: String,
+        priceInputPerMillion: Double = 0,
+        priceOutputPerMillion: Double = 0,
+        priceCacheReadPerMillion: Double = 0,
+        priceCacheWritePerMillion: Double = 0
+    ) {
+        self.id = id
+        self.priceInputPerMillion = priceInputPerMillion
+        self.priceOutputPerMillion = priceOutputPerMillion
+        self.priceCacheReadPerMillion = priceCacheReadPerMillion
+        self.priceCacheWritePerMillion = priceCacheWritePerMillion
+    }
+
+    var hasPricing: Bool {
+        priceInputPerMillion > 0 || priceOutputPerMillion > 0
+            || priceCacheReadPerMillion > 0 || priceCacheWritePerMillion > 0
+    }
+}
+
 /// 节点上游协议：决定受管 provider 块的 npm 包与代理模式复用的透传轨道。
 enum OpenCodeProtocol: String, Codable, CaseIterable {
     /// OpenAI chat/completions（绝大多数兼容上游：DeepSeek、Ollama、LM Studio…）。
@@ -65,8 +116,8 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     var apiKey: String
     /// 上游协议（决定 npm 包与代理轨道）；旧档案缺省为 OpenAI 兼容。
     var protocolType: OpenCodeProtocol
-    /// 模型 ID 列表（顺序即展示顺序），至少一个。
-    var models: [String]
+    /// 模型条目（顺序即展示顺序，含每模型独立定价），至少一个。
+    var modelEntries: [OpenCodeModelEntry]
     /// 顶层 `model` 指向的默认模型（必须在 models 中）。
     var defaultModel: String
     /// 受管 provider 的节点标识（进 opencode.db 的 providerID，统计按它归因到节点）。
@@ -80,12 +131,10 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     var proxyEnabled: Bool
     /// 本地透传代理监听端口。
     var proxyPort: Int
-    /// 定价（USD / 百万 token，0 = 未设置）。写入受管块每个模型的 `cost` 字段，
-    /// OpenCode 据此把每条消息的费用算进 opencode.db——统计金额即真实消费。
-    var priceInputPerMillion: Double
-    var priceOutputPerMillion: Double
-    var priceCacheReadPerMillion: Double
-    var priceCacheWritePerMillion: Double
+    /// 定价币种：none = 不计价（不写 cost 块）。单价存在每个模型条目上（每模型独立），
+    /// 写入受管块各模型的 `cost` 字段（USD，CNY 录入按近似汇率折算），OpenCode 据此
+    /// 把每条消息的费用算进 opencode.db——统计金额即真实消费。
+    var pricingCurrency: OpenCodePricingCurrency
     /// 通用配置合并策略（跟随全局/始终合并/从不合并，与 Claude 节点同一枚举）；
     /// nil = 跟随全局。
     var commonConfigMode: CommonConfigMode?
@@ -105,17 +154,14 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         baseURL: String = "",
         apiKey: String = "",
         protocolType: OpenCodeProtocol = .openAICompatible,
-        models: [String] = [],
+        modelEntries: [OpenCodeModelEntry] = [],
         defaultModel: String = "",
         providerSlug: String? = nil,
         contextLimit: Int = 0,
         outputLimit: Int = 0,
         proxyEnabled: Bool = false,
         proxyPort: Int = OpenCodeNode.defaultProxyPort,
-        priceInputPerMillion: Double = 0,
-        priceOutputPerMillion: Double = 0,
-        priceCacheReadPerMillion: Double = 0,
-        priceCacheWritePerMillion: Double = 0,
+        pricingCurrency: OpenCodePricingCurrency = .none,
         commonConfigMode: CommonConfigMode? = nil,
         createdAt: Date = Date(),
         lastUsedAt: Date? = nil,
@@ -126,24 +172,36 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.protocolType = protocolType
-        self.models = models
+        self.modelEntries = modelEntries
         self.defaultModel = defaultModel
         self.providerSlug = providerSlug
         self.contextLimit = contextLimit
         self.outputLimit = outputLimit
         self.proxyEnabled = proxyEnabled
         self.proxyPort = proxyPort
-        self.priceInputPerMillion = priceInputPerMillion
-        self.priceOutputPerMillion = priceOutputPerMillion
-        self.priceCacheReadPerMillion = priceCacheReadPerMillion
-        self.priceCacheWritePerMillion = priceCacheWritePerMillion
+        self.pricingCurrency = pricingCurrency
         self.commonConfigMode = commonConfigMode
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.sortOrder = sortOrder
     }
 
-    /// 兼容旧档案（无 protocolType/proxyEnabled/proxyPort 字段）的解码。
+    private enum CodingKeys: String, CodingKey {
+        case id, name, baseURL, apiKey, protocolType
+        case modelEntries
+        case models                    // legacy: [String]
+        case defaultModel, providerSlug, contextLimit, outputLimit
+        case proxyEnabled, proxyPort
+        case pricingCurrency
+        case priceInputPerMillion      // legacy: 节点级单价
+        case priceOutputPerMillion
+        case priceCacheReadPerMillion
+        case priceCacheWritePerMillion
+        case commonConfigMode, createdAt, lastUsedAt, sortOrder
+    }
+
+    /// 兼容旧档案的解码：models: [String] + 节点级单价 → 模型条目（各模型继承同一单价），
+    /// 任一单价 > 0 视为 USD 计价。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -151,21 +209,70 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         baseURL = try c.decode(String.self, forKey: .baseURL)
         apiKey = try c.decode(String.self, forKey: .apiKey)
         protocolType = try c.decodeIfPresent(OpenCodeProtocol.self, forKey: .protocolType) ?? .openAICompatible
-        models = try c.decode([String].self, forKey: .models)
         defaultModel = try c.decode(String.self, forKey: .defaultModel)
         providerSlug = try c.decodeIfPresent(String.self, forKey: .providerSlug)
         contextLimit = try c.decode(Int.self, forKey: .contextLimit)
         outputLimit = try c.decode(Int.self, forKey: .outputLimit)
         proxyEnabled = try c.decodeIfPresent(Bool.self, forKey: .proxyEnabled) ?? false
         proxyPort = try c.decodeIfPresent(Int.self, forKey: .proxyPort) ?? Self.defaultProxyPort
-        priceInputPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceInputPerMillion) ?? 0
-        priceOutputPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceOutputPerMillion) ?? 0
-        priceCacheReadPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheReadPerMillion) ?? 0
-        priceCacheWritePerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheWritePerMillion) ?? 0
         commonConfigMode = try c.decodeIfPresent(CommonConfigMode.self, forKey: .commonConfigMode)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         lastUsedAt = try c.decodeIfPresent(Date.self, forKey: .lastUsedAt)
         sortOrder = try c.decode(Int.self, forKey: .sortOrder)
+
+        if let entries = try c.decodeIfPresent([OpenCodeModelEntry].self, forKey: .modelEntries) {
+            modelEntries = entries
+            pricingCurrency = try c.decodeIfPresent(OpenCodePricingCurrency.self, forKey: .pricingCurrency) ?? .none
+        } else {
+            let legacyModels = try c.decodeIfPresent([String].self, forKey: .models) ?? []
+            let input = try c.decodeIfPresent(Double.self, forKey: .priceInputPerMillion) ?? 0
+            let output = try c.decodeIfPresent(Double.self, forKey: .priceOutputPerMillion) ?? 0
+            let cacheRead = try c.decodeIfPresent(Double.self, forKey: .priceCacheReadPerMillion) ?? 0
+            let cacheWrite = try c.decodeIfPresent(Double.self, forKey: .priceCacheWritePerMillion) ?? 0
+            modelEntries = legacyModels.map {
+                OpenCodeModelEntry(
+                    id: $0,
+                    priceInputPerMillion: input,
+                    priceOutputPerMillion: output,
+                    priceCacheReadPerMillion: cacheRead,
+                    priceCacheWritePerMillion: cacheWrite
+                )
+            }
+            let hadLegacyPricing = input > 0 || output > 0 || cacheRead > 0 || cacheWrite > 0
+            pricingCurrency = hadLegacyPricing ? .usd : .none
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(baseURL, forKey: .baseURL)
+        try c.encode(apiKey, forKey: .apiKey)
+        try c.encode(protocolType, forKey: .protocolType)
+        try c.encode(modelEntries, forKey: .modelEntries)
+        try c.encode(defaultModel, forKey: .defaultModel)
+        try c.encodeIfPresent(providerSlug, forKey: .providerSlug)
+        try c.encode(contextLimit, forKey: .contextLimit)
+        try c.encode(outputLimit, forKey: .outputLimit)
+        try c.encode(proxyEnabled, forKey: .proxyEnabled)
+        try c.encode(proxyPort, forKey: .proxyPort)
+        try c.encode(pricingCurrency, forKey: .pricingCurrency)
+        try c.encodeIfPresent(commonConfigMode, forKey: .commonConfigMode)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(lastUsedAt, forKey: .lastUsedAt)
+        try c.encode(sortOrder, forKey: .sortOrder)
+    }
+
+    /// 模型 ID 列表（modelEntries 的投影）。setter 保留同名条目的定价。
+    var models: [String] {
+        get { modelEntries.map(\.id) }
+        set {
+            let existing = modelEntries
+            modelEntries = newValue.map { id in
+                existing.first { $0.id == id } ?? OpenCodeModelEntry(id: id)
+            }
+        }
     }
 
     /// 展示名：未命名时回退到 baseURL 的 host。
@@ -186,10 +293,9 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         baseURL.nilIfBlank != nil && effectiveDefaultModel != nil
     }
 
-    /// 是否配置了定价（任一单价 > 0 即写入受管块 cost 字段）。
+    /// 是否配置了定价（币种非 none 且任一模型有单价时写入受管块 cost 字段）。
     var hasPricing: Bool {
-        priceInputPerMillion > 0 || priceOutputPerMillion > 0
-            || priceCacheReadPerMillion > 0 || priceCacheWritePerMillion > 0
+        pricingCurrency != .none && modelEntries.contains { $0.hasPricing }
     }
 
     /// 代理模式下写入 opencode.json 的本地 baseURL。三种协议的 SDK 在其后分别拼接
