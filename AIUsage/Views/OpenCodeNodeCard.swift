@@ -26,6 +26,7 @@ struct OpenCodeNodeCard: View, Equatable {
     var onToggleActivation: () -> Void = {}
     var onToggleProxyMode: () -> Void = {}
     var onTestConnectivity: () -> Void = {}
+    var onCopyLaunchCommand: () -> Void = {}
     var onEdit: () -> Void = {}
     var onDuplicate: () -> Void = {}
     var onDelete: () -> Void = {}
@@ -127,6 +128,19 @@ struct OpenCodeNodeCard: View, Equatable {
                           ? L("Proxy mode on: requests go through 127.0.0.1:\(String(node.proxyPort)) for request logs. Click to switch to direct.", "代理模式已开：请求经 127.0.0.1:\(String(node.proxyPort)) 以获得请求日志。点击切回直连。")
                           : L("Direct mode: click to route through a local proxy for request logs.", "直连模式：点击改走本地代理以获得请求日志。"))
 
+                    Button(action: onCopyLaunchCommand) {
+                        Image(systemName: "doc.on.clipboard")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.blue)
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!node.isComplete)
+                    .help(L(
+                        "Copy a launch command that runs OpenCode with this node's config (OPENCODE_CONFIG), without touching the global opencode.json.",
+                        "复制启动命令：用该节点配置启动 OpenCode（OPENCODE_CONFIG），不改全局 opencode.json。"
+                    ))
+
                     connectivityControl
 
                     Button(action: onEdit) {
@@ -196,8 +210,8 @@ struct OpenCodeNodeCard: View, Equatable {
 
     private var protocolBadge: some View {
         let label = node.proxyEnabled
-            ? "\(node.protocolType.displayName) Proxy"
-            : "\(node.protocolType.displayName) Direct"
+            ? "\(node.protocolType.badgeName) Proxy"
+            : "\(node.protocolType.badgeName) Direct"
         let icon = node.proxyEnabled ? "bolt.shield.fill" : "bolt.horizontal.fill"
 
         return HStack(spacing: 3) {
@@ -399,6 +413,11 @@ struct OpenCodeNodeCard: View, Equatable {
         }
         .disabled(isBusy)
 
+        Button { onCopyLaunchCommand() } label: {
+            Label(L("Copy Launch Command", "复制启动命令"), systemImage: "doc.on.clipboard")
+        }
+        .disabled(!node.isComplete)
+
         Button { onTestConnectivity() } label: {
             Label(L("Test Connectivity", "测试连通性"), systemImage: "bolt.horizontal.circle")
         }
@@ -443,6 +462,15 @@ struct OpenCodeNodeCard: View, Equatable {
                         "\(node.models.count) 个，默认 \(node.effectiveDefaultModel ?? "—")")
             )
             detailItem(label: "Provider ID", value: node.managedProviderId)
+            detailItem(
+                label: L("Pricing", "定价"),
+                value: node.hasPricing
+                    ? L(
+                        "$\(Self.priceText(node.priceInputPerMillion)) in / $\(Self.priceText(node.priceOutputPerMillion)) out per M tokens",
+                        "输入 $\(Self.priceText(node.priceInputPerMillion)) / 输出 $\(Self.priceText(node.priceOutputPerMillion)) 每百万 token"
+                    )
+                    : L("Unpriced (cost stays $0)", "未计价（费用恒为 $0）")
+            )
             if node.proxyEnabled {
                 detailItem(label: L("Local Proxy", "本地代理"), value: "http://127.0.0.1:\(String(node.proxyPort))")
             }
@@ -451,6 +479,11 @@ struct OpenCodeNodeCard: View, Equatable {
             }
         }
         .font(.caption)
+    }
+
+    /// 单价展示：去掉无意义的尾零（如 3.0 → 3，0.14 → 0.14）。
+    private static func priceText(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...4)))
     }
 
     private func detailItem(label: String, value: String) -> some View {

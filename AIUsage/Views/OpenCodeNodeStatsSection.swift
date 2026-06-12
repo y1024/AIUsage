@@ -213,7 +213,12 @@ struct OpenCodeNodeStatisticsSection: View {
                     value: stats.map { formatProxyCurrency($0.costUsd) } ?? "—",
                     icon: "dollarsign.circle",
                     color: .red,
-                    help: L("Pre-computed by OpenCode (opencode.db), same as Usage Stats.", "OpenCode 预计算（opencode.db），与用量统计页同口径。")
+                    help: node.hasPricing
+                        ? L("Pre-computed by OpenCode (opencode.db), same as Usage Stats.", "OpenCode 预计算（opencode.db），与用量统计页同口径。")
+                        : L(
+                            "This node is unpriced — set per-token prices in the node editor and OpenCode will record real spend for new messages.",
+                            "该节点未计价——在节点编辑器中填写单价后，OpenCode 会为新消息记录真实消费。"
+                        )
                 )
             }
         }

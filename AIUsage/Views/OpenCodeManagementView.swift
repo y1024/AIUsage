@@ -22,6 +22,8 @@ struct OpenCodeManagementView: View {
     @State private var pendingDeletion: OpenCodeNode?
     @State var actionError: String?
     @State var importSummary: String?
+    /// opencode.json 内嵌编辑器（语法高亮，与 Claude 页 settings.json 同款）。
+    @State var showConfigFileEditor = false
     @State private var activationInProgress = false
     /// 单击展开详情的节点 id（再次单击收起）。
     @State private var selectedNodeId: String?
@@ -60,6 +62,13 @@ struct OpenCodeManagementView: View {
             OpenCodeNodeEditorView(node: node) { saved in
                 store.upsert(saved)
             }
+        }
+        .sheet(isPresented: $showConfigFileEditor) {
+            LocalSettingsEditorView(
+                filePath: store.configPath,
+                displayTitle: "~/.config/opencode/opencode.json",
+                subtitle: L("Live configuration file for OpenCode", "OpenCode 当前生效的配置文件")
+            )
         }
         .alert(
             L("Import Finished", "导入完成"),
@@ -112,71 +121,15 @@ struct OpenCodeManagementView: View {
                 let srcIdx = draggingNodeId.flatMap { id in ids.firstIndex(of: id) }
                 let target = srcIdx.map { dragTarget(ids: ids, srcIdx: $0) }
                 ForEach(Array(store.nodes.enumerated()), id: \.element.id) { index, node in
-                    let isSelected = selectedNodeId == node.id
                     let isDragging = draggingNodeId == node.id
-                    let stats = statsStore.stats(for: node)
-                    VStack(spacing: 0) {
-                        OpenCodeNodeCard(
-                            node: node,
-                            isActive: node.id == store.activeNodeId,
-                            isSelected: isSelected,
-                            isBusy: activationInProgress,
-                            activationDisabled: store.usesJSONC || !node.isComplete,
-                            statsRequests: stats?.requestCount ?? 0,
-                            statsCostUsd: stats?.costUsd ?? 0,
-                            lastRequestAt: stats?.lastUsedAt,
-                            connectivityState: connectivityStates[node.id],
-                            onDragChanged: { translation in
-                                if draggingNodeId != node.id {
-                                    draggingNodeId = node.id
-                                    if selectedNodeId != nil { selectedNodeId = nil }
-                                }
-                                dragTranslation = translation
-                            },
-                            onDragEnded: { commitNodeDrag() },
-                            onToggleActivation: { toggleActivation(node) },
-                            onToggleProxyMode: { toggleProxyMode(node) },
-                            onTestConnectivity: { testConnectivity(node) },
-                            onEdit: { editingNode = node },
-                            onDuplicate: { store.duplicate(node) },
-                            onDelete: { pendingDeletion = node },
-                            onToggleSelection: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedNodeId = isSelected ? nil : node.id
-                                }
-                            }
-                        )
-                        .equatable()
-                        .background {
-                            if draggingNodeId != nil {
-                                rowHeightReader(for: node.id)
-                            }
-                        }
-                        .padding(.vertical, 4)
-
-                        if isSelected {
-                            OpenCodeNodeStatisticsSection(
-                                node: node,
-                                statsStore: statsStore,
-                                proxyRuntime: proxyRuntime
-                            )
-                            .padding(.top, 8)
-                            .padding(.bottom, 4)
-                            OpenCodeNodeRecentRequestsSection(
-                                node: node,
-                                statsStore: statsStore,
-                                proxyRuntime: proxyRuntime
-                            )
-                            .padding(.bottom, 4)
-                        }
-                    }
-                    .offset(y: rowOffset(index: index, id: node.id, srcIdx: srcIdx, target: target))
-                    .scaleEffect(isDragging ? 1.02 : 1, anchor: .center)
-                    .shadow(color: .black.opacity(isDragging ? 0.22 : 0),
-                            radius: isDragging ? 9 : 0, y: isDragging ? 5 : 0)
-                    .zIndex(isDragging ? 1 : 0)
-                    .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.82), value: target)
-                    .animation(.interactiveSpring(response: 0.30, dampingFraction: 0.85), value: draggingNodeId)
+                    nodeRow(node)
+                        .offset(y: rowOffset(index: index, id: node.id, srcIdx: srcIdx, target: target))
+                        .scaleEffect(isDragging ? 1.02 : 1, anchor: .center)
+                        .shadow(color: .black.opacity(isDragging ? 0.22 : 0),
+                                radius: isDragging ? 9 : 0, y: isDragging ? 5 : 0)
+                        .zIndex(isDragging ? 1 : 0)
+                        .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.82), value: target)
+                        .animation(.interactiveSpring(response: 0.30, dampingFraction: 0.85), value: draggingNodeId)
                 }
             }
             .onPreferenceChange(OpenCodeNodeRowHeightKey.self) { heights in
@@ -197,6 +150,78 @@ struct OpenCodeManagementView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 18)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    /// 单个节点行：卡片 + 选中态的内联统计/最近请求。
+    /// 拆成独立函数避免 ForEach 内的巨型表达式（编译器类型检查超时）。
+    @ViewBuilder
+    private func nodeRow(_ node: OpenCodeNode) -> some View {
+        let isSelected = selectedNodeId == node.id
+        let stats = statsStore.stats(for: node)
+        VStack(spacing: 0) {
+            nodeCard(node, isSelected: isSelected, stats: stats)
+                .equatable()
+                .background {
+                    if draggingNodeId != nil {
+                        rowHeightReader(for: node.id)
+                    }
+                }
+                .padding(.vertical, 4)
+
+            if isSelected {
+                OpenCodeNodeStatisticsSection(
+                    node: node,
+                    statsStore: statsStore,
+                    proxyRuntime: proxyRuntime
+                )
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+                OpenCodeNodeRecentRequestsSection(
+                    node: node,
+                    statsStore: statsStore,
+                    proxyRuntime: proxyRuntime
+                )
+                .padding(.bottom, 4)
+            }
+        }
+    }
+
+    private func nodeCard(
+        _ node: OpenCodeNode,
+        isSelected: Bool,
+        stats: OpenCodeNodeStatsFetcher.NodeStats?
+    ) -> OpenCodeNodeCard {
+        OpenCodeNodeCard(
+            node: node,
+            isActive: node.id == store.activeNodeId,
+            isSelected: isSelected,
+            isBusy: activationInProgress,
+            activationDisabled: store.usesJSONC || !node.isComplete,
+            statsRequests: stats?.requestCount ?? 0,
+            statsCostUsd: stats?.costUsd ?? 0,
+            lastRequestAt: stats?.lastUsedAt,
+            connectivityState: connectivityStates[node.id],
+            onDragChanged: { translation in
+                if draggingNodeId != node.id {
+                    draggingNodeId = node.id
+                    if selectedNodeId != nil { selectedNodeId = nil }
+                }
+                dragTranslation = translation
+            },
+            onDragEnded: { commitNodeDrag() },
+            onToggleActivation: { toggleActivation(node) },
+            onToggleProxyMode: { toggleProxyMode(node) },
+            onTestConnectivity: { testConnectivity(node) },
+            onCopyLaunchCommand: { copyLaunchCommand(node) },
+            onEdit: { editingNode = node },
+            onDuplicate: { store.duplicate(node) },
+            onDelete: { pendingDeletion = node },
+            onToggleSelection: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    selectedNodeId = isSelected ? nil : node.id
+                }
+            }
         )
     }
 
@@ -347,6 +372,18 @@ struct OpenCodeManagementView: View {
         Task {
             let result = await OpenCodeConnectivityTester.test(node: node)
             connectivityStates[node.id] = result
+        }
+    }
+
+    /// 复制「不改全局配置即可启动」的命令（OPENCODE_CONFIG 指向导出的独立配置）。
+    private func copyLaunchCommand(_ node: OpenCodeNode) {
+        do {
+            let command = try OpenCodeConfigManager.shared.makeLaunchCommand(node: node)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(command, forType: .string)
+        } catch {
+            actionError = error.localizedDescription
         }
     }
 

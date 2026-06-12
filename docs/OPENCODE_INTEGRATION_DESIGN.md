@@ -279,21 +279,34 @@ OpenCode 自定义 provider 的上游协议由受管块的 `npm` 字段决定，
   代理日志落盘持久化（`~/.config/aiusage/opencode-proxy-logs.json`，500 条环形 +
   2s 防抖写入，成本恒 0 不变）。平均响应优先取 db 单条耗时（直连也有）。
 
-页面骨架（自上而下）：状态横幅 → 工具栏（`opencode.json`/导入节点/导出节点/新建节点，
-CC 同款容器按钮组）→ 汇总条（节点数/已激活/总请求/成功率/总 Tokens/总费用）→ 节点列表。
+页面骨架（自上而下）：告警横幅（仅异常态：JSONC 无法接管 / 代理进程故障或未运行；
+常态不占版面，接管状态由卡片激活开关表达，与 CC 一致）→ 工具栏（`opencode.json`/
+导入节点/导出节点/新建节点，CC 同款容器按钮组；`opencode.json` 按钮打开内嵌语法
+高亮编辑器——参数化复用 `LocalSettingsEditorView`+`JSONRawEditorView`，非 Finder
+reveal）→ 汇总条（节点数/已激活/总请求/成功率/总 Tokens/总费用）→ 节点列表。
 
 节点卡片（CC `ConfigurationCardView` 同款，Equatable 跳渲染）：顶部协议徽章
-（`<协议> Direct/Proxy`，按协议配色）、拖拽把手、左侧统计 pills（请求数/费用）、
-名称/URL/连通性状态行（成功 `200 · 885ms · 时间`；失败可点开 Popover 看完整报文+重试）、
-右侧动作区（激活开关 `ProxyActivationToggleStyle` + 代理模式 antenna 切换 + 连通性测试 +
-编辑 + 删除）、右键菜单（含复制节点）。**单击内联展开**：卡片内配置明细 + 卡片下方
+（`OpenAI|Anthropic|Responses Direct/Proxy` 短名措辞，与 CC「OpenAI Proxy」对齐，
+按协议配色）、拖拽把手、左侧统计 pills（请求数/费用）、名称/URL/连通性状态行
+（成功 `200 · 885ms · 时间`；失败可点开 Popover 看完整报文+重试）、右侧动作区
+（激活开关 `ProxyActivationToggleStyle` + 代理模式 antenna 切换 + **复制启动命令**
+（导出与激活同口径的独立配置到 `~/.config/aiusage/opencode-configs/<slug>.json`，
+命令 `OPENCODE_CONFIG="<path>" opencode`，不改全局配置，与 CC `claude --settings`/
+Codex `CODEX_HOME` 同构）+ 连通性测试 + 编辑 + 删除）、右键菜单（含复制节点/
+复制启动命令）。**单击内联展开**：卡片内配置明细（含定价行）+ 卡片下方
 「统计信息」网格（总请求/成功/失败/平均响应/输入/输出/缓存读写/命中率/费用）+
 「最近请求」列表（db 成功消息与代理失败日志按时间合并，限 10 条）——与 CC 完全同构。
 
 编辑器对齐：顶部 Tab（节点设置 / JSON 预览）。JSON 预览为只读的「激活后 opencode.json
 最终内容」（与现有配置合并，代理模式显示本地 baseURL + Key 占位符语义说明）。
 不移植 CC 的可视化配置 Tab（那是 settings.json 的 env/权限/钩子，OpenCode 受管块已被
-表单全覆盖）、定价配置（费用由 opencode.db 自带）与 Opus/Sonnet/Haiku 槽位（Claude 专属）。
+表单全覆盖）与 Opus/Sonnet/Haiku 槽位（Claude 专属）。
+
+节点计费（CC 定价区同款）：每节点四项单价（输入/输出/缓存写入/缓存读取，USD/百万
+token，含缓存 1.25×/0.1× 自动填充）。**不在本地算账**——单价写入受管块每个模型的
+`cost` 字段（models.dev schema），OpenCode 据此把逐条消息的真实消费算进 opencode.db，
+统计页/卡片 pill/用量统计自动呈现金额（自定义 provider 默认无价、cost 恒 0 的问题由此
+解决，对既往消息不回溯）。代理端口字段常驻显示（未开代理时禁用），与 CC 一致。
 
 品牌图标：`ProviderIcons/opencode.imageset`（lobehub 官方 opencode logomark SVG，
 template 渲染自适应明暗），替换此前的 SF Symbol 兜底。
@@ -308,7 +321,7 @@ template 渲染自适应明暗），替换此前的 SF Symbol 兜底。
 | `Views/OpenCodeNodeCard.swift`（重做） | CC 同款卡片（徽章/pills/开关/antenna/测试/编辑/删除/右键/内联明细/Equatable） |
 | `Views/OpenCodeNodeStatsSection.swift`（重做） | 汇总条 + 选中节点内联「统计信息」/「最近请求」区块（CC 同款视觉） |
 | `OpenCodeNodeStore`（改） | 节点导入/导出 + 复制节点（新 id/slug，代理端口避让） |
-| `OpenCodeConfigManager`（改） | 受管块构建抽取 + `previewMergedConfig`（编辑器 JSON 预览，不落盘） |
+| `OpenCodeConfigManager`（改） | 受管块构建抽取（含模型 `cost` 定价块）+ `previewMergedConfig`（编辑器 JSON 预览，不落盘） |
 | `OpenCodeManagementView`（重做） | CC 同款骨架与列表编排；连通性状态字典 |
 | `Views/OpenCodeManagementView+Toolbar.swift`（新） | 状态横幅 + 工具栏（opencode.json/导入/导出/新建），拆出以控规模 |
 | `Views/OpenCodeRequestLogSection.swift`（删除） | 页面级日志区被节点内联「最近请求」取代 |
@@ -322,3 +335,4 @@ template 渲染自适应明暗），替换此前的 SF Symbol 兜底。
 | `cost: 0` 双语义（订阅 vs 真未定价） | Phase 1 不报 unpriced；如实呈现 0 成本 + token 量 |
 | 巨型 message 表 | 30 天窗口下推 SQL + 冻结归档；首次全量仅一次 |
 | 桌面版数据目录不同 | Discovery 多路径探测（§2.1） |
+| 内嵌 QuotaServer 过旧（曾导致代理 404「Not found」：build phase 声明 outputPaths 但无 inputPaths，Xcode 增量构建跳过 swift build+拷贝） | 「Build QuotaServer Helper」phase 改为 alwaysOutOfDate=1，每次构建都跑（swift build 自身增量，代价小） |

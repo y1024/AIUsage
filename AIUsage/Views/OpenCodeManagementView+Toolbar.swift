@@ -8,7 +8,9 @@ import UniformTypeIdentifiers
 
 extension OpenCodeManagementView {
 
-    // MARK: - Status Banner
+    // MARK: - Warning Banners
+    // 仅保留异常告警（JSONC 无法接管 / 代理进程故障）；常态信息不占版面，
+    // 与 Claude/Codex 页一致（接管状态由节点卡片的激活开关表达）。
 
     @ViewBuilder
     var statusBanner: some View {
@@ -22,55 +24,10 @@ extension OpenCodeManagementView {
                     "AIUsage 无法安全改写 JSONC（注释会丢失）。请先迁移为 opencode.json 再使用节点切换。"
                 )
             )
-        } else if let active = store.activeNode {
-            banner(
-                icon: "checkmark.circle.fill",
-                tint: Self.brand,
-                title: L("Managing opencode.json — \(active.displayName)", "已接管 opencode.json — \(active.displayName)"),
-                message: active.proxyEnabled
-                    ? (proxyRuntime.isRunning
-                        ? L(
-                            "OpenCode goes through the local proxy at 127.0.0.1:\(String(active.proxyPort)) — request logs appear in the node's detail. Restart OpenCode sessions for the change to take effect.",
-                            "OpenCode 经本地代理 127.0.0.1:\(String(active.proxyPort)) 访问上游，请求日志见节点详情。重启 OpenCode 会话后生效。"
-                        )
-                        : L(
-                            "Local proxy is not running — OpenCode requests will fail until it is restarted.",
-                            "本地代理未在运行——重启代理前 OpenCode 请求将失败。"
-                        ))
-                    : L(
-                        "OpenCode now talks to this node directly. Restart OpenCode sessions for the change to take effect.",
-                        "OpenCode 将直连该节点。重启 OpenCode 会话后生效。"
-                    ),
-                trailing: AnyView(
-                    HStack(spacing: 8) {
-                        if active.proxyEnabled, !proxyRuntime.isRunning {
-                            Button(L("Restart Proxy", "重启代理")) {
-                                Task { await proxyRuntime.restart() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.orange)
-                            .controlSize(.small)
-                        }
-                        Button(L("Deactivate", "停用")) { deactivate() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                )
-            )
-        } else {
-            banner(
-                icon: "circle.dashed",
-                tint: .secondary,
-                title: L("Not managing opencode.json", "未接管 opencode.json"),
-                message: L(
-                    "OpenCode is using its own configuration. Activate a node to route OpenCode to that endpoint.",
-                    "OpenCode 正在使用自身配置。激活某个节点后，OpenCode 将切换到该接入点。"
-                )
-            )
         }
     }
 
-    /// 代理进程异常（多次自动重启失败）时的提示。
+    /// 代理进程异常：崩溃多次自动重启失败，或激活的代理节点进程未在运行。
     @ViewBuilder
     var proxyErrorBanner: some View {
         if store.activeNode?.proxyEnabled == true, let error = proxyRuntime.lastError {
@@ -79,15 +36,28 @@ extension OpenCodeManagementView {
                 tint: .red,
                 title: L("Local proxy error", "本地代理异常"),
                 message: error,
-                trailing: AnyView(
-                    Button(L("Restart Proxy", "重启代理")) {
-                        Task { await proxyRuntime.restart() }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                )
+                trailing: AnyView(restartProxyButton)
+            )
+        } else if let active = store.activeNode, active.proxyEnabled, !proxyRuntime.isRunning {
+            banner(
+                icon: "bolt.trianglebadge.exclamationmark.fill",
+                tint: .orange,
+                title: L("Local proxy is not running", "本地代理未在运行"),
+                message: L(
+                    "OpenCode requests via 127.0.0.1:\(String(active.proxyPort)) will fail until the proxy is restarted.",
+                    "重启代理前，OpenCode 经 127.0.0.1:\(String(active.proxyPort)) 的请求将失败。"
+                ),
+                trailing: AnyView(restartProxyButton)
             )
         }
+    }
+
+    private var restartProxyButton: some View {
+        Button(L("Restart Proxy", "重启代理")) {
+            Task { await proxyRuntime.restart() }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     private func banner(icon: String, tint: Color, title: String, message: String, trailing: AnyView? = nil) -> some View {
@@ -162,9 +132,9 @@ extension OpenCodeManagementView {
             title: "opencode.json",
             icon: "doc.text.magnifyingglass",
             role: .file,
-            help: L("Reveal the live opencode.json in Finder.", "在访达中显示当前生效的 opencode.json。")
+            help: L("View and edit the live opencode.json with syntax highlighting.", "查看并编辑当前生效的 opencode.json（语法高亮）。")
         ) {
-            revealConfigFile()
+            showConfigFileEditor = true
         }
     }
 
@@ -263,17 +233,6 @@ extension OpenCodeManagementView {
         case .primary: return Color.white.opacity(colorScheme == .dark ? 0.18 : 0.12)
         case .file: return Color.blue.opacity(colorScheme == .dark ? 0.30 : 0.18)
         case .secondary: return Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08)
-        }
-    }
-
-    // MARK: - File Actions
-
-    func revealConfigFile() {
-        let path = store.configPath
-        if FileManager.default.fileExists(atPath: path) {
-            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
-        } else {
-            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: (path as NSString).deletingLastPathComponent)
         }
     }
 

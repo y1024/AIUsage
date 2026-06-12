@@ -148,6 +148,16 @@ final class OpenCodeConfigManager {
 
     /// 受管 provider 条目（写进 provider[managedProviderId] 的值）。激活与编辑器 JSON 预览共用。
     func managedProviderEntry(node: OpenCodeNode, baseURLOverride: String? = nil) -> [String: Any] {
+        // 定价（USD/百万 token）写入每个模型的 cost 块，OpenCode 据此把费用算进
+        // opencode.db——金额单一来源，统计页直接呈现，不在本地重复计费。
+        var costBlock: [String: Any] = [:]
+        if node.hasPricing {
+            costBlock["input"] = node.priceInputPerMillion
+            costBlock["output"] = node.priceOutputPerMillion
+            if node.priceCacheReadPerMillion > 0 { costBlock["cache_read"] = node.priceCacheReadPerMillion }
+            if node.priceCacheWritePerMillion > 0 { costBlock["cache_write"] = node.priceCacheWritePerMillion }
+        }
+
         var modelsBlock: [String: Any] = [:]
         for modelId in node.models where !modelId.isEmpty {
             var entry: [String: Any] = ["name": modelId]
@@ -155,6 +165,7 @@ final class OpenCodeConfigManager {
             if node.contextLimit > 0 { limit["context"] = node.contextLimit }
             if node.outputLimit > 0 { limit["output"] = node.outputLimit }
             if !limit.isEmpty { entry["limit"] = limit }
+            if !costBlock.isEmpty { entry["cost"] = costBlock }
             modelsBlock[modelId] = entry
         }
 
@@ -209,6 +220,25 @@ final class OpenCodeConfigManager {
             defaultModel: node.effectiveDefaultModel ?? "",
             baseURLOverride: baseURLOverride
         )
+    }
+
+    // MARK: - Launch Command Export
+
+    /// 「复制启动命令」：导出与激活完全同口径的合并配置（不碰全局 opencode.json），
+    /// 写到 ~/.config/aiusage/opencode-configs/<slug>.json（0600），返回
+    /// `OPENCODE_CONFIG="<path>" opencode`。代理模式节点指向本地代理（需代理在运行）。
+    func makeLaunchCommand(node: OpenCodeNode) throws -> String {
+        guard node.isComplete else { throw OpenCodeConfigError.nodeIncomplete }
+        let merged = previewMergedConfig(
+            node: node,
+            baseURLOverride: node.proxyEnabled ? node.proxyLocalBaseURL : nil
+        )
+        let home = fileManager.homeDirectoryForCurrentUser.path
+        let dir = (home as NSString).appendingPathComponent(".config/aiusage/opencode-configs")
+        let slug = node.providerSlug?.nilIfBlank ?? node.preferredSlug()
+        let path = (dir as NSString).appendingPathComponent("\(slug).json")
+        try writeObject(merged, toPath: path, restrictPermissions: true)
+        return "OPENCODE_CONFIG=\"\(path)\" opencode"
     }
 
     /// 预览用的稳定序列化（与落盘格式一致：pretty + sortedKeys + 不转义斜杠）。

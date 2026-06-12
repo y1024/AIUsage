@@ -89,6 +89,7 @@ struct OpenCodeNodeEditorView: View {
                             basicSection
                             modelsSection
                             limitsSection
+                            pricingSection
                             proxySection
                         }
                         .padding(18)
@@ -173,17 +174,14 @@ struct OpenCodeNodeEditorView: View {
                 .controlSize(.small)
             }
 
-            ScrollView([.vertical, .horizontal]) {
-                Text(jsonText)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(nsColor: .textBackgroundColor))
+            JSONRawEditorView(
+                jsonText: .constant(jsonText),
+                error: .constant(nil),
+                title: "opencode.json",
+                isEditable: false,
+                showsActions: false
             )
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
@@ -387,6 +385,68 @@ struct OpenCodeNodeEditorView: View {
         }
     }
 
+    // MARK: - Pricing (CC 编辑器同款定价区)
+
+    /// 单价写入受管块每个模型的 `cost` 字段（USD/百万 token），OpenCode 据此把费用
+    /// 算进 opencode.db，统计页与卡片金额随之变为真实消费。
+    private var pricingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                fieldLabel(L("Pricing (USD / M tokens)", "定价（USD / 百万 token）"), required: false)
+                Spacer()
+                Button {
+                    guard node.priceInputPerMillion > 0 else { return }
+                    node.priceCacheWritePerMillion = node.priceInputPerMillion * OpenCodeNode.cacheWriteMultiplier
+                    node.priceCacheReadPerMillion = node.priceInputPerMillion * OpenCodeNode.cacheReadMultiplier
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "wand.and.stars")
+                        Text(L("Auto-fill Cache (1.25× / 0.1×)", "自动填充缓存（1.25×/0.1×）"))
+                    }
+                    .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.borderless)
+                .disabled(node.priceInputPerMillion <= 0)
+                .help(L(
+                    "Set cache-write = 1.25× input and cache-read = 0.1× input.",
+                    "按输入价格自动计算缓存写入（×1.25）与缓存读取（×0.1）单价。"
+                ))
+            }
+
+            HStack(spacing: 0) {
+                Text(L("Input", "输入")).frame(maxWidth: .infinity, alignment: .leading)
+                Text(L("Output", "输出")).frame(maxWidth: .infinity, alignment: .leading)
+                Text(L("Cache Write", "缓存写入")).frame(maxWidth: .infinity, alignment: .leading)
+                Text(L("Cache Read", "缓存读取")).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.system(size: 10, weight: .medium)).foregroundStyle(.tertiary)
+
+            HStack(spacing: 6) {
+                pricingField($node.priceInputPerMillion)
+                pricingField($node.priceOutputPerMillion)
+                pricingField($node.priceCacheWritePerMillion)
+                pricingField($node.priceCacheReadPerMillion)
+            }
+
+            Text(L(
+                "Written into each model's cost block — OpenCode then records real spend per message, which feeds the node statistics. 0 = unpriced (subscription / local models).",
+                "写入每个模型的 cost 块——OpenCode 据此逐条记录真实消费，节点统计随之显示金额。0 = 不计价（订阅 / 本地模型）。"
+            ))
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func pricingField(_ value: Binding<Double>) -> some View {
+        TextField("0", value: value, format: .number.precision(.fractionLength(0...4)))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12, design: .monospaced))
+            .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Proxy
+
     private var proxySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: $node.proxyEnabled) {
@@ -405,30 +465,33 @@ struct OpenCodeNodeEditorView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
 
-            if node.proxyEnabled {
-                HStack(spacing: 6) {
-                    Text(L("Port", "端口"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("\(OpenCodeNode.defaultProxyPort)", value: $node.proxyPort, format: .number.grouping(.never))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 90)
-                    Text(L("OpenCode will connect to 127.0.0.1:\(String(node.proxyPort)).", "OpenCode 将连接 127.0.0.1:\(String(node.proxyPort))。"))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
-                if node.protocolType == .openAIResponses, node.apiKey.nilIfBlank == nil {
-                    Label(
-                        L(
-                            "Proxy mode with the OpenAI Responses protocol requires an API key.",
-                            "OpenAI Responses 协议的代理模式需要填写 API Key。"
-                        ),
-                        systemImage: "exclamationmark.triangle"
-                    )
+            // 端口常驻显示（CC 同款），未开启代理时禁用。
+            HStack(spacing: 6) {
+                Text(L("Port", "端口"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("\(OpenCodeNode.defaultProxyPort)", value: $node.proxyPort, format: .number.grouping(.never))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+                    .disabled(!node.proxyEnabled)
+                Text(node.proxyEnabled
+                     ? L("OpenCode will connect to 127.0.0.1:\(String(node.proxyPort)).", "OpenCode 将连接 127.0.0.1:\(String(node.proxyPort))。")
+                     : L("Enable the proxy to edit the port.", "开启代理后可修改端口。"))
                     .font(.caption2)
-                    .foregroundStyle(.orange)
-                }
+                    .foregroundStyle(.tertiary)
+            }
+            .opacity(node.proxyEnabled ? 1 : 0.55)
+
+            if node.proxyEnabled, node.protocolType == .openAIResponses, node.apiKey.nilIfBlank == nil {
+                Label(
+                    L(
+                        "Proxy mode with the OpenAI Responses protocol requires an API key.",
+                        "OpenAI Responses 协议的代理模式需要填写 API Key。"
+                    ),
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption2)
+                .foregroundStyle(.orange)
             }
         }
     }
@@ -505,6 +568,10 @@ struct OpenCodeNodeEditorView: View {
         if !(1...65_535).contains(saved.proxyPort) {
             saved.proxyPort = OpenCodeNode.defaultProxyPort
         }
+        saved.priceInputPerMillion = max(0, saved.priceInputPerMillion)
+        saved.priceOutputPerMillion = max(0, saved.priceOutputPerMillion)
+        saved.priceCacheReadPerMillion = max(0, saved.priceCacheReadPerMillion)
+        saved.priceCacheWritePerMillion = max(0, saved.priceCacheWritePerMillion)
         onSave(saved)
         dismiss()
     }

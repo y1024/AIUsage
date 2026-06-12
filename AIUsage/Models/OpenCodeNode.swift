@@ -47,6 +47,15 @@ enum OpenCodeProtocol: String, Codable, CaseIterable {
             return "OpenAI Responses"
         }
     }
+
+    /// 卡片徽章用短名（与 Claude/Codex 页「OpenAI Proxy / Anthropic Direct」措辞对齐）。
+    var badgeName: String {
+        switch self {
+        case .openAICompatible: return "OpenAI"
+        case .anthropic: return "Anthropic"
+        case .openAIResponses: return "Responses"
+        }
+    }
 }
 
 struct OpenCodeNode: Identifiable, Codable, Equatable {
@@ -71,11 +80,21 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     var proxyEnabled: Bool
     /// 本地透传代理监听端口。
     var proxyPort: Int
+    /// 定价（USD / 百万 token，0 = 未设置）。写入受管块每个模型的 `cost` 字段，
+    /// OpenCode 据此把每条消息的费用算进 opencode.db——统计金额即真实消费。
+    var priceInputPerMillion: Double
+    var priceOutputPerMillion: Double
+    var priceCacheReadPerMillion: Double
+    var priceCacheWritePerMillion: Double
     var createdAt: Date
     var lastUsedAt: Date?
     var sortOrder: Int
 
     static let defaultProxyPort = 4321
+
+    /// Anthropic 惯例：缓存写入 ≈ 输入 ×1.25，缓存读取 ≈ 输入 ×0.1。
+    static let cacheWriteMultiplier = 1.25
+    static let cacheReadMultiplier = 0.1
 
     init(
         id: String = UUID().uuidString,
@@ -90,6 +109,10 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         outputLimit: Int = 0,
         proxyEnabled: Bool = false,
         proxyPort: Int = OpenCodeNode.defaultProxyPort,
+        priceInputPerMillion: Double = 0,
+        priceOutputPerMillion: Double = 0,
+        priceCacheReadPerMillion: Double = 0,
+        priceCacheWritePerMillion: Double = 0,
         createdAt: Date = Date(),
         lastUsedAt: Date? = nil,
         sortOrder: Int = Int.max
@@ -106,6 +129,10 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.outputLimit = outputLimit
         self.proxyEnabled = proxyEnabled
         self.proxyPort = proxyPort
+        self.priceInputPerMillion = priceInputPerMillion
+        self.priceOutputPerMillion = priceOutputPerMillion
+        self.priceCacheReadPerMillion = priceCacheReadPerMillion
+        self.priceCacheWritePerMillion = priceCacheWritePerMillion
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.sortOrder = sortOrder
@@ -126,6 +153,10 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         outputLimit = try c.decode(Int.self, forKey: .outputLimit)
         proxyEnabled = try c.decodeIfPresent(Bool.self, forKey: .proxyEnabled) ?? false
         proxyPort = try c.decodeIfPresent(Int.self, forKey: .proxyPort) ?? Self.defaultProxyPort
+        priceInputPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceInputPerMillion) ?? 0
+        priceOutputPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceOutputPerMillion) ?? 0
+        priceCacheReadPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheReadPerMillion) ?? 0
+        priceCacheWritePerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheWritePerMillion) ?? 0
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         lastUsedAt = try c.decodeIfPresent(Date.self, forKey: .lastUsedAt)
         sortOrder = try c.decode(Int.self, forKey: .sortOrder)
@@ -147,6 +178,12 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     /// 节点是否填齐了激活所需字段。
     var isComplete: Bool {
         baseURL.nilIfBlank != nil && effectiveDefaultModel != nil
+    }
+
+    /// 是否配置了定价（任一单价 > 0 即写入受管块 cost 字段）。
+    var hasPricing: Bool {
+        priceInputPerMillion > 0 || priceOutputPerMillion > 0
+            || priceCacheReadPerMillion > 0 || priceCacheWritePerMillion > 0
     }
 
     /// 代理模式下写入 opencode.json 的本地 baseURL。三种协议的 SDK 在其后分别拼接

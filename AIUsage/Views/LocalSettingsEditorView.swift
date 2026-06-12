@@ -2,20 +2,28 @@ import SwiftUI
 import os.log
 
 // MARK: - Local Settings Editor View
-// In-app editor for the live ~/.claude/settings.json file.
-// Reuses JSONRawEditorView for syntax highlighting and validation.
+// In-app editor for a live JSON config file (syntax highlighting via JSONRawEditorView).
+// 默认指向 ~/.claude/settings.json（Claude 页），其他页（如 OpenCode 的
+// opencode.json）通过参数复用同一查看/编辑体验。
 
 private let localSettingsLog = Logger(subsystem: "com.aiusage.desktop", category: "LocalSettingsEditor")
 
 struct LocalSettingsEditorView: View {
     @Environment(\.dismiss) private var dismiss
+
+    /// 要编辑的 JSON 文件绝对路径。
+    var filePath: String = LocalSettingsEditorView.claudeSettingsPath
+    /// 头部展示的文件名（默认按 home 缩写）。
+    var displayTitle: String = "~/.claude/settings.json"
+    var subtitle: String = L("Live configuration file for Claude Code", "Claude Code 当前生效的配置文件")
+
     @State private var jsonText = ""
     @State private var jsonError: String?
     @State private var hasUnsavedChanges = false
     @State private var showSaveSuccess = false
     @State private var isLoadingFile = false
 
-    private static var settingsPath: String {
+    static var claudeSettingsPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return (home as NSString).appendingPathComponent(".claude/settings.json")
     }
@@ -45,9 +53,9 @@ struct LocalSettingsEditorView: View {
                 .font(.system(size: 14))
                 .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 1) {
-                Text("~/.claude/settings.json")
+                Text(displayTitle)
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                Text(L("Live configuration file for Claude Code", "Claude Code 当前生效的配置文件"))
+                Text(subtitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -120,7 +128,7 @@ struct LocalSettingsEditorView: View {
 
     private func loadFile() {
         isLoadingFile = true
-        let path = Self.settingsPath
+        let path = filePath
         guard let data = FileManager.default.contents(atPath: path) else {
             jsonText = "{\n  \n}"
             hasUnsavedChanges = false
@@ -155,7 +163,7 @@ struct LocalSettingsEditorView: View {
                 withJSONObject: obj,
                 options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             )
-            let path = Self.settingsPath
+            let path = filePath
             let dir = (path as NSString).deletingLastPathComponent
             try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             try prettyData.write(to: URL(fileURLWithPath: path), options: .atomic)
@@ -165,7 +173,7 @@ struct LocalSettingsEditorView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                 withAnimation(.easeOut(duration: 0.3)) { showSaveSuccess = false }
             }
-            localSettingsLog.info("settings.json saved via local editor")
+            localSettingsLog.info("\((path as NSString).lastPathComponent, privacy: .public) saved via local editor")
         } catch {
             jsonError = error.localizedDescription
         }
