@@ -6,11 +6,12 @@ import SwiftUI
 // 取代原先 ProxyConfigEditorView 与 CodexProxyEditorView 里的两份重复实现。
 // 数据来源: 上游 GET /v1/models（OpenAI 兼容）或 GET <base>/models（Anthropic 风格）。
 
-/// 模型列表端点风格。
+/// 模型列表端点风格。两种风格的端点路径都是 <root>/v1/models
+/// （base 末尾已含 /v1 则拼 /models，否则拼 /v1/models），区别在认证头。
 enum ModelListEndpointStyle {
-    /// OpenAI 兼容：base 末尾已含 /v1 则拼 /models，否则拼 /v1/models。
+    /// OpenAI 兼容：Authorization: Bearer。
     case openAICompatible
-    /// Anthropic 风格：base（通常已含 /v1）直接拼 /models，并附加 x-api-key 头。
+    /// Anthropic 风格：附加 x-api-key + anthropic-version 头。
     case anthropic
 }
 
@@ -26,13 +27,7 @@ final class ModelFetchState: ObservableObject {
         while trimmed.hasSuffix("/") { trimmed.removeLast() }
         guard !trimmed.isEmpty else { return nil }
 
-        let path: String
-        switch style {
-        case .openAICompatible:
-            path = trimmed.lowercased().hasSuffix("/v1") ? "/models" : "/v1/models"
-        case .anthropic:
-            path = "/models"
-        }
+        let path = trimmed.lowercased().hasSuffix("/v1") ? "/models" : "/v1/models"
         return URL(string: trimmed + path)
     }
 

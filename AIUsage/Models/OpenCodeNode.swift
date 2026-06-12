@@ -1,18 +1,61 @@
 import Foundation
 
 // MARK: - OpenCode Node
-// OpenCode 接入节点：一个 OpenAI 兼容上游（baseURL + API Key + 模型列表）。
-// 激活时由 OpenCodeConfigManager 注入 ~/.config/opencode/opencode.json 的受管 provider 块。
+// OpenCode 接入节点：一个上游接入点（baseURL + API Key + 模型列表 + 协议）。
+// 激活时由 OpenCodeConfigManager 注入 ~/.config/opencode/opencode.json 的受管 provider 块，
+// 协议由受管块的 npm 字段决定（OpenCode 据此选择 AI SDK 包）。
 // 直连模式: OpenCode 原生直连上游，无本地代理进程。
-// 代理模式（路线 B）: 本地 QuotaServer(PROXY_TARGET=opencode) 透传 chat/completions，
-//   opencode.json 指向 127.0.0.1:<proxyPort>，借此获得请求级日志（仅观测，不参与计费）。
+// 代理模式（路线 B）: 本地 QuotaServer 按协议复用对应透传轨道（chat/completions、
+//   responses、Anthropic passthrough），opencode.json 指向 127.0.0.1:<proxyPort>，
+//   借此获得请求级日志（仅观测，不参与计费）。
 // 持久化: ~/.config/aiusage/opencode-nodes.json（OpenCodeNodeStore）。
+
+/// 节点上游协议：决定受管 provider 块的 npm 包与代理模式复用的透传轨道。
+enum OpenCodeProtocol: String, Codable, CaseIterable {
+    /// OpenAI chat/completions（绝大多数兼容上游：DeepSeek、Ollama、LM Studio…）。
+    case openAICompatible = "openai-compatible"
+    /// Anthropic v1/messages（官方或 Anthropic 兼容网关）。
+    case anthropic = "anthropic"
+    /// OpenAI Responses API（官方 /v1/responses 或同协议网关）。
+    case openAIResponses = "openai-responses"
+
+    /// 受管 provider 块写入的 AI SDK 包名。
+    var npmPackage: String {
+        switch self {
+        case .openAICompatible: return "@ai-sdk/openai-compatible"
+        case .anthropic: return "@ai-sdk/anthropic"
+        case .openAIResponses: return "@ai-sdk/openai"
+        }
+    }
+
+    /// SDK 在 baseURL 后拼接的请求路径（同时也是代理模式的入站路径）。
+    var requestPath: String {
+        switch self {
+        case .openAICompatible: return "/chat/completions"
+        case .anthropic: return "/messages"
+        case .openAIResponses: return "/responses"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .openAICompatible:
+            return AppSettings.shared.t("OpenAI Compatible", "OpenAI 兼容")
+        case .anthropic:
+            return "Anthropic"
+        case .openAIResponses:
+            return "OpenAI Responses"
+        }
+    }
+}
 
 struct OpenCodeNode: Identifiable, Codable, Equatable {
     var id: String
     var name: String
     var baseURL: String
     var apiKey: String
+    /// 上游协议（决定 npm 包与代理轨道）；旧档案缺省为 OpenAI 兼容。
+    var protocolType: OpenCodeProtocol
     /// 模型 ID 列表（顺序即展示顺序），至少一个。
     var models: [String]
     /// 顶层 `model` 指向的默认模型（必须在 models 中）。
@@ -39,6 +82,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         name: String = "",
         baseURL: String = "",
         apiKey: String = "",
+        protocolType: OpenCodeProtocol = .openAICompatible,
         models: [String] = [],
         defaultModel: String = "",
         providerSlug: String? = nil,
@@ -54,6 +98,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.name = name
         self.baseURL = baseURL
         self.apiKey = apiKey
+        self.protocolType = protocolType
         self.models = models
         self.defaultModel = defaultModel
         self.providerSlug = providerSlug
@@ -66,13 +111,14 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.sortOrder = sortOrder
     }
 
-    /// 兼容旧档案（无 proxyEnabled/proxyPort 字段）的解码。
+    /// 兼容旧档案（无 protocolType/proxyEnabled/proxyPort 字段）的解码。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         baseURL = try c.decode(String.self, forKey: .baseURL)
         apiKey = try c.decode(String.self, forKey: .apiKey)
+        protocolType = try c.decodeIfPresent(OpenCodeProtocol.self, forKey: .protocolType) ?? .openAICompatible
         models = try c.decode([String].self, forKey: .models)
         defaultModel = try c.decode(String.self, forKey: .defaultModel)
         providerSlug = try c.decodeIfPresent(String.self, forKey: .providerSlug)
@@ -103,9 +149,22 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         baseURL.nilIfBlank != nil && effectiveDefaultModel != nil
     }
 
-    /// 代理模式下写入 opencode.json 的本地 baseURL（OpenCode 在其后拼接 /chat/completions）。
+    /// 代理模式下写入 opencode.json 的本地 baseURL。三种协议的 SDK 在其后分别拼接
+    /// /chat/completions、/messages、/responses，均命中 QuotaServer 的对应入站路径。
     var proxyLocalBaseURL: String {
         "http://127.0.0.1:\(proxyPort)/v1"
+    }
+
+    /// 去掉末尾 /v1 的 baseURL。Anthropic passthrough 轨道按「上游根 + 入站完整路径
+    /// /v1/messages」拼 URL，而节点 baseURL 习惯含 /v1（SDK 语义），需剥掉避免重复。
+    var baseURLWithoutV1Suffix: String {
+        var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasSuffix("/") { trimmed.removeLast() }
+        if trimmed.lowercased().hasSuffix("/v1") {
+            trimmed = String(trimmed.dropLast(3))
+            while trimmed.hasSuffix("/") { trimmed.removeLast() }
+        }
+        return trimmed
     }
 
     // MARK: - Managed Provider Id

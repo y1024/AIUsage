@@ -3,8 +3,8 @@ import os.log
 
 // MARK: - OpenCode Config Manager
 // 管理 ~/.config/opencode/opencode.json：注入受管的 provider["aiusage-<节点>"] 块
-// （npm: @ai-sdk/openai-compatible + baseURL/apiKey/models），并把顶层 model 指向
-// "aiusage-<节点>/<模型>"；停用时从备份完整还原原文。
+// （npm 按节点协议选择 @ai-sdk/openai-compatible|anthropic|openai + baseURL/apiKey/models），
+// 并把顶层 model 指向 "aiusage-<节点>/<模型>"；停用时从备份完整还原原文。
 // 直连模式 OpenCode 原生直连上游；代理模式经 baseURLOverride 指向本地透传代理（路线 B）。
 // provider id 按节点区分（node.managedProviderId）——opencode.db 的消息会携带它作为
 // providerID，Phase 1 统计据此把用量/费用归因到具体节点。
@@ -151,7 +151,7 @@ final class OpenCodeConfigManager {
         var options: [String: Any] = ["baseURL": baseURLOverride ?? node.baseURL]
         if baseURLOverride != nil {
             // 代理模式：真实 Key 留在代理进程环境里，配置里只放占位符
-            // （@ai-sdk/openai-compatible 需要非空 apiKey 才不会去找环境变量）。
+            // （AI SDK 各包都需要非空 apiKey 才不会去找环境变量）。
             options["apiKey"] = "aiusage-proxy"
         } else if let apiKey = node.apiKey.nilIfBlank {
             options["apiKey"] = apiKey
@@ -160,7 +160,7 @@ final class OpenCodeConfigManager {
         let managedId = node.managedProviderId
         var provider = root["provider"] as? [String: Any] ?? [:]
         provider[managedId] = [
-            "npm": "@ai-sdk/openai-compatible",
+            "npm": node.protocolType.npmPackage,
             "name": node.displayName,
             "options": options,
             "models": modelsBlock,

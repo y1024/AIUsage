@@ -14,6 +14,20 @@ import QuotaBackend
 
 private let openCodeStoreLog = Logger(subsystem: "com.aiusage.desktop", category: "OpenCodeNodeStore")
 
+enum OpenCodeNodeStoreError: LocalizedError {
+    case proxyRequiresAPIKey
+
+    var errorDescription: String? {
+        switch self {
+        case .proxyRequiresAPIKey:
+            return AppSettings.shared.t(
+                "Proxy mode with the OpenAI Responses protocol requires an API key.",
+                "OpenAI Responses 协议的代理模式需要填写 API Key。"
+            )
+        }
+    }
+}
+
 @MainActor
 final class OpenCodeNodeStore: ObservableObject {
     static let shared = OpenCodeNodeStore()
@@ -92,6 +106,11 @@ final class OpenCodeNodeStore: ObservableObject {
 
     func activate(_ node: OpenCodeNode) async throws {
         if node.proxyEnabled {
+            // Codex 轨道（responses 透传）启动时强制要求 Key，缺失会让 QuotaServer
+            // 静默不挂载代理路由，请求全 404——提前拦截给出可读错误。
+            if node.protocolType == .openAIResponses, node.apiKey.nilIfBlank == nil {
+                throw OpenCodeNodeStoreError.proxyRequiresAPIKey
+            }
             // 代理模式：先拉起本地透传进程，再把 opencode.json 指向它；写配置失败则回收进程。
             try await proxyRuntime.start(node: node)
             do {

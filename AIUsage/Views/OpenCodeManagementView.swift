@@ -344,8 +344,8 @@ struct OpenCodeManagementView: View {
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
             Text(L(
-                "Add an OpenAI-compatible endpoint (base URL + API key + models). Activating a node writes it into opencode.json — directly, or through a local proxy when you want per-request logs.",
-                "添加一个 OpenAI 兼容接入点（Base URL + API Key + 模型）。激活节点会把它写入 opencode.json——默认直连；需要请求日志时可开启本地代理模式。"
+                "Add an upstream endpoint (OpenAI-compatible, Anthropic, or OpenAI Responses). Activating a node writes it into opencode.json — directly, or through a local proxy when you want per-request logs.",
+                "添加一个上游接入点（OpenAI 兼容 / Anthropic / OpenAI Responses）。激活节点会把它写入 opencode.json——默认直连；需要请求日志时可开启本地代理模式。"
             ))
             .font(.caption)
             .foregroundStyle(.tertiary)
@@ -454,6 +454,18 @@ private struct OpenCodeNodeCard: View {
                             .help(L(
                                 "Goes through the local passthrough proxy on port \(String(node.proxyPort)) for request logs.",
                                 "经端口 \(String(node.proxyPort)) 的本地透传代理访问上游，以获得请求日志。"
+                            ))
+                    }
+                    if node.protocolType != .openAICompatible {
+                        Text(node.protocolType.displayName)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1.5)
+                            .background(Capsule().fill(Color.orange.opacity(0.12)))
+                            .help(L(
+                                "Upstream protocol: OpenCode talks to this node via \(node.protocolType.requestPath).",
+                                "上游协议：OpenCode 通过 \(node.protocolType.requestPath) 与该节点通信。"
                             ))
                     }
                 }

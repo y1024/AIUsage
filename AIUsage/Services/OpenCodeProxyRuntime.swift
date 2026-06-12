@@ -4,10 +4,13 @@ import os.log
 import QuotaBackend
 
 // MARK: - OpenCode Proxy Runtime
-// OpenCode 节点「代理模式」（路线 B）的本地透传进程管理：
-// 启动 QuotaServer(PROXY_TARGET=opencode) 把 /v1/chat/completions 忠实透传到节点上游，
-// 解析其 stdout 的 PROXY_LOG 行得到请求级日志（仅观测展示，不参与计费——
-// 用量成本仍以 opencode.db 为准，避免双重计账）。
+// OpenCode 节点「代理模式」（路线 B）的本地透传进程管理。
+// 按节点协议复用 QuotaServer 的对应透传轨道（环境变量选轨）：
+//   openai-compatible → PROXY_TARGET=opencode（/v1/chat/completions）
+//   openai-responses  → PROXY_TARGET=codex（/v1/responses，需 API Key）
+//   anthropic         → PROXY_MODE=passthrough（/v1/messages，Anthropic 透传）
+// 三条轨道都向 stdout 发同构的 PROXY_LOG 行，统一解析为请求级日志
+// （仅观测展示，不参与计费——用量成本仍以 opencode.db 为准，避免双重计账）。
 // 单进程模型: 同一时刻最多一个 OpenCode 节点生效，因此只维护一个子进程。
 
 private let openCodeProxyLog = Logger(subsystem: "com.aiusage.desktop", category: "OpenCodeProxyRuntime")
@@ -91,9 +94,29 @@ final class OpenCodeProxyRuntime: ObservableObject {
         }
 
         var environment = ProcessInfo.processInfo.environment
-        environment["PROXY_TARGET"] = "opencode"
-        environment["OPENAI_BASE_URL"] = node.baseURL
-        environment["OPENAI_API_KEY"] = node.apiKey
+        // 清掉继承环境里可能残留的选轨/认证变量，避免误启别的轨道或被
+        // passthrough 当作客户端校验 Key（ANTHROPIC_API_KEY）拒掉 OpenCode 请求。
+        for key in ["PROXY_TARGET", "PROXY_MODE", "OPENAI_API_MODE", "ANTHROPIC_API_KEY",
+                    "CODEX_CLIENT_KEY", "OPENCODE_CLIENT_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"] {
+            environment.removeValue(forKey: key)
+        }
+        switch node.protocolType {
+        case .openAICompatible:
+            environment["PROXY_TARGET"] = "opencode"
+            environment["OPENAI_BASE_URL"] = node.baseURL
+            environment["OPENAI_API_KEY"] = node.apiKey
+        case .openAIResponses:
+            // Codex 轨道要求非空 Key（responses 上游均需认证）。
+            environment["PROXY_TARGET"] = "codex"
+            environment["OPENAI_API_MODE"] = "responses"
+            environment["OPENAI_BASE_URL"] = node.baseURL
+            environment["OPENAI_API_KEY"] = node.apiKey
+        case .anthropic:
+            // passthrough 轨道按「上游根 + /v1/messages」拼 URL，传入不含 /v1 的根地址。
+            environment["PROXY_MODE"] = "passthrough"
+            environment["ANTHROPIC_UPSTREAM_URL"] = node.baseURLWithoutV1Suffix
+            environment["ANTHROPIC_UPSTREAM_KEY"] = node.apiKey
+        }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
@@ -105,6 +128,7 @@ final class OpenCodeProxyRuntime: ObservableObject {
         process.standardError = outputPipe
 
         let nodeId = node.id
+        let inboundPath = "/v1" + node.protocolType.requestPath
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
@@ -117,7 +141,7 @@ final class OpenCodeProxyRuntime: ObservableObject {
                 }
                 let jsonStr = String(line[jsonStart...])
                 Task { @MainActor [weak self] in
-                    self?.recordProxyLog(jsonStr, nodeId: nodeId)
+                    self?.recordProxyLog(jsonStr, nodeId: nodeId, path: inboundPath)
                 }
             }
         }
@@ -187,7 +211,7 @@ final class OpenCodeProxyRuntime: ObservableObject {
 
     // MARK: - Log Ingestion
 
-    private func recordProxyLog(_ jsonStr: String, nodeId: String) {
+    private func recordProxyLog(_ jsonStr: String, nodeId: String, path: String) {
         guard let data = jsonStr.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String, type == "proxy_request_log" else {
@@ -205,7 +229,7 @@ final class OpenCodeProxyRuntime: ObservableObject {
         let log = ProxyRequestLog(
             configId: nodeId,
             method: "POST",
-            path: "/v1/chat/completions",
+            path: path,
             claudeModel: json["claude_model"] as? String ?? "unknown",
             upstreamModel: json["upstream_model"] as? String ?? "unknown",
             success: json["success"] as? Bool ?? false,

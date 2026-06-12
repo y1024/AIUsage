@@ -83,13 +83,25 @@ struct OpenCodeNodeEditorView: View {
             TextField(L("e.g. DeepSeek Official", "如：DeepSeek 官方"), text: $node.name)
                 .textFieldStyle(.roundedBorder)
 
+            fieldLabel(L("Protocol", "上游协议"), required: false)
+            Picker("", selection: $node.protocolType) {
+                ForEach(OpenCodeProtocol.allCases, id: \.self) { proto in
+                    Text(proto.displayName).tag(proto)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .onChange(of: node.protocolType) { _, _ in
+                connectivity = .idle
+            }
+
             fieldLabel(L("Base URL", "Base URL"), required: true)
-            TextField("https://api.example.com/v1", text: $node.baseURL)
+            TextField(baseURLPlaceholder, text: $node.baseURL)
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
             Text(L(
-                "OpenAI-compatible endpoint. OpenCode appends /chat/completions to it.",
-                "OpenAI 兼容接入点，OpenCode 会在其后拼接 /chat/completions。"
+                "OpenCode appends \(node.protocolType.requestPath) to it.",
+                "OpenCode 会在其后拼接 \(node.protocolType.requestPath)。"
             ))
             .font(.caption2)
             .foregroundStyle(.tertiary)
@@ -116,6 +128,14 @@ struct OpenCodeNodeEditorView: View {
             }
 
             connectivityRow
+        }
+    }
+
+    private var baseURLPlaceholder: String {
+        switch node.protocolType {
+        case .openAICompatible: return "https://api.example.com/v1"
+        case .anthropic: return "https://api.anthropic.com/v1"
+        case .openAIResponses: return "https://api.openai.com/v1"
         }
     }
 
@@ -162,24 +182,24 @@ struct OpenCodeNodeEditorView: View {
 
     private func runConnectivityTest() {
         guard let model = parsedModels.first,
-              let url = Self.chatCompletionsURL(baseURL: node.baseURL) else { return }
+              let url = Self.testEndpointURL(baseURL: node.baseURL, protocolType: node.protocolType) else { return }
         connectivity = .testing
         let apiKey = node.apiKey
+        let protocolType = node.protocolType
 
         Task {
             var request = URLRequest(url: url, timeoutInterval: 15)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             if !apiKey.isEmpty {
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                if protocolType == .anthropic {
+                    request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+                    request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+                } else {
+                    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                }
             }
-            let body: [String: Any] = [
-                "model": model,
-                "messages": [["role": "user", "content": "ping"]],
-                "max_tokens": 1,
-                "stream": false,
-            ]
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            request.httpBody = try? JSONSerialization.data(withJSONObject: Self.testBody(model: model, protocolType: protocolType))
 
             let start = Date()
             do {
@@ -199,13 +219,42 @@ struct OpenCodeNodeEditorView: View {
         }
     }
 
-    /// OpenAI 兼容 chat/completions 端点：base 末尾已含 /v1 则直接拼接，否则补 /v1。
-    private static func chatCompletionsURL(baseURL: String) -> URL? {
+    /// 连通性测试端点：base 末尾已含 /v1 则直接拼协议路径，否则补 /v1。
+    private static func testEndpointURL(baseURL: String, protocolType: OpenCodeProtocol) -> URL? {
         var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         while trimmed.hasSuffix("/") { trimmed.removeLast() }
         guard !trimmed.isEmpty else { return nil }
-        let path = trimmed.lowercased().hasSuffix("/v1") ? "/chat/completions" : "/v1/chat/completions"
+        let path = trimmed.lowercased().hasSuffix("/v1")
+            ? protocolType.requestPath
+            : "/v1" + protocolType.requestPath
         return URL(string: trimmed + path)
+    }
+
+    /// 各协议最小可行的 1-token 探测请求体。
+    private static func testBody(model: String, protocolType: OpenCodeProtocol) -> [String: Any] {
+        switch protocolType {
+        case .openAICompatible:
+            return [
+                "model": model,
+                "messages": [["role": "user", "content": "ping"]],
+                "max_tokens": 1,
+                "stream": false,
+            ]
+        case .anthropic:
+            return [
+                "model": model,
+                "messages": [["role": "user", "content": "ping"]],
+                "max_tokens": 1,
+            ]
+        case .openAIResponses:
+            // Responses API 要求 max_output_tokens ≥ 16。
+            return [
+                "model": model,
+                "input": "ping",
+                "max_output_tokens": 16,
+                "stream": false,
+            ]
+        }
     }
 
     private var modelsSection: some View {
@@ -216,7 +265,7 @@ struct OpenCodeNodeEditorView: View {
                 state: modelFetch,
                 baseURL: node.baseURL,
                 apiKey: node.apiKey,
-                style: .openAICompatible,
+                style: node.protocolType == .anthropic ? .anthropic : .openAICompatible,
                 requiresAPIKey: false
             )
 
@@ -301,6 +350,18 @@ struct OpenCodeNodeEditorView: View {
                     Text(L("OpenCode will connect to 127.0.0.1:\(String(node.proxyPort)).", "OpenCode 将连接 127.0.0.1:\(String(node.proxyPort))。"))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                }
+
+                if node.protocolType == .openAIResponses, node.apiKey.nilIfBlank == nil {
+                    Label(
+                        L(
+                            "Proxy mode with the OpenAI Responses protocol requires an API key.",
+                            "OpenAI Responses 协议的代理模式需要填写 API Key。"
+                        ),
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
                 }
             }
         }
