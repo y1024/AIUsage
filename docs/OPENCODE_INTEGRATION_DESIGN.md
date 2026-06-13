@@ -416,6 +416,9 @@ models 的 `cost` 块（USD/百万）→ 每模型定价、`limit` → 上下文
 的 `app_config_dir_override` 键（Tauri store）；未设置时默认 `~/.cc-switch`。
 此前 Claude/Codex/OpenCode 三处同步都硬编码默认路径，用户迁移过配置目录后
 会读到陈旧库——`NodeProfileStore` 与 OpenCode 同步现统一走 `CCSwitchLocator.databasePath()`。
+解析优先级：设置页「数据与刷新 → cc-switch 配置目录」手动指定（权威，db 缺失时
+如实报错不回退）> app_paths.json 自动探测（要求 db 存在）> 默认目录。
+导入节点名称统一加「 (cc-switch)」后缀（与 Claude/Codex 导入同款来源标记）。
 
 ## 11. 风险与缓解
 

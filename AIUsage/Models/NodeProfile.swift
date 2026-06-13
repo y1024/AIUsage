@@ -306,6 +306,9 @@ struct ProxySettings: Codable, Equatable {
     var maxOutputTokens: Int
     var defaultModel: String
     var modelMapping: ProxyConfiguration.ModelMapping
+    /// 模型库（模型名 + 独立定价，与 OpenCode modelEntries 同构）。定价唯一来源；
+    /// 槽位/默认模型从库中点选切换。可选以兼容旧档（nil/空 = 回退槽位价格）。
+    var modelLibrary: [ProxyConfiguration.MappedModel]?
 
     var anthropicBaseURL: String
     var anthropicAPIKey: String
@@ -380,6 +383,7 @@ struct ProxySettings: Codable, Equatable {
         maxOutputTokens = config.maxOutputTokens
         defaultModel = config.defaultModel
         modelMapping = config.modelMapping
+        modelLibrary = config.modelLibrary.isEmpty ? nil : config.modelLibrary
         anthropicBaseURL = config.anthropicBaseURL
         anthropicAPIKey = config.anthropicAPIKey
         usePassthroughProxy = config.usePassthroughProxy
@@ -395,6 +399,7 @@ struct ProxySettings: Codable, Equatable {
         upstreamAPIKey: String, expectedClientKey: String,
         maxOutputTokens: Int, defaultModel: String,
         modelMapping: ProxyConfiguration.ModelMapping,
+        modelLibrary: [ProxyConfiguration.MappedModel]? = nil,
         anthropicBaseURL: String, anthropicAPIKey: String, usePassthroughProxy: Bool,
         enableModelAliasMapping: Bool = false,
         enableHTTPS: Bool? = nil, httpsPort: Int? = nil,
@@ -411,6 +416,7 @@ struct ProxySettings: Codable, Equatable {
         self.maxOutputTokens = maxOutputTokens
         self.defaultModel = defaultModel
         self.modelMapping = modelMapping
+        self.modelLibrary = modelLibrary
         self.anthropicBaseURL = anthropicBaseURL
         self.anthropicAPIKey = anthropicAPIKey
         self.usePassthroughProxy = usePassthroughProxy
@@ -439,10 +445,44 @@ struct ProxySettings: Codable, Equatable {
         (commonConfigMode ?? .followGlobal).shouldMerge(globalEnabled: globalEnabled)
     }
 
+    /// 计价查询与 ProxyConfiguration.pricingForModel 同序：库精确 → 槽位精确 → 家族。
+    /// 实际运行时计价走 toProxyConfiguration 后的副本，此处保持一致仅为直接调用方。
     func pricingForModel(_ model: String) -> ProxyConfiguration.ModelPricing? {
+        if let p = modelLibrary?.first(where: { $0.name == model })?.pricing { return p }
         if let p = modelMapping.pricingForUpstreamModel(model) { return p }
         if let p = modelMapping.pricingForFamily(of: model) { return p }
         return nil
+    }
+
+    /// 保存前把库价格回写到同名槽位，保证仍直接读槽位价格的旧回退路径与库一致。
+    mutating func syncSlotPricingFromLibrary() {
+        guard let library = modelLibrary, !library.isEmpty else { return }
+        func sync(_ slot: inout ProxyConfiguration.MappedModel) {
+            if let match = library.first(where: { $0.name == slot.name }) {
+                slot.pricing = match.pricing
+            }
+        }
+        sync(&modelMapping.bigModel)
+        sync(&modelMapping.middleModel)
+        sync(&modelMapping.smallModel)
+    }
+
+    /// 旧档案迁移：模型库为空时用现有槽位（名称+价格）与主模型播种，
+    /// 编辑器打开即看到完整库，保存后落盘完成迁移。
+    mutating func seedModelLibraryIfEmpty() {
+        guard (modelLibrary ?? []).isEmpty else { return }
+        var seen = Set<String>()
+        var seeded: [ProxyConfiguration.MappedModel] = []
+        for slot in [modelMapping.bigModel, modelMapping.middleModel, modelMapping.smallModel] {
+            let name = slot.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(name).inserted else { continue }
+            seeded.append(.init(name: name, pricing: slot.pricing))
+        }
+        let dm = defaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !dm.isEmpty, seen.insert(dm).inserted {
+            seeded.append(.init(name: dm, pricing: .zero))
+        }
+        modelLibrary = seeded.isEmpty ? nil : seeded
     }
 
     /// Build the env config that will be written to settings.json.
@@ -494,6 +534,7 @@ struct ProxySettings: Codable, Equatable {
             expectedClientKey: expectedClientKey,
             defaultModel: defaultModel,
             modelMapping: modelMapping,
+            modelLibrary: modelLibrary ?? [],
             maxOutputTokens: maxOutputTokens,
             createdAt: metadata.createdAt,
             lastUsedAt: metadata.lastUsedAt,

@@ -71,6 +71,7 @@ struct SettingsView: View {
     @State var lowQuotaThreshold: Double = UserDefaults.standard.double(forKey: DefaultsKey.lowQuotaThreshold)
     @State var remoteHostInput: String = ""
     @State var remotePortInput: String = ""
+    @State var ccSwitchDirInput: String = UserDefaults.standard.string(forKey: DefaultsKey.ccSwitchConfigDirOverride) ?? ""
     @State var isTestingRemoteConnection = false
     @State var remoteConnectionState: RemoteConnectionState = .idle
     @State var remoteConnectionMessage: String?

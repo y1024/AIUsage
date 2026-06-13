@@ -57,6 +57,7 @@ extension ProxyManagementView {
                             },
                             onDelete: { pendingDeletionConfig = config },
                             onDuplicate: { duplicateConfig(config) },
+                            onSelectDefaultModel: { model in switchDefaultModel(config, to: model) },
                             onToggleSelection: {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     selectedConfigId = selectedConfigId == config.id ? nil : config.id
@@ -107,6 +108,22 @@ extension ProxyManagementView {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
+    }
+
+    // MARK: - Model Quick Switch
+
+    /// 卡片上的默认模型快速切换：从模型库点选 → 写入 profile 并走滚动重载
+    /// （激活中节点自动断开→保存→重新接入；定价由模型库按新模型名解析，无需重填）。
+    func switchDefaultModel(_ config: ProxyConfiguration, to model: String) {
+        guard var profile = viewModel.profileStore.profile(for: config.id) else { return }
+        if profile.metadata.nodeType.isCodex {
+            // Codex 单模型：config.toml 的 model 即 bigModel。
+            profile.metadata.proxy.modelMapping.bigModel.name = model
+        }
+        profile.metadata.proxy.defaultModel = model
+        profile.metadata.proxy.syncSlotPricingFromLibrary()
+        profile.syncEnvFromProxy()
+        Task { await viewModel.updateProfile(profile) }
     }
 
     // MARK: - Drag & Drop Helpers (手势驱动「拖拽实时让位」，与订阅账号列表同一套手感)

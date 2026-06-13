@@ -464,6 +464,17 @@ UI 状态管理和激活事务：
 - **通用配置一并处理**：Claude 读 `common_config_claude`（JSON）→ `GlobalConfig`；Codex 读 `common_config_codex`（TOML 片段）→ `CodexGlobalConfig`；本地非空则跳过。
 - **后台 I/O（不卡主线程）**：SQLite 只读读取在 `Task.detached(priority:.userInitiated)` 后台执行（`readCCSwitchClaudeData` / `readCCSwitchCodexData` 等 `nonisolated static` 函数，按 `app_type` 复用 `readCCSwitchRawRows`，产出 `Sendable` 的 `CCSwitchReadOutput`），`@MainActor` 主线程只做 JSON/TOML 解析与 profile upsert；同步期间 UI 显示进行中态（`isSyncingCCSwitch`）。
 - **入口**：Claude 与 Codex 家族工具栏均提供「同步 cc-switch」按钮（`syncCCSwitch()` 按当前 `family` 走对应 `app_type`）。
+- **数据库定位（`CCSwitchLocator`，与 OpenCode 同步共用）**：解析优先级为设置页「数据与刷新 → cc-switch 配置目录」手动指定（权威，db 缺失时如实报错不回退）> `~/Library/Application Support/com.ccswitch.desktop/app_paths.json` 的 `app_config_dir_override` 自动探测（要求 db 存在）> 默认 `~/.cc-switch`。
+
+#### 模型库（per-model 定价 + 默认模型快速切换）
+
+与 OpenCode 节点的 `modelEntries` 同构：`ProxySettings.modelLibrary: [MappedModel]?`（模型名 + 独立四项单价），是节点定价的唯一来源。
+
+- **计价查询顺序**（`pricingForModel`，`ProxyConfiguration` / `ProxySettings` 一致）：库精确匹配 → 槽位精确匹配 → 槽位家族匹配 → 库家族匹配。旧档案（库为空）自动回退槽位价格，行为不变、无需迁移。
+- **编辑器**（`ProxyModelLibraryEditor` 共享组件，Claude / Codex 都接入）：获取模型 → `FetchedModelAppendList` 勾选批量添加 → 每模型一行独立定价（输入/输出/缓存写/缓存读）+ 币种切换 + 缓存自动填充。行用稳定 UUID 包装（模型名可编辑，不能充当 ForEach 身份）。
+- **槽位点选**（`ModelLibrarySlotPicker`）：Claude 主模型 + Opus/Sonnet/Haiku 槽位、Codex 单模型的输入框旁提供「从模型库选择」下拉，点选即填，与手输/补全互不排斥。
+- **旧档案播种**：编辑器打开时 `seedModelLibraryIfEmpty()` 用现有槽位（名称+价格）与主模型填充库；保存时 `syncSlotPricingFromLibrary()` 把库价回写同名槽位，保证遗留回退路径与库一致。
+- **卡片快速切换**：模型库 >1 个模型时，节点卡片详情区与右键菜单提供「默认模型」切换（Claude 改 settings.json 的 `model`，Codex 改 config.toml 的 `model`），走 `updateProfile` 滚动重载（激活中节点自动断开→保存→重新接入），定价由库按新模型名解析，无需重填。
 
 ### ProxyRuntimeService
 

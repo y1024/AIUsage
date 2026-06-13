@@ -26,6 +26,7 @@ struct ConfigurationCardView: View, Equatable {
     var onEdit: () -> Void = {}
     var onDelete: () -> Void = {}
     var onDuplicate: () -> Void = {}
+    var onSelectDefaultModel: (String) -> Void = { _ in }
     var onToggleSelection: () -> Void = {}
 
     /// 失败明细 Popover 的展开态。属于本卡片局部 UI 状态，不参与 Equatable 比较。
@@ -76,6 +77,26 @@ struct ConfigurationCardView: View, Equatable {
 
     private var connectedUnavailableLabel: String {
         L("Unavailable while connected to \(activationTargetName)", "接入 \(activationTargetName) 时不可用")
+    }
+
+    // MARK: - Model Quick Switch（模型库多于一个模型时提供）
+
+    /// 模型库中的可切换模型（去空名）。
+    private var libraryModels: [String] {
+        config.modelLibrary.map(\.name).filter { !$0.isEmpty }
+    }
+
+    /// 当前生效模型：Codex = config.toml 的 model；Claude 家族 = settings.json 的 model。
+    private var currentDefaultModel: String {
+        config.nodeType.isCodex ? config.codexModel : config.defaultModel
+    }
+
+    /// 切换候选：当前模型不在库中（手输的自定义名）时补到首位，避免 Picker 选中态丢失。
+    private var modelSwitchOptions: [String] {
+        if currentDefaultModel.isEmpty || libraryModels.contains(currentDefaultModel) {
+            return libraryModels
+        }
+        return [currentDefaultModel] + libraryModels
     }
 
     var body: some View {
@@ -415,6 +436,25 @@ struct ConfigurationCardView: View, Equatable {
         }
         .disabled(isBusy || connectivityState?.isTesting == true)
 
+        if libraryModels.count > 1 {
+            Menu {
+                ForEach(modelSwitchOptions, id: \.self) { model in
+                    Button {
+                        onSelectDefaultModel(model)
+                    } label: {
+                        if model == currentDefaultModel {
+                            Label(model, systemImage: "checkmark")
+                        } else {
+                            Text(model)
+                        }
+                    }
+                }
+            } label: {
+                Label(L("Default Model", "默认模型"), systemImage: "cpu")
+            }
+            .disabled(isBusy)
+        }
+
         Divider()
 
         Button { onEdit() } label: {
@@ -506,15 +546,44 @@ struct ConfigurationCardView: View, Equatable {
             case .codexProxy:
                 detailItem(label: L("Upstream", "上游"), value: config.normalizedUpstreamBaseURL)
                 detailItem(label: L("API Mode", "接口模式"), value: "Responses")
-                detailItem(label: L("Model", "模型"), value: config.codexModel.isEmpty ? "—" : config.codexModel)
+                if libraryModels.count <= 1 {
+                    detailItem(label: L("Model", "模型"), value: config.codexModel.isEmpty ? "—" : config.codexModel)
+                }
                 detailItem(label: L("Codex Endpoint", "Codex 接入"), value: "http://\(config.host):\(config.port)/v1")
                 detailItem(label: L("LAN Access", "局域网访问"), value: config.allowLAN ? L("Enabled", "已启用") : L("Disabled", "已禁用"))
             }
+            defaultModelRow
             if let lastUsed = lastRequestAt ?? config.lastUsedAt {
                 detailItem(label: L("Last Used", "最后使用"), value: Self.relativeFormatter.localizedString(for: lastUsed, relativeTo: Date()))
             }
         }
         .font(.caption)
+    }
+
+    /// 默认模型行：模型库多于一个模型时内联单选切换（保存即生效，激活中节点自动滚动重载）。
+    @ViewBuilder
+    private var defaultModelRow: some View {
+        if libraryModels.count > 1 {
+            HStack(spacing: 8) {
+                Text(L("Default Model", "默认模型"))
+                    .foregroundStyle(.secondary)
+                Picker("", selection: Binding(
+                    get: { currentDefaultModel },
+                    set: { onSelectDefaultModel($0) }
+                )) {
+                    ForEach(modelSwitchOptions, id: \.self) { model in
+                        Text(model).tag(model)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .fixedSize()
+                .disabled(isBusy)
+                Text(L("(\(libraryModels.count) models)", "（共 \(libraryModels.count) 个）"))
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 
     private func detailItem(label: String, value: String) -> some View {

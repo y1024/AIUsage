@@ -22,12 +22,16 @@ struct CodexProxyEditorView: View {
             var p = profile
             // Codex 固定使用 Responses（其 wire_api），纠正历史误存的 chat_completions。
             p.metadata.proxy.openAIUpstreamAPI = .responses
+            // 旧档案迁移：库为空时用单模型价格播种。
+            p.metadata.proxy.seedModelLibraryIfEmpty()
             _profile = State(initialValue: p)
             _isNew = State(initialValue: false)
-            _pricingCurrency = State(initialValue: p.metadata.proxy.modelMapping.bigModel.pricing.currency)
+            _pricingCurrency = State(initialValue: p.metadata.proxy.modelLibrary?.first?.pricing.currency
+                ?? p.metadata.proxy.modelMapping.bigModel.pricing.currency)
             _extraTOMLCheck = State(initialValue: TOMLLinter.validate(p.metadata.proxy.extraTOML ?? ""))
         } else {
-            let newProfile = NodeProfile.defaultProfile(nodeType: .codexProxy)
+            var newProfile = NodeProfile.defaultProfile(nodeType: .codexProxy)
+            newProfile.metadata.proxy.seedModelLibraryIfEmpty()
             _profile = State(initialValue: newProfile)
             _isNew = State(initialValue: true)
             _pricingCurrency = State(initialValue: .usd)
@@ -38,9 +42,11 @@ struct CodexProxyEditorView: View {
     init(config: ProxyConfiguration) {
         var p = NodeProfile.fromLegacyConfiguration(config)
         p.metadata.proxy.openAIUpstreamAPI = .responses
+        p.metadata.proxy.seedModelLibraryIfEmpty()
         _profile = State(initialValue: p)
         _isNew = State(initialValue: false)
-        _pricingCurrency = State(initialValue: config.modelMapping.bigModel.pricing.currency)
+        _pricingCurrency = State(initialValue: p.metadata.proxy.modelLibrary?.first?.pricing.currency
+            ?? config.modelMapping.bigModel.pricing.currency)
     }
 
     var body: some View {
@@ -218,48 +224,33 @@ struct CodexProxyEditorView: View {
         sectionCard(title: L("Model & Pricing", "模型与定价")) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(L("Model", "模型")).font(.subheadline.weight(.semibold))
-                modelTextField(text: $profile.metadata.proxy.modelMapping.bigModel.name, placeholder: "gpt-5.5")
+                HStack(spacing: 6) {
+                    modelTextField(text: $profile.metadata.proxy.modelMapping.bigModel.name, placeholder: "gpt-5.5")
+                    ModelLibrarySlotPicker(
+                        selection: $profile.metadata.proxy.modelMapping.bigModel.name,
+                        library: currentModelLibrary
+                    )
+                }
                 Text(L(
-                    "Written as `model` in config.toml, used as the upstream model name and the pricing key for stats.",
-                    "将写入 config.toml 的 `model`，同时作为上游模型名与统计定价键。"
+                    "Written as `model` in config.toml, used as the upstream model name and the pricing key for stats. Switchable from the node card when the library has multiple models.",
+                    "将写入 config.toml 的 `model`，同时作为上游模型名与统计定价键。模型库有多个模型时，节点卡片上可随时切换。"
                 ))
                 .font(.caption2).foregroundStyle(.tertiary)
             }
 
             Divider()
 
-            HStack {
-                Text(L("Pricing", "定价")).font(.subheadline.weight(.semibold))
-                Spacer()
-                Button { applyCacheAutoFill() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wand.and.stars")
-                        Text(L("Auto-fill Cache (1.25× / 0.1×)", "自动填充缓存（1.25×/0.1×）"))
-                    }
-                    .font(.caption.weight(.medium))
-                }
-                .buttonStyle(.borderless)
-                Picker("", selection: $pricingCurrency) {
-                    Text("USD ($)").tag(ProxyConfiguration.PricingCurrency.usd)
-                    Text("CNY (¥)").tag(ProxyConfiguration.PricingCurrency.cny)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
-                .onChange(of: pricingCurrency) { _, newCurrency in
-                    profile.metadata.proxy.modelMapping.bigModel.pricing.currency = newCurrency
-                }
+            ProxyModelLibraryEditor(
+                library: Binding(
+                    get: { profile.metadata.proxy.modelLibrary ?? [] },
+                    set: { profile.metadata.proxy.modelLibrary = $0.isEmpty ? nil : $0 }
+                ),
+                currency: $pricingCurrency,
+                modelFetch: modelFetch
+            )
+            .onChange(of: pricingCurrency) { _, newCurrency in
+                profile.metadata.proxy.modelMapping.bigModel.pricing.currency = newCurrency
             }
-
-            HStack(spacing: 0) {
-                Text(L("Input", "输入")).frame(maxWidth: .infinity, alignment: .leading)
-                Text(L("Output", "输出")).frame(maxWidth: .infinity, alignment: .leading)
-                Text(L("Cache Write", "缓存写入")).frame(maxWidth: .infinity, alignment: .leading)
-                Text(L("Cache Read", "缓存读取")).frame(maxWidth: .infinity, alignment: .leading)
-                Text(L("/ M tokens", "/ 百万")).frame(width: 64, alignment: .trailing)
-            }
-            .font(.system(size: 10, weight: .medium)).foregroundStyle(.tertiary)
-
-            pricingRow(pricing: $profile.metadata.proxy.modelMapping.bigModel.pricing)
 
             Divider()
 
@@ -272,6 +263,11 @@ struct CodexProxyEditorView: View {
                 }
             }
         }
+    }
+
+    /// 槽位下拉用的当前模型库（已过滤空名）。
+    private var currentModelLibrary: [ProxyConfiguration.MappedModel] {
+        (profile.metadata.proxy.modelLibrary ?? []).filter { !$0.name.isEmpty }
     }
 
     // MARK: - Security
@@ -353,28 +349,6 @@ struct CodexProxyEditorView: View {
         ModelSuggestionField(text: text, placeholder: placeholder, state: modelFetch)
     }
 
-    private func pricingRow(pricing: Binding<ProxyConfiguration.ModelPricing>) -> some View {
-        HStack(spacing: 6) {
-            TextField("0", value: pricing.inputPerMillion, format: .number.precision(.fractionLength(0...4)))
-                .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced)).frame(maxWidth: .infinity)
-            TextField("0", value: pricing.outputPerMillion, format: .number.precision(.fractionLength(0...4)))
-                .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced)).frame(maxWidth: .infinity)
-            TextField("0", value: pricing.cacheCreatePerMillion, format: .number.precision(.fractionLength(0...4)))
-                .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced)).frame(maxWidth: .infinity)
-            TextField("0", value: pricing.cacheReadPerMillion, format: .number.precision(.fractionLength(0...4)))
-                .textFieldStyle(.roundedBorder).font(.system(size: 12, design: .monospaced)).frame(maxWidth: .infinity)
-            Spacer().frame(width: 64)
-        }
-    }
-
-    private func applyCacheAutoFill() {
-        var p = profile.metadata.proxy.modelMapping.bigModel.pricing
-        guard p.inputPerMillion > 0 else { return }
-        p.cacheCreatePerMillion = p.inputPerMillion * ProxyConfiguration.ModelPricing.defaultCacheWriteMultiplier
-        p.cacheReadPerMillion = p.inputPerMillion * ProxyConfiguration.ModelPricing.defaultCacheReadMultiplier
-        profile.metadata.proxy.modelMapping.bigModel.pricing = p
-    }
-
     // MARK: - Validation / Save
 
     private var isValid: Bool {
@@ -394,6 +368,7 @@ struct CodexProxyEditorView: View {
         profile.metadata.proxy.modelMapping.middleModel.name = ""
         profile.metadata.proxy.modelMapping.smallModel.name = ""
         profile.metadata.proxy.defaultModel = model
+        profile.metadata.proxy.syncSlotPricingFromLibrary()
         profile.syncEnvFromProxy()
 
         Task {

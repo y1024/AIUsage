@@ -176,6 +176,65 @@ extension SettingsView {
                 .pickerStyle(.menu)
                 .frame(maxWidth: 180, alignment: .leading)
             }
+
+            Divider()
+
+            settingsBlock(
+                title: L("cc-switch Config Directory", "cc-switch 配置目录"),
+                subtitle: L(
+                    "Used by all three cc-switch sync buttons (Claude / Codex / OpenCode). Leave empty to auto-detect: custom directory from cc-switch's own settings first, then ~/.cc-switch.",
+                    "三处「同步 cc-switch」（Claude / Codex / OpenCode）共用。留空则自动探测：优先读取 cc-switch 自身记录的自定义目录，其次 ~/.cc-switch。"
+                )
+            ) {
+                HStack(spacing: 8) {
+                    TextField("~/.cc-switch", text: $ccSwitchDirInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                        .onSubmit { applyCCSwitchDir() }
+                    Button(L("Choose…", "选择…")) { chooseCCSwitchDir() }
+                    if !ccSwitchDirInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button(L("Reset", "清除")) {
+                            ccSwitchDirInput = ""
+                            applyCCSwitchDir()
+                        }
+                    }
+                }
+                Text(ccSwitchResolvedPathHint)
+                    .font(.caption2)
+                    .foregroundStyle(FileManager.default.fileExists(atPath: CCSwitchLocator.databasePath()) ? Color.secondary : Color.orange)
+            }
+        }
+    }
+
+    /// 当前生效的 cc-switch.db 解析结果（实时反馈手动路径是否有效）。
+    private var ccSwitchResolvedPathHint: String {
+        let path = CCSwitchLocator.databasePath()
+        let exists = FileManager.default.fileExists(atPath: path)
+        let abbreviated = (path as NSString).abbreviatingWithTildeInPath
+        return exists
+            ? L("Database in use: \(abbreviated)", "当前使用的数据库：\(abbreviated)")
+            : L("Database not found: \(abbreviated)", "未找到数据库：\(abbreviated)")
+    }
+
+    private func applyCCSwitchDir() {
+        let trimmed = ccSwitchDirInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: DefaultsKey.ccSwitchConfigDirOverride)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: DefaultsKey.ccSwitchConfigDirOverride)
+        }
+    }
+
+    private func chooseCCSwitchDir() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.prompt = L("Choose", "选择")
+        if panel.runModal() == .OK, let url = panel.url {
+            ccSwitchDirInput = (url.path as NSString).abbreviatingWithTildeInPath
+            applyCCSwitchDir()
         }
     }
 

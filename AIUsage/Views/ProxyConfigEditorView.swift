@@ -46,13 +46,17 @@ struct ProxyConfigEditorView: View {
     @State var isApplyingFinalJSONEdit = false
 
     init(profile: NodeProfile? = nil) {
-        if let profile {
+        if var profile {
+            // 旧档案迁移：库为空时用槽位价格播种，打开编辑器即看到完整模型库。
+            profile.metadata.proxy.seedModelLibraryIfEmpty()
             _profile = State(initialValue: profile)
             _isNew = State(initialValue: false)
             _jsonText = State(initialValue: profile.settingsJSONString)
-            _pricingCurrency = State(initialValue: profile.metadata.proxy.modelMapping.bigModel.pricing.currency)
+            _pricingCurrency = State(initialValue: profile.metadata.proxy.modelLibrary?.first?.pricing.currency
+                ?? profile.metadata.proxy.modelMapping.bigModel.pricing.currency)
         } else {
-            let newProfile = NodeProfile.defaultProfile()
+            var newProfile = NodeProfile.defaultProfile()
+            newProfile.metadata.proxy.seedModelLibraryIfEmpty()
             _profile = State(initialValue: newProfile)
             _isNew = State(initialValue: true)
             _jsonText = State(initialValue: newProfile.settingsJSONString)
@@ -62,11 +66,13 @@ struct ProxyConfigEditorView: View {
 
     /// Legacy init wrapping a ProxyConfiguration for callers not yet migrated.
     init(config: ProxyConfiguration) {
-        let p = NodeProfile.fromLegacyConfiguration(config)
+        var p = NodeProfile.fromLegacyConfiguration(config)
+        p.metadata.proxy.seedModelLibraryIfEmpty()
         _profile = State(initialValue: p)
         _isNew = State(initialValue: false)
         _jsonText = State(initialValue: p.settingsJSONString)
-        _pricingCurrency = State(initialValue: config.modelMapping.bigModel.pricing.currency)
+        _pricingCurrency = State(initialValue: p.metadata.proxy.modelLibrary?.first?.pricing.currency
+            ?? config.modelMapping.bigModel.pricing.currency)
     }
 
     var body: some View {
@@ -473,10 +479,13 @@ struct ProxyConfigEditorView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(L("Default Model", "主模型")).font(.subheadline.weight(.semibold))
-                modelTextField(text: $profile.metadata.proxy.defaultModel,
-                               placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.5" : "claude-sonnet-4-6")
-                Text(L("The model field in settings.json. Claude Code uses this as the active model.",
-                       "settings.json 中的 model 字段，Claude Code 以此作为当前使用的模型。"))
+                HStack(spacing: 6) {
+                    modelTextField(text: $profile.metadata.proxy.defaultModel,
+                                   placeholder: profile.metadata.nodeType == .openaiProxy ? "gpt-5.5" : "claude-sonnet-4-6")
+                    ModelLibrarySlotPicker(selection: $profile.metadata.proxy.defaultModel, library: currentModelLibrary)
+                }
+                Text(L("The model field in settings.json. Claude Code uses this as the active model. Switchable from the node card when the library has multiple models.",
+                       "settings.json 中的 model 字段，Claude Code 以此作为当前使用的模型。模型库有多个模型时，节点卡片上可随时切换。"))
                     .font(.caption2).foregroundStyle(.tertiary)
             }
 
@@ -494,7 +503,7 @@ struct ProxyConfigEditorView: View {
 
             if profile.metadata.proxy.needsProxyProcess(nodeType: profile.metadata.nodeType) {
                 Divider()
-                modelPricingSection
+                modelLibrarySection
             }
 
             if profile.metadata.nodeType == .openaiProxy {
@@ -566,6 +575,7 @@ struct ProxyConfigEditorView: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 52, alignment: .trailing)
             modelTextField(text: binding, placeholder: placeholder)
+            ModelLibrarySlotPicker(selection: binding, library: currentModelLibrary)
         }
     }
 
@@ -573,9 +583,31 @@ struct ProxyConfigEditorView: View {
         ModelSuggestionField(text: text, placeholder: placeholder, state: modelFetch)
     }
 
+    /// 槽位下拉用的当前模型库（已过滤空名）。
+    var currentModelLibrary: [ProxyConfiguration.MappedModel] {
+        (profile.metadata.proxy.modelLibrary ?? []).filter { !$0.name.isEmpty }
+    }
+
     // MARK: - Pricing Sub-section
 
     @State var pricingCurrency: ProxyConfiguration.PricingCurrency = .usd
+
+    /// 模型库与定价（共享组件）；币种切换时同步槽位的遗留价格币种，保持回退路径一致。
+    var modelLibrarySection: some View {
+        ProxyModelLibraryEditor(
+            library: Binding(
+                get: { profile.metadata.proxy.modelLibrary ?? [] },
+                set: { profile.metadata.proxy.modelLibrary = $0.isEmpty ? nil : $0 }
+            ),
+            currency: $pricingCurrency,
+            modelFetch: modelFetch
+        )
+        .onChange(of: pricingCurrency) { _, newCurrency in
+            profile.metadata.proxy.modelMapping.bigModel.pricing.currency = newCurrency
+            profile.metadata.proxy.modelMapping.middleModel.pricing.currency = newCurrency
+            profile.metadata.proxy.modelMapping.smallModel.pricing.currency = newCurrency
+        }
+    }
 
     // MARK: - Security Section (OpenAI Proxy)
 
@@ -641,6 +673,7 @@ struct ProxyConfigEditorView: View {
         } else {
             profile.syncEnvFromProxy()
         }
+        profile.metadata.proxy.syncSlotPricingFromLibrary()
 
         Task {
             if isNew {

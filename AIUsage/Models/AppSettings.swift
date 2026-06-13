@@ -93,6 +93,7 @@ enum DefaultsKey {
     static let appLanguage = "appLanguage"
     static let autoRefreshInterval = "autoRefreshInterval"
     static let backendMode = "backendMode"
+    static let ccSwitchConfigDirOverride = "ccSwitchConfigDirOverride"
     static let claudeCodeDailyThreshold = "claudeCodeDailyThreshold"
     static let claudeCodeLastNotifiedDate = "claudeCodeLastNotifiedDate"
     static let claudeCodeRefreshInterval = "claudeCodeRefreshInterval"

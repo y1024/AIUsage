@@ -54,6 +54,10 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
     var expectedClientKey: String
     var defaultModel: String
     var modelMapping: ModelMapping
+    /// 模型库：节点内预配置的「模型名 + 独立定价」清单（与 OpenCode 的 modelEntries 同构）。
+    /// 定价唯一来源（查询顺序见 pricingForModel）；槽位/默认模型从库中点选即可切换，
+    /// 无需重填名称与价格。旧档案无此字段时为空，计价自动回退槽位价格。
+    var modelLibrary: [MappedModel]
     var maxOutputTokens: Int // 0 = no cap, pass through original value
     var enableModelAliasMapping: Bool
     var enableHTTPS: Bool
@@ -241,6 +245,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         expectedClientKey: String = "",
         defaultModel: String = "",
         modelMapping: ModelMapping = .default,
+        modelLibrary: [MappedModel] = [],
         maxOutputTokens: Int = 0,
         createdAt: Date = Date(),
         lastUsedAt: Date? = nil,
@@ -264,6 +269,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         self.expectedClientKey = expectedClientKey
         self.defaultModel = defaultModel
         self.modelMapping = modelMapping
+        self.modelLibrary = modelLibrary
         self.maxOutputTokens = maxOutputTokens
         self.enableModelAliasMapping = enableModelAliasMapping
         self.enableHTTPS = enableHTTPS
@@ -292,6 +298,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         expectedClientKey = try container.decode(String.self, forKey: .expectedClientKey)
         defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel) ?? ""
         modelMapping = try container.decode(ModelMapping.self, forKey: .modelMapping)
+        modelLibrary = try container.decodeIfPresent([MappedModel].self, forKey: .modelLibrary) ?? []
         maxOutputTokens = try container.decodeIfPresent(Int.self, forKey: .maxOutputTokens) ?? 0
         enableModelAliasMapping = try container.decodeIfPresent(Bool.self, forKey: .enableModelAliasMapping) ?? false
         enableHTTPS = try container.decodeIfPresent(Bool.self, forKey: .enableHTTPS) ?? false
@@ -332,9 +339,16 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         expectedClientKey.isEmpty ? "proxy-key" : expectedClientKey
     }
 
+    /// 计价查询：模型库精确匹配 → 槽位精确匹配 → 槽位家族匹配 → 模型库家族匹配。
+    /// 模型库是定价唯一来源；旧档案（库为空）自动回退槽位价格，行为不变。
     func pricingForModel(_ model: String) -> ModelPricing? {
+        if let p = modelLibrary.first(where: { $0.name == model })?.pricing { return p }
         if let p = modelMapping.pricingForUpstreamModel(model) { return p }
         if let p = modelMapping.pricingForFamily(of: model) { return p }
+        if let family = Self.modelFamilyHint(for: model),
+           let p = modelLibrary.first(where: { Self.modelFamilyHint(for: $0.name) == family })?.pricing {
+            return p
+        }
         return nil
     }
 

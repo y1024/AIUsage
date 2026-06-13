@@ -119,7 +119,8 @@ extension OpenCodeNodeStore {
             ?? raw.id
 
         var node = existing ?? OpenCodeNode(id: stableId, sortOrder: appendOrder)
-        node.name = name
+        // 与 Claude/Codex 导入同款来源标记，便于在节点列表里识别镜像节点。
+        node.name = "\(name) (cc-switch)"
         node.baseURL = baseURL
         node.apiKey = apiKey
         node.protocolType = Self.protocolType(forNPMPackage: npm)
