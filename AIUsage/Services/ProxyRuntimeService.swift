@@ -2,7 +2,9 @@ import Foundation
 import QuotaBackend
 import os.log
 
-private actor ProxyProcessInspector {
+/// 端口残留进程清理：lsof + SIGTERM。放在独立 actor 上执行，避免在主线程同步阻塞
+/// （Claude/Codex/OpenCode 三轨共用，统一并发语义）。
+actor ProxyProcessInspector {
     static let shared = ProxyProcessInspector()
 
     func killStaleProcesses(port: Int, currentProcessIdentifier: Int32) throws {

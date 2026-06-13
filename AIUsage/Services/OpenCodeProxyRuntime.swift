@@ -139,6 +139,8 @@ final class OpenCodeProxyRuntime: ObservableObject {
     private func terminate(_ instance: Instance) {
         guard let process = instance.process else { return }
         instance.process = nil
+        // 先解绑日志读取回调（进程结束后管道 EOF 会反复触发），再终止进程。
+        (process.standardOutput as? Pipe)?.fileHandleForReading.readabilityHandler = nil
         if process.isRunning {
             process.terminationHandler = nil
             process.terminate()
@@ -149,7 +151,17 @@ final class OpenCodeProxyRuntime: ObservableObject {
 
     private func launch(instance: Instance) async throws {
         let node = instance.node
-        killStaleProcesses(port: node.proxyPort)
+        // 清掉残留占用端口的旧代理进程（上次未正常退出时）。复用 Claude/Codex 的独立
+        // actor，避免在 @MainActor 上同步 lsof.waitUntilExit()+usleep 阻塞 UI。
+        // 调用前已确认没有别的受管实例占用该端口，不会误杀自己的子进程。
+        do {
+            try await ProxyProcessInspector.shared.killStaleProcesses(
+                port: node.proxyPort,
+                currentProcessIdentifier: ProcessInfo.processInfo.processIdentifier
+            )
+        } catch {
+            openCodeProxyLog.error("Failed to inspect stale processes on port \(node.proxyPort, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
 
         guard let executablePath = await QuotaServerLocator.find() else {
             throw ProxyRuntimeError.quotaServerNotFound
@@ -349,33 +361,6 @@ final class OpenCodeProxyRuntime: ObservableObject {
     }
 
     // MARK: - Helpers
-
-    /// 清掉残留占用端口的旧代理进程（上次未正常退出时）。
-    /// 调用前已确认没有别的受管实例占用该端口，不会误杀自己的子进程。
-    private func killStaleProcesses(port: Int) {
-        let lsof = Process()
-        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        lsof.arguments = ["-ti", "tcp:\(port)"]
-        let pipe = Pipe()
-        lsof.standardOutput = pipe
-        lsof.standardError = FileHandle.nullDevice
-        do {
-            try lsof.run()
-            lsof.waitUntilExit()
-        } catch {
-            openCodeProxyLog.error("Failed to inspect stale processes on port \(port, privacy: .public): \(String(describing: error), privacy: .public)")
-            return
-        }
-
-        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let currentPid = ProcessInfo.processInfo.processIdentifier
-        for pidStr in output.components(separatedBy: .whitespacesAndNewlines) where !pidStr.isEmpty {
-            guard let pid = Int32(pidStr), pid != currentPid else { continue }
-            openCodeProxyLog.info("Killing stale process on port \(port, privacy: .public): pid=\(pid, privacy: .public)")
-            kill(pid, SIGTERM)
-            usleep(200_000)
-        }
-    }
 
     private func waitForHealth(process: Process, port: Int) async throws {
         let deadline = Date().addingTimeInterval(Self.startupTimeout)
