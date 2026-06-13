@@ -55,6 +55,32 @@ extension SettingsView {
 
             Divider()
 
+            settingsBlock(
+                title: L("CNY / USD Rate", "CNY/USD 汇率"),
+                subtitle: L(
+                    "Approximate rate to convert CNY pricing to USD and to display costs in CNY. Not a real billing rate.",
+                    "把人民币定价折算为美元、以及以人民币显示费用时使用的近似汇率，并非真实计费汇率。"
+                )
+            ) {
+                HStack(spacing: 8) {
+                    Text("1 USD =")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        "\(AppSettings.defaultCNYPerUSD)",
+                        value: $settings.cnyExchangeRate,
+                        format: .number.precision(.fractionLength(0...4))
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+                    Text("CNY")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
             settingsToggleRow(
                 title: L("Launch at Login", "开机启动"),
                 subtitle: L("Open AIUsage automatically after login.", "登录系统后自动打开 AIUsage。"),

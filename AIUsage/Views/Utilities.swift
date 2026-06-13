@@ -128,12 +128,6 @@ func formatRelativeRefreshTime(_ date: Date, language: String) -> String {
     }
 }
 
-private enum CurrencyDisplayConstants {
-    /// Approximate USD/CNY rate for display purposes only. Not used for actual billing.
-    /// Users configure pricing in their preferred currency per node.
-    static let approximateUsdToCnyRate: Double = 7.3
-}
-
 private enum NumberFormatterCache {
     static func currencyFormatter(symbol: String, fractionDigits: Int) -> NumberFormatter {
         let key = "AIUsage.CurrencyFormatter.\(symbol).\(fractionDigits)"
@@ -166,7 +160,7 @@ private enum NumberFormatterCache {
 func formatCurrency(_ value: Double) -> String {
     let displayCurrency = UserDefaults.standard.string(forKey: DefaultsKey.displayCurrency) ?? "USD"
 
-    let displayValue = displayCurrency == "CNY" ? value * CurrencyDisplayConstants.approximateUsdToCnyRate : value
+    let displayValue = displayCurrency == "CNY" ? value * AppSettings.cnyPerUSD : value
     let symbol = displayCurrency == "CNY" ? "¥" : "$"
 
     // 智能精度：精确为 0 → "$0"；极小额（>0 且 <0.01）→ "<$0.01"（不再堆四位 0）；其余统一 2 位。
@@ -185,7 +179,7 @@ func formatCurrency(_ value: Double) -> String {
 func formatCurrencyCompact(_ usd: Double) -> String {
     let isCNY = (UserDefaults.standard.string(forKey: DefaultsKey.displayCurrency) ?? "USD") == "CNY"
     let symbol = isCNY ? "¥" : "$"
-    let value = isCNY ? usd * CurrencyDisplayConstants.approximateUsdToCnyRate : usd
+    let value = isCNY ? usd * AppSettings.cnyPerUSD : usd
     if value <= 0 { return "\(symbol)0" }
     if value < 1 { return String(format: "\(symbol)%.2f", value) }
     if value < 100 { return String(format: "\(symbol)%.1f", value) }

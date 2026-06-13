@@ -84,10 +84,9 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
             ModelPricing(inputPerMillion: 0, outputPerMillion: 0, cacheCreatePerMillion: 0, cacheReadPerMillion: 0, currency: .usd)
         }
 
-        /// Approximate USD/CNY rate for display purposes only. Not used for actual billing.
-        /// Users configure pricing in their preferred currency per node.
-        private static let approximateUsdToCnyRate: Double = 7.3
-        private static let cnyToUsdRate: Double = 1.0 / approximateUsdToCnyRate
+        /// CNY → USD 折算用用户配置的全局汇率（AppSettings.cnyPerUSD，默认 7），
+        /// 与 OpenCode 定价、费用显示共用同一汇率，保证录入与显示口径一致。
+        private static var cnyToUsdRate: Double { 1.0 / AppSettings.cnyPerUSD }
 
         var inputPerMillionUSD: Double {
             currency == .usd ? inputPerMillion : inputPerMillion * Self.cnyToUsdRate

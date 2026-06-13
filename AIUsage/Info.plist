@@ -24,8 +24,12 @@
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
+		<!-- 本应用是连接「用户自填上游」的开发者工具：测试连通/获取模型会直连用户配置的
+		     任意 AI 网关，其中大量自建/区域网关仅提供明文 http。上游主机在构建期未知，
+		     无法用 NSExceptionDomains 白名单覆盖，故放开任意加载让 URLSession 能直连 http 上游
+		     （否则触发 ATS「requires a secure connection」报错，见 issue #21）。 -->
 		<key>NSAllowsArbitraryLoads</key>
-		<false/>
+		<true/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>

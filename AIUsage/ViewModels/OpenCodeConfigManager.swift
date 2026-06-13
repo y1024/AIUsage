@@ -158,6 +158,7 @@ final class OpenCodeConfigManager {
     func managedProviderEntry(node: OpenCodeNode, baseURLOverride: String? = nil) -> [String: Any] {
         // 每模型独立定价写入各自的 cost 块（USD/百万 token，CNY 录入按近似汇率折算），
         // OpenCode 据此把费用算进 opencode.db——金额单一来源，不在本地重复计费。
+        let generationOptions = node.modelGenerationOptions
         var modelsBlock: [String: Any] = [:]
         for model in node.modelEntries where !model.id.isEmpty {
             var entry: [String: Any] = ["name": model.id]
@@ -165,6 +166,8 @@ final class OpenCodeConfigManager {
             if node.contextLimit > 0 { limit["context"] = node.contextLimit }
             if node.outputLimit > 0 { limit["output"] = node.outputLimit }
             if !limit.isEmpty { entry["limit"] = limit }
+            // 生成参数（temperature/topP/…）统一写入每个模型 options，OpenCode 透传给上游 SDK。
+            if !generationOptions.isEmpty { entry["options"] = generationOptions }
             if node.pricingCurrency != .none, model.hasPricing {
                 let currency = node.pricingCurrency
                 var costBlock: [String: Any] = [
