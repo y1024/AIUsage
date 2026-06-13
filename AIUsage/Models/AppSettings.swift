@@ -97,6 +97,7 @@ enum DefaultsKey {
     static let claudeCodeDailyThreshold = "claudeCodeDailyThreshold"
     static let claudeCodeLastNotifiedDate = "claudeCodeLastNotifiedDate"
     static let claudeCodeRefreshInterval = "claudeCodeRefreshInterval"
+    static let cnyExchangeRate = "cnyExchangeRate"
     static let displayCurrency = "displayCurrency"
     static let hideDockIcon = "hideDockIcon"
     static let lowQuotaThreshold = "lowQuotaThreshold"
@@ -141,6 +142,17 @@ final class AppSettings: ObservableObject {
     static let supportedClaudeCodeRefreshIntervals: [Int] = [10, 30, 60, 180, 300, 600, 0]
     static let defaultClaudeCodeRefreshInterval = 30
 
+    /// CNY/USD 近似汇率默认值（1 USD ≈ 7 CNY）。仅用于把人民币录入价折算成 USD 落盘、
+    /// 以及费用以人民币显示时的换算；非真实计费汇率，可由用户在设置里调整。
+    static let defaultCNYPerUSD: Double = 7.0
+
+    /// 线程安全读取当前 CNY/USD 汇率（模型/工具层折算可能跑在非主线程，故直接读 UserDefaults，
+    /// 与 `formatCurrency` 同源）。未设置或非正数时回退默认 7。
+    static var cnyPerUSD: Double {
+        let raw = UserDefaults.standard.double(forKey: DefaultsKey.cnyExchangeRate)
+        return raw > 0 ? raw : defaultCNYPerUSD
+    }
+
     @Published var themeMode: String = UserDefaults.standard.string(forKey: DefaultsKey.themeMode) ?? "system"
 
     var resolvedColorScheme: ColorScheme? {
@@ -165,6 +177,13 @@ final class AppSettings: ObservableObject {
             ? defaults.integer(forKey: DefaultsKey.claudeCodeRefreshInterval)
             : AppSettings.defaultClaudeCodeRefreshInterval
         return AppSettings.normalizedClaudeCodeRefreshInterval(storedValue)
+    }()
+
+    /// CNY/USD 汇率（1 USD = ? CNY），默认 7；设置页可调，三处折算（OpenCode 定价录入、
+    /// 费用显示、Claude/Codex 代理定价）统一读它，保证录入与显示口径一致。
+    @Published var cnyExchangeRate: Double = {
+        let raw = UserDefaults.standard.double(forKey: DefaultsKey.cnyExchangeRate)
+        return raw > 0 ? raw : AppSettings.defaultCNYPerUSD
     }()
 
     @Published var language: String = UserDefaults.standard.string(forKey: DefaultsKey.appLanguage) ?? "en"
@@ -250,6 +269,7 @@ final class AppSettings: ObservableObject {
         $quotaIndicatorStyle.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.quotaIndicatorStyle) }.store(in: &cancellables)
         $quotaIndicatorMetric.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.quotaIndicatorMetric) }.store(in: &cancellables)
         $claudeCodeDailyThreshold.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.claudeCodeDailyThreshold) }.store(in: &cancellables)
+        $cnyExchangeRate.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.cnyExchangeRate) }.store(in: &cancellables)
         $menuBarDisplayMode.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.menuBarDisplayMode) }.store(in: &cancellables)
         $menuBarMetricType.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.menuBarMetricType) }.store(in: &cancellables)
         $menuBarPinnedQuotaAccountIds.dropFirst().sink { defaults.set(Array($0), forKey: DefaultsKey.menuBarPinnedQuotaAccountIds) }.store(in: &cancellables)

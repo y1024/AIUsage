@@ -38,6 +38,12 @@ struct OpenCodeNodeEditorView: View {
     @StateObject private var modelFetch = ModelFetchState()
     @State private var connectivity: ConnectivityResult = .idle
     @State private var selectedTab: OpenCodeEditorTab = .settings
+    /// 生成参数的文本镜像：temperature/topP/penalty 的 0 是合法值，用文本输入避免 0 哨兵歧义，
+    /// 解析为可选 Double（空/非法 = nil）。maxOutputTokens 直接绑定 node（Int，0 = 不写）。
+    @State private var temperatureText: String
+    @State private var topPText: String
+    @State private var frequencyPenaltyText: String
+    @State private var presencePenaltyText: String
     private let isNew: Bool
 
     struct ModelRow: Identifiable {
@@ -58,7 +64,33 @@ struct OpenCodeNodeEditorView: View {
         self.onSave = onSave
         _node = State(initialValue: node)
         _modelRows = State(initialValue: node.modelEntries.map { ModelRow(entry: $0) })
+        _temperatureText = State(initialValue: Self.decimalText(node.temperature))
+        _topPText = State(initialValue: Self.decimalText(node.topP))
+        _frequencyPenaltyText = State(initialValue: Self.decimalText(node.frequencyPenalty))
+        _presencePenaltyText = State(initialValue: Self.decimalText(node.presencePenalty))
         isNew = node.name.isEmpty && node.baseURL.isEmpty && node.modelEntries.isEmpty
+    }
+
+    /// 可选 Double → 输入框文本（nil → 空串；用 %g 紧凑显示，0.7 → "0.7"、1 → "1"）。
+    private static func decimalText(_ value: Double?) -> String {
+        guard let value else { return "" }
+        return String(format: "%g", value)
+    }
+
+    /// 输入框文本 → 可选 Double（去空白后空串/非法 = nil）。
+    private func parsedOptionalDouble(_ text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return Double(trimmed)
+    }
+
+    /// 把文本镜像解析并夹到合法区间后写回节点的生成参数（草稿预览与保存共用，口径一致）。
+    private func applyParsedParameters(to node: inout OpenCodeNode) {
+        node.temperature = parsedOptionalDouble(temperatureText).map { min(max($0, 0), 2) }
+        node.topP = parsedOptionalDouble(topPText).map { min(max($0, 0), 1) }
+        node.frequencyPenalty = parsedOptionalDouble(frequencyPenaltyText).map { min(max($0, -2), 2) }
+        node.presencePenalty = parsedOptionalDouble(presencePenaltyText).map { min(max($0, -2), 2) }
+        node.maxOutputTokens = max(0, node.maxOutputTokens)
     }
 
     /// 行内容 → 模型条目（去空白、去重、保持顺序）。
@@ -82,6 +114,7 @@ struct OpenCodeNodeEditorView: View {
     private var draftNode: OpenCodeNode {
         var draft = node
         draft.modelEntries = parsedEntries
+        applyParsedParameters(to: &draft)
         return draft
     }
 
@@ -100,6 +133,7 @@ struct OpenCodeNodeEditorView: View {
                             basicSection
                             modelsSection
                             limitsSection
+                            parametersSection
                             proxySection
                         }
                         .padding(18)
@@ -394,6 +428,9 @@ struct OpenCodeNodeEditorView: View {
 
     private var showsPriceColumns: Bool { node.pricingCurrency != .none }
 
+    /// 当前 CNY/USD 汇率的紧凑文本（如 7、7.3），用于定价说明里实时回显用户在设置里配置的汇率。
+    private var cnyRateText: String { String(format: "%g", AppSettings.cnyPerUSD) }
+
     private var modelsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -459,8 +496,8 @@ struct OpenCodeNodeEditorView: View {
 
             Text(showsPriceColumns
                  ? L(
-                     "Pick the default model with the radio button — switchable from the node card anytime. Prices are per million tokens (\(node.pricingCurrency == .cny ? "CNY, converted to USD at ≈7.3 when written" : "USD")); OpenCode records real spend per message.",
-                     "单选钮选默认模型——节点卡片上也可随时切换。单价为每百万 token（\(node.pricingCurrency == .cny ? "人民币，写入时按 ≈7.3 折算为美元" : "美元")），OpenCode 据此逐条记录真实消费。"
+                     "Pick the default model with the radio button — switchable from the node card anytime. Prices are per million tokens (\(node.pricingCurrency == .cny ? "CNY, converted to USD at ≈\(cnyRateText) when written" : "USD")); OpenCode records real spend per message.",
+                     "单选钮选默认模型——节点卡片上也可随时切换。单价为每百万 token（\(node.pricingCurrency == .cny ? "人民币，写入时按 ≈\(cnyRateText) 折算为美元" : "美元")），OpenCode 据此逐条记录真实消费。"
                  )
                  : L(
                      "Pick the default model with the radio button — switchable from the node card anytime. Pricing is off (cost stays $0); choose USD/CNY to price each model.",
@@ -562,6 +599,46 @@ struct OpenCodeNodeEditorView: View {
             ))
             .font(.caption2)
             .foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: - Generation Parameters
+    // 节点级生成参数（可选）：统一写入每个模型的 options 块，OpenCode 透传给上游。
+    // 留空 = 不写、由上游取默认；与「上限」（limit.context/output）相互独立。
+
+    private var parametersSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            fieldLabel(L("Model Parameters (optional, blank = upstream default)", "模型参数（可选，留空 = 由上游取默认）"), required: false)
+            HStack(spacing: 12) {
+                decimalParamField("temperature", placeholder: "0.7", text: $temperatureText)
+                decimalParamField("top_p", placeholder: "1.0", text: $topPText)
+                labeledNumberField("max_tokens", value: $node.maxOutputTokens)
+            }
+            HStack(spacing: 12) {
+                decimalParamField("frequency_penalty", placeholder: "0", text: $frequencyPenaltyText)
+                decimalParamField("presence_penalty", placeholder: "0", text: $presencePenaltyText)
+                Spacer()
+            }
+            Text(L(
+                "Applied to every model's options block (temperature / top_p / max_tokens / …) and forwarded to the upstream. Independent from the limits above.",
+                "统一写入每个模型的 options 块（temperature / top_p / max_tokens / …），由 OpenCode 透传给上游；与上方「上限」相互独立。"
+            ))
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func decimalParamField(_ title: String, placeholder: String, text: Binding<String>) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .frame(width: 76)
+                .autocorrectionDisabled()
         }
     }
 
@@ -692,6 +769,7 @@ struct OpenCodeNodeEditorView: View {
         if !(1...65_535).contains(saved.proxyPort) {
             saved.proxyPort = OpenCodeNode.defaultProxyPort
         }
+        applyParsedParameters(to: &saved)
         onSave(saved)
         dismiss()
     }

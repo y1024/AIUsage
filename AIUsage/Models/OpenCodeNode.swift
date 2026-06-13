@@ -25,11 +25,10 @@ enum OpenCodePricingCurrency: String, Codable, CaseIterable {
         }
     }
 
-    /// 与 ProxyConfiguration.ModelPricing 同一近似汇率（仅用于把录入价折算为 USD）。
-    static let approximateUsdToCnyRate: Double = 7.3
-
+    /// 把录入价折算为 USD：CNY 按用户配置的全局汇率（AppSettings.cnyPerUSD，默认 7）折算，
+    /// USD/none 原样返回。与费用显示、Claude/Codex 代理定价共用同一汇率，口径一致。
     func toUSD(_ value: Double) -> Double {
-        self == .cny ? value / Self.approximateUsdToCnyRate : value
+        self == .cny ? value / AppSettings.cnyPerUSD : value
     }
 }
 
@@ -127,6 +126,15 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     var contextLimit: Int
     /// 写进每个模型 `limit.output` 的输出上限；0 = 不写。
     var outputLimit: Int
+    /// 模型生成参数（可选），统一写入每个模型 `options` 块，OpenCode 透传给上游 SDK。
+    /// temperature / topP / penalty 的 0 都是合法取值，故用可选（nil = 不写、由上游取默认）
+    /// 而非 0 哨兵；maxOutputTokens 用 0 = 不写（单次生成上限不会取 0）。
+    /// 与 `limit.output`（OpenCode 的上下文输出预算）相互独立。
+    var temperature: Double?
+    var topP: Double?
+    var maxOutputTokens: Int
+    var frequencyPenalty: Double?
+    var presencePenalty: Double?
     /// 代理模式：激活时启动本地透传代理并把 opencode.json 指向它（请求级日志）。
     var proxyEnabled: Bool
     /// 本地透传代理监听端口。
@@ -159,6 +167,11 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         providerSlug: String? = nil,
         contextLimit: Int = 0,
         outputLimit: Int = 0,
+        temperature: Double? = nil,
+        topP: Double? = nil,
+        maxOutputTokens: Int = 0,
+        frequencyPenalty: Double? = nil,
+        presencePenalty: Double? = nil,
         proxyEnabled: Bool = false,
         proxyPort: Int = OpenCodeNode.defaultProxyPort,
         pricingCurrency: OpenCodePricingCurrency = .none,
@@ -177,6 +190,11 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.providerSlug = providerSlug
         self.contextLimit = contextLimit
         self.outputLimit = outputLimit
+        self.temperature = temperature
+        self.topP = topP
+        self.maxOutputTokens = maxOutputTokens
+        self.frequencyPenalty = frequencyPenalty
+        self.presencePenalty = presencePenalty
         self.proxyEnabled = proxyEnabled
         self.proxyPort = proxyPort
         self.pricingCurrency = pricingCurrency
@@ -191,6 +209,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         case modelEntries
         case models                    // legacy: [String]
         case defaultModel, providerSlug, contextLimit, outputLimit
+        case temperature, topP, maxOutputTokens, frequencyPenalty, presencePenalty
         case proxyEnabled, proxyPort
         case pricingCurrency
         case priceInputPerMillion      // legacy: 节点级单价
@@ -213,6 +232,11 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         providerSlug = try c.decodeIfPresent(String.self, forKey: .providerSlug)
         contextLimit = try c.decode(Int.self, forKey: .contextLimit)
         outputLimit = try c.decode(Int.self, forKey: .outputLimit)
+        temperature = try c.decodeIfPresent(Double.self, forKey: .temperature)
+        topP = try c.decodeIfPresent(Double.self, forKey: .topP)
+        maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens) ?? 0
+        frequencyPenalty = try c.decodeIfPresent(Double.self, forKey: .frequencyPenalty)
+        presencePenalty = try c.decodeIfPresent(Double.self, forKey: .presencePenalty)
         proxyEnabled = try c.decodeIfPresent(Bool.self, forKey: .proxyEnabled) ?? false
         proxyPort = try c.decodeIfPresent(Int.self, forKey: .proxyPort) ?? Self.defaultProxyPort
         commonConfigMode = try c.decodeIfPresent(CommonConfigMode.self, forKey: .commonConfigMode)
@@ -255,6 +279,11 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         try c.encodeIfPresent(providerSlug, forKey: .providerSlug)
         try c.encode(contextLimit, forKey: .contextLimit)
         try c.encode(outputLimit, forKey: .outputLimit)
+        try c.encodeIfPresent(temperature, forKey: .temperature)
+        try c.encodeIfPresent(topP, forKey: .topP)
+        try c.encode(maxOutputTokens, forKey: .maxOutputTokens)
+        try c.encodeIfPresent(frequencyPenalty, forKey: .frequencyPenalty)
+        try c.encodeIfPresent(presencePenalty, forKey: .presencePenalty)
         try c.encode(proxyEnabled, forKey: .proxyEnabled)
         try c.encode(proxyPort, forKey: .proxyPort)
         try c.encode(pricingCurrency, forKey: .pricingCurrency)
@@ -296,6 +325,18 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     /// 是否配置了定价（币种非 none 且任一模型有单价时写入受管块 cost 字段）。
     var hasPricing: Bool {
         pricingCurrency != .none && modelEntries.contains { $0.hasPricing }
+    }
+
+    /// 生成参数 → 每个模型 `options` 块（OpenAI 兼容口径的 snake_case 键，OpenCode 透传给上游）。
+    /// 未设置（nil / 0）的项不写，由上游取默认；全空时返回空字典（不写 options）。
+    var modelGenerationOptions: [String: Any] {
+        var options: [String: Any] = [:]
+        if let temperature { options["temperature"] = temperature }
+        if let topP { options["top_p"] = topP }
+        if maxOutputTokens > 0 { options["max_tokens"] = maxOutputTokens }
+        if let frequencyPenalty { options["frequency_penalty"] = frequencyPenalty }
+        if let presencePenalty { options["presence_penalty"] = presencePenalty }
+        return options
     }
 
     /// 代理模式下写入 opencode.json 的本地 baseURL。三种协议的 SDK 在其后分别拼接
