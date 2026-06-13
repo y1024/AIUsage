@@ -8,7 +8,7 @@
 
 <p align="center">
   Track quotas, costs, and accounts across 10+ AI providers.<br>
-  Built-in Claude Code proxy for any OpenAI-compatible model.
+  Built-in proxies for Claude Code, Codex and OpenCode — any OpenAI-compatible model.
 </p>
 
 <p align="center">
@@ -53,12 +53,13 @@
 
 | Feature | Description |
 | --- | --- |
-| **11+ AI Providers** | Codex, Copilot, Cursor, Antigravity, Kiro, Warp, Gemini CLI, Droid, Claude Code, Kimi, MiniMax — one dashboard |
+| **12+ AI Providers** | Codex, Copilot, Cursor, Antigravity, Kiro, Warp, Gemini CLI, Droid, Claude Code, OpenCode, Kimi, MiniMax — one dashboard |
 | **Multi-account** | Multiple accounts per provider, independent refresh, one-click CLI switching |
-| **Usage Stats** | Unified cost & token breakdown from Claude/Codex proxy archives plus token-only non-proxy Codex sessions — per-model trends, time-period analysis, source-aware aggregation |
+| **Usage Stats** | Unified cost & token breakdown from Claude/Codex proxy archives, token-only non-proxy Codex sessions, and OpenCode's local session ledger — per-model trends, time-period analysis, source-aware aggregation |
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
 | **Codex Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
-| **Menu Bar** | Multi-account status bar icons, quota/cost metrics, quick-glance popover, colored progress bars |
+| **OpenCode Proxy** | Switch OpenCode across upstreams via a managed `opencode.json` block — OpenAI-compatible, Anthropic and Responses protocols, per-node usage attribution, per-model pricing and optional request logging |
+| **Menu Bar** | Multi-account status bar icons, quota/cost metrics, per-proxy node switchers, quick-glance popover, colored progress bars |
 | **Credential Vault** | macOS Keychain storage for all managed credentials |
 
 ## Preview
@@ -82,17 +83,19 @@
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/Codex-Proxy-stats_en.png" alt="Codex proxy"></td>
-    <td width="50%"><img src="docs/images/proxy-stats_en.png" alt="Usage stats"></td>
+    <td width="50%"><img src="docs/images/Opencode-Proxy-stats_en.png" alt="OpenCode proxy"></td>
   </tr>
   <tr>
     <td align="center"><strong>Codex Proxy · Nodes &amp; Subscriptions</strong></td>
-    <td align="center"><strong>Usage Stats (Claude &amp; Codex)</strong></td>
+    <td align="center"><strong>OpenCode Proxy · Nodes &amp; Stats</strong></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><img src="docs/images/menu_bar_en.png" alt="Menu bar" width="50%"></td>
+    <td width="50%"><img src="docs/images/proxy-stats_en.png" alt="Usage stats"></td>
+    <td width="50%"><img src="docs/images/menu_bar_en.png" alt="Menu bar"></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><strong>Menu Bar</strong></td>
+    <td align="center"><strong>Usage Stats (Claude, Codex &amp; OpenCode)</strong></td>
+    <td align="center"><strong>Menu Bar</strong></td>
   </tr>
 </table>
 
@@ -102,7 +105,7 @@ Download `.dmg` or `.zip` from the [Releases](https://github.com/sylearn/AIUsage
 
 ## Proxies
 
-AIUsage ships two independent proxies — one for **Claude Code**, one for **Codex (Codex CLI)** — each with node management, usage logging and a unified switcher.
+AIUsage ships three independent proxies — for **Claude Code**, **Codex (Codex CLI)** and **OpenCode** — each with node management, usage logging and a unified switcher.
 
 ### Claude Code Proxy
 
@@ -128,7 +131,21 @@ Point the Codex CLI at any OpenAI-compatible upstream (Responses API), and switc
 
 **Quick start:** Open AIUsage → Codex Proxy → New Node (or pick a subscription account) → Configure → Activate. `~/.codex/config.toml` is merged automatically. Already on cc-switch? Hit "Sync cc-switch" in the toolbar to import in one click.
 
-Usage and billing details for Claude Code and Codex are documented in [docs/USAGE_AND_BILLING.md](docs/USAGE_AND_BILLING.md).
+### OpenCode Proxy
+
+Switch OpenCode between any number of upstreams without hand-editing `opencode.json`. AIUsage injects a managed provider block (and points the top-level `model` at it), then restores your original config on deactivate — the backup is the source of truth, so takeover is idempotent.
+
+| Capability | What it does |
+|------------|-------------|
+| **Multi-protocol** | OpenAI-compatible (`@ai-sdk/openai-compatible`), Anthropic (`@ai-sdk/anthropic`) and OpenAI Responses (`@ai-sdk/openai`) — the npm package follows the node's protocol |
+| **Direct or proxy mode** | Direct rewrites `opencode.json` to talk to the upstream; proxy mode points it at a local passthrough process for per-request logs (usage/cost still comes from `opencode.db`) |
+| **Per-node usage** | Each node writes a distinct managed `providerID`, so the local OpenCode session ledger attributes tokens and models.dev-priced cost back to the right node |
+| **Model library & pricing** | Per-node model list with independent per-model pricing (USD/CNY); pick the default model from the library and switch from the node card |
+| **cc-switch sync** | One-click import of OpenCode providers from local cc-switch (upstream / models / key / pricing), deterministic-id dedup, configurable cc-switch directory |
+
+**Quick start:** Open AIUsage → OpenCode Proxy → New Node → Configure models & pricing → Activate. `~/.config/opencode/opencode.json` is taken over automatically (requires OpenCode ≥ 1.2 for usage tracking).
+
+Usage and billing details for Claude Code and Codex are documented in [docs/USAGE_AND_BILLING.md](docs/USAGE_AND_BILLING.md). OpenCode cost is read directly from its local session ledger (`opencode.db`), pre-priced per [models.dev](https://models.dev).
 
 ---
 
