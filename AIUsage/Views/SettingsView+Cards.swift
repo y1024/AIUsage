@@ -69,6 +69,10 @@ extension SettingsView {
                 isOn: $hideDockIcon
             )
             .help(L("The app will only appear in the menu bar", "应用将只显示在菜单栏"))
+
+            Divider()
+
+            sidebarVisibilityBlock
         }
     }
 

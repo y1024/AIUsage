@@ -1,0 +1,72 @@
+import SwiftUI
+
+// MARK: - Sidebar Navigation Model
+// 主侧边栏导航条目的唯一数据源：同时驱动 ContentView 的 NavigationSplitView 列表
+// 与「设置 → 通用」里的侧边栏可见性开关，避免两处条目/图标/文案各写一份导致漂移。
+// 数据来源: 内置静态条目；隐藏状态来自 AppSettings.hiddenSidebarSections（UserDefaults）。
+
+/// 单个侧边栏导航条目的展示元数据。
+struct SidebarNavItem: Identifiable {
+    /// 条目图标：系统 SF Symbol 或品牌资产（代理入口用品牌图标）。
+    enum Icon {
+        case system(String)
+        case providerAsset(String)
+    }
+
+    let section: AppSection
+    let titleEn: String
+    let titleZh: String
+    let localizationKey: String
+    let icon: Icon
+    let tint: Color
+    /// 仪表盘与设置常驻，保证用户隐藏其它入口后仍能回到设置恢复。
+    let isHideable: Bool
+
+    var id: AppSection { section }
+    var title: String { L(titleEn, titleZh, key: localizationKey) }
+}
+
+/// 侧边栏导航条目集合与可见性过滤。
+enum SidebarNavigation {
+    /// 分隔线上方的主分组（与历史展示顺序保持一致）。
+    static let primary: [SidebarNavItem] = [
+        SidebarNavItem(section: .dashboard, titleEn: "Dashboard", titleZh: "仪表盘",
+                       localizationKey: "nav.dashboard", icon: .system("chart.bar.doc.horizontal"),
+                       tint: .blue, isHideable: false),
+        SidebarNavItem(section: .providers, titleEn: "Providers", titleZh: "服务商",
+                       localizationKey: "nav.providers", icon: .system("square.grid.2x2"),
+                       tint: .indigo, isHideable: true),
+        SidebarNavItem(section: .codexProxyManagement, titleEn: "Codex Proxy", titleZh: "Codex 代理",
+                       localizationKey: "nav.codex_proxy_management", icon: .providerAsset("codex"),
+                       tint: .primary, isHideable: true),
+        SidebarNavItem(section: .opencodeManagement, titleEn: "OpenCode Proxy", titleZh: "OpenCode 代理",
+                       localizationKey: "nav.opencode_management", icon: .providerAsset("opencode"),
+                       tint: .primary, isHideable: true),
+        SidebarNavItem(section: .proxyManagement, titleEn: "Claude Code Proxy", titleZh: "Claude Code 代理",
+                       localizationKey: "nav.proxy_management", icon: .providerAsset("claude"),
+                       tint: .primary, isHideable: true),
+        SidebarNavItem(section: .costTracking, titleEn: "Usage Stats", titleZh: "用量统计",
+                       localizationKey: "nav.cost_tracking", icon: .system("chart.bar.xaxis"),
+                       tint: .green, isHideable: true)
+    ]
+
+    /// 分隔线下方的次分组（消息 + 设置）。
+    static let secondary: [SidebarNavItem] = [
+        SidebarNavItem(section: .inbox, titleEn: "Inbox", titleZh: "消息",
+                       localizationKey: "nav.inbox", icon: .system("bell.fill"),
+                       tint: .orange, isHideable: true),
+        SidebarNavItem(section: .settings, titleEn: "Settings", titleZh: "设置",
+                       localizationKey: "nav.settings", icon: .system("gearshape"),
+                       tint: .gray, isHideable: false)
+    ]
+
+    static let all: [SidebarNavItem] = primary + secondary
+
+    /// 可被用户隐藏的条目（设置页据此渲染开关列表）。
+    static let hideable: [SidebarNavItem] = all.filter(\.isHideable)
+
+    /// 过滤掉已隐藏的条目；常驻条目不受影响。
+    static func visible(_ items: [SidebarNavItem], hidden: Set<String>) -> [SidebarNavItem] {
+        items.filter { !$0.isHideable || !hidden.contains($0.section.rawValue) }
+    }
+}

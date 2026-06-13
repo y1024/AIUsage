@@ -98,6 +98,7 @@ enum DefaultsKey {
     static let claudeCodeLastNotifiedDate = "claudeCodeLastNotifiedDate"
     static let claudeCodeRefreshInterval = "claudeCodeRefreshInterval"
     static let displayCurrency = "displayCurrency"
+    static let hiddenSidebarSections = "hiddenSidebarSections"
     static let hideDockIcon = "hideDockIcon"
     static let lowQuotaThreshold = "lowQuotaThreshold"
     static let menuBarDisplayMode = "menuBarDisplayMode"
@@ -219,6 +220,12 @@ final class AppSettings: ObservableObject {
 
     @Published var proxyAutoRestoreOnLaunch: Bool = UserDefaults.standard.bool(forKey: DefaultsKey.proxyAutoRestoreOnLaunch)
 
+    /// 侧边栏中被用户隐藏的导航分区（存 `AppSection.rawValue`）。常驻分区即使被写入也不会真正隐藏。
+    @Published var hiddenSidebarSections: Set<String> = {
+        let stored = UserDefaults.standard.stringArray(forKey: DefaultsKey.hiddenSidebarSections) ?? []
+        return Set(stored)
+    }()
+
     private var cancellables = Set<AnyCancellable>()
 
     func pruneMenuBarPinnedIds(validQuotaIds: Set<String>, validCostIds: Set<String>) {
@@ -280,6 +287,7 @@ final class AppSettings: ObservableObject {
             self.onRemoteSettingsChanged?("http://\(self.remoteHost):\(port)")
         }.store(in: &cancellables)
         $proxyAutoRestoreOnLaunch.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.proxyAutoRestoreOnLaunch) }.store(in: &cancellables)
+        $hiddenSidebarSections.dropFirst().sink { defaults.set(Array($0), forKey: DefaultsKey.hiddenSidebarSections) }.store(in: &cancellables)
     }
 
     static func normalizedAutoRefreshInterval(_ value: Int) -> Int {

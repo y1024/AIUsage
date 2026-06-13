@@ -199,8 +199,10 @@ struct ProxyStatsView: View {
         }
     }
 
+    /// 何时把「数据源 / 视图」两簇竖排：宽度不足以左右并排时。Codex 选中时多出轨道选择器，所需宽度更大。
     private var usesStackedControlLayout: Bool {
-        contentWidth == 0 || contentWidth < 950
+        let needed: CGFloat = showsTrackPicker ? 1080 : 880
+        return contentWidth == 0 || contentWidth < needed
     }
 
     private func controlCluster<Content: View>(
@@ -219,61 +221,78 @@ struct ProxyStatsView: View {
         }
     }
 
-    private var scopeControls: some View {
-        HStack(spacing: 8) {
-            StatsSegmentedControl(
-                SourceFamily.allCases,
-                selection: familyBinding,
-                segmentWidth: 84,
-                tint: .indigo
-            ) { family in
-                switch family {
-                case .all: return L("Combined", "综合")
-                case .claude: return "Claude Code"
-                case .codex: return "Codex"
-                case .opencode: return "OpenCode"
-                }
+    // 控制簇内的两个分段控件：窄宽下用 ViewThatFits 自动从「并排」回退为「上下两行」，永不横向溢出。
+    private var familyControl: some View {
+        StatsSegmentedControl(
+            SourceFamily.allCases,
+            selection: familyBinding,
+            segmentWidth: 84,
+            tint: .indigo
+        ) { family in
+            switch family {
+            case .all: return L("Combined", "综合")
+            case .claude: return "Claude Code"
+            case .codex: return "Codex"
+            case .opencode: return "OpenCode"
             }
+        }
+    }
 
-            if showsTrackPicker {
-                StatsSegmentedControl(
-                    UsageTrack.allCases,
-                    selection: trackBinding,
-                    segmentWidth: 66,
-                    tint: .teal
-                ) { track in
-                    track.label
+    @ViewBuilder
+    private var trackControl: some View {
+        if showsTrackPicker {
+            StatsSegmentedControl(
+                UsageTrack.allCases,
+                selection: trackBinding,
+                segmentWidth: 66,
+                tint: .teal
+            ) { track in
+                track.label
+            }
+            .help(L("Split Codex usage into Proxy (priced archive) and Non-Proxy (token-only local logs) tracks.",
+                    "将 Codex 用量拆分为代理（可计价归档）与非代理（仅 Token 本地日志）两轨。"))
+        }
+    }
+
+    private var scopeControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { familyControl; trackControl }
+            VStack(alignment: .leading, spacing: 6) { familyControl; trackControl }
+        }
+    }
+
+    private var periodControl: some View {
+        StatsSegmentedControl(
+            DistributionPeriod.allCases,
+            selection: $period,
+            segmentWidth: 50,
+            tint: .blue
+        ) { period in
+            period.label
+        }
+    }
+
+    @ViewBuilder
+    private var metricControl: some View {
+        if showsCost {
+            StatsSegmentedControl(
+                StatMetric.allCases,
+                selection: $metric,
+                segmentWidth: 64,
+                tint: .orange
+            ) { metric in
+                switch metric {
+                case .cost: return L("Cost", "费用")
+                case .tokens: return "Tokens"
                 }
-                .help(L("Split Codex usage into Proxy (priced archive) and Non-Proxy (token-only local logs) tracks.",
-                        "将 Codex 用量拆分为代理（可计价归档）与非代理（仅 Token 本地日志）两轨。"))
             }
         }
     }
 
     private var lensControls: some View {
-        HStack(spacing: 8) {
-            StatsSegmentedControl(
-                DistributionPeriod.allCases,
-                selection: $period,
-                segmentWidth: 50,
-                tint: .blue
-            ) { period in
-                period.label
-            }
-
-            if showsCost {
-                StatsSegmentedControl(
-                    StatMetric.allCases,
-                    selection: $metric,
-                    segmentWidth: 64,
-                    tint: .orange
-                ) { metric in
-                    switch metric {
-                    case .cost: return L("Cost", "费用")
-                    case .tokens: return "Tokens"
-                    }
-                }
-            }
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { periodControl; metricControl }
+            VStack(alignment: .leading, spacing: 6) { periodControl; metricControl }
         }
     }
 
@@ -342,8 +361,10 @@ struct ProxyStatsView: View {
         return map
     }
 
+    // 宽度未知（contentWidth == 0，首帧）时默认竖排：避免首帧用并排布局，分布+详情两卡的刚性最小宽度
+    // 超过窄窗口可用宽度，导致内容溢出窗口右缘（用量统计页缩窄时被截断的根因）。
     var usesStackedInsightsLayout: Bool {
-        contentWidth > 0 && contentWidth < 1080
+        contentWidth == 0 || contentWidth < 1080
     }
 
     var granularity: CostGranularity { chartTimeRange.isHourly ? .hourly : .daily }

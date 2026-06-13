@@ -74,6 +74,7 @@
 		5EFAD78D2F87B10500A15674 /* AccountNoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD78E2F87B10500A15674 /* AccountNoteEditorView.swift */; };
 		5EFAD78F2F87B10600A15674 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7902F87B10600A15674 /* Utilities.swift */; };
 		5EFHMP012F99002100A15674 /* DashboardView+Heatmap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */; };
+		5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSNV002F99003300A15674 /* SidebarNavigation.swift */; };
 		5EFPA0122F91000100A15674 /* ProviderAuthTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0112F91000100A15674 /* ProviderAuthTypes.swift */; };
 		5EFPA0222F91000200A15674 /* ProviderManagedImportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */; };
 		5EFPA0322F91000300A15674 /* CLIExecutableResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */; };
@@ -106,6 +107,7 @@
 		A2B3C4EC2F96001000A15674 /* CostTrackingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4EB2F96001000A15674 /* CostTrackingCard.swift */; };
 		A2B3C4EE2F96001000A15674 /* SettingsView+Cards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4ED2F96001000A15674 /* SettingsView+Cards.swift */; };
 		C1SV00022FB0000500B26789 /* SettingsView+MenuBarPins.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1SV00012FB0000500B26789 /* SettingsView+MenuBarPins.swift */; };
+		5EFSSB012F99003400A15674 /* SettingsView+Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */; };
 		A2B3C4F02F96001000A15674 /* SettingsView+Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4EF2F96001000A15674 /* SettingsView+Chrome.swift */; };
 		A2B3C4F02F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4EF2F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift */; };
 		A2B3C4F12F96001000A15699 /* ProviderLoginStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4F02F96001000A15699 /* ProviderLoginStatusCard.swift */; };
@@ -215,6 +217,7 @@
 		5EFAD78E2F87B10500A15674 /* AccountNoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountNoteEditorView.swift; sourceTree = "<group>"; };
 		5EFAD7902F87B10600A15674 /* Utilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities.swift; sourceTree = "<group>"; };
 		5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DashboardView+Heatmap.swift"; sourceTree = "<group>"; };
+		5EFSNV002F99003300A15674 /* SidebarNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarNavigation.swift; sourceTree = "<group>"; };
 		5EFPA0112F91000100A15674 /* ProviderAuthTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAuthTypes.swift; sourceTree = "<group>"; };
 		5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderManagedImportStore.swift; sourceTree = "<group>"; };
 		5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIExecutableResolver.swift; sourceTree = "<group>"; };
@@ -247,6 +250,7 @@
 		A2B3C4EB2F96001000A15674 /* CostTrackingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostTrackingCard.swift; sourceTree = "<group>"; };
 		A2B3C4ED2F96001000A15674 /* SettingsView+Cards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Cards.swift"; sourceTree = "<group>"; };
 		C1SV00012FB0000500B26789 /* SettingsView+MenuBarPins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+MenuBarPins.swift"; sourceTree = "<group>"; };
+		5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Sidebar.swift"; sourceTree = "<group>"; };
 		A2B3C4EF2F96001000A15674 /* SettingsView+Chrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Chrome.swift"; sourceTree = "<group>"; };
 		A2B3C4EF2F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyViewModel+ProxyOnlyMode.swift"; sourceTree = "<group>"; };
 		A2B3C4F02F96001000A15699 /* ProviderLoginStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderLoginStatusCard.swift; sourceTree = "<group>"; };
@@ -415,6 +419,7 @@
 				C1CX00062FB0000400B26789 /* StatsHubView.swift */,
 				C1SP00042FB0000700B26789 /* SystemProxyWarningBanner.swift */,
 				5EFAD7462F87AC7100A15674 /* ContentView.swift */,
+				5EFSNV002F99003300A15674 /* SidebarNavigation.swift */,
 				5EFAD7472F87AC7100A15674 /* DashboardView.swift */,
 				5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */,
 				5EFSCD002F99003100A15674 /* DashboardStatCards.swift */,
@@ -464,6 +469,7 @@
 				5EFAD74B2F87AC7100A15674 /* SettingsView.swift */,
 				A2B3C4ED2F96001000A15674 /* SettingsView+Cards.swift */,
 				C1SV00012FB0000500B26789 /* SettingsView+MenuBarPins.swift */,
+				5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */,
 				A2B3C4EF2F96001000A15674 /* SettingsView+Chrome.swift */,
 				A2B3C4F12F96001000A15674 /* SettingsView+Titles.swift */,
 				A2B3C4F32F96001000A15674 /* SettingsView+QuotaPreview.swift */,
@@ -617,6 +623,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5EFAD7732F87AFE700A15674 /* DashboardView.swift in Sources */,
+				5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */,
 				5EFHMP012F99002100A15674 /* DashboardView+Heatmap.swift in Sources */,
 				5EFSCD012F99003100A15674 /* DashboardStatCards.swift in Sources */,
 				5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */,
@@ -730,6 +737,7 @@
 				A2B3C4EC2F96001000A15674 /* CostTrackingCard.swift in Sources */,
 				A2B3C4EE2F96001000A15674 /* SettingsView+Cards.swift in Sources */,
 				C1SV00022FB0000500B26789 /* SettingsView+MenuBarPins.swift in Sources */,
+				5EFSSB012F99003400A15674 /* SettingsView+Sidebar.swift in Sources */,
 				A2B3C4F02F96001000A15674 /* SettingsView+Chrome.swift in Sources */,
 				A2B3C4F22F96001000A15674 /* SettingsView+Titles.swift in Sources */,
 				A2B3C4F42F96001000A15674 /* SettingsView+QuotaPreview.swift in Sources */,
