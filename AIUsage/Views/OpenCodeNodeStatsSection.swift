@@ -72,9 +72,11 @@ struct OpenCodeOverviewStrip: View {
         return (requests, tokens, cost)
     }
 
-    /// 全部代理日志的成功率；无代理日志（纯直连）时显示 —。
+    /// 当前列表节点的代理日志成功率（按 configId=节点 id 过滤，与汇总口径一致，
+    /// 不被已删除节点的历史日志稀释）；无代理日志（纯直连）时显示 —。
     private func proxySuccessRate() -> String {
-        let logs = proxyRuntime.requestLogs
+        let nodeIds = Set(store.nodes.map(\.id))
+        let logs = proxyRuntime.requestLogs.filter { nodeIds.contains($0.configId) }
         guard !logs.isEmpty else { return "—" }
         let successful = logs.filter(\.success).count
         return String(format: "%.1f%%", Double(successful) / Double(logs.count) * 100)

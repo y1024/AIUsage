@@ -232,8 +232,24 @@ final class OpenCodeConfigManager {
     /// 编辑器 JSON 预览：激活该节点后 opencode.json 的完整内容（基于备份/当前原文合成，不落盘）。
     /// 节点缺默认模型时顶层 model 留空字符串占位，仅供预览。
     func previewMergedConfig(node: OpenCodeNode, baseURLOverride: String? = nil, commonSettings: [String: Any]? = nil) -> [String: Any] {
+        previewMergedConfig(
+            node: node,
+            baseURLOverride: baseURLOverride,
+            commonSettings: commonSettings,
+            pristine: pristineConfig()
+        )
+    }
+
+    /// 预读 pristine 复用版：调用方（如预览页同时算行标注）已读过一次干净原文时传入，
+    /// 避免同一次刷新里重复读盘 + 重复剥离。
+    func previewMergedConfig(
+        node: OpenCodeNode,
+        baseURLOverride: String?,
+        commonSettings: [String: Any]?,
+        pristine: [String: Any]
+    ) -> [String: Any] {
         injectManagedEntries(
-            into: mergedBase(pristine: pristineConfig(), commonSettings: commonSettings),
+            into: mergedBase(pristine: pristine, commonSettings: commonSettings),
             node: node,
             defaultModel: node.effectiveDefaultModel ?? "",
             baseURLOverride: baseURLOverride

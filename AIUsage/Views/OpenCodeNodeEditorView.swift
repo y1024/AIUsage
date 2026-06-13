@@ -177,15 +177,18 @@ struct OpenCodeNodeEditorView: View {
         let manager = OpenCodeConfigManager.shared
         let baseURLOverride = node.proxyEnabled ? node.proxyLocalBaseURL : nil
         let common = draftCommonSettings
+        // 干净原文只读一次盘，预览合并与行标注共用，避免同次刷新双次读盘。
+        let pristine = manager.pristineConfig()
         let merged = manager.previewMergedConfig(
             node: draftNode,
             baseURLOverride: baseURLOverride,
-            commonSettings: common
+            commonSettings: common,
+            pristine: pristine
         )
         let jsonText = OpenCodeConfigManager.jsonString(merged)
         let markers = OpenCodeConfigLayering.lineMarkers(
             text: jsonText,
-            pristine: manager.pristineConfig(),
+            pristine: pristine,
             common: common ?? [:],
             managed: manager.managedLayer(node: draftNode, baseURLOverride: baseURLOverride)
         )
@@ -442,7 +445,8 @@ struct OpenCodeNodeEditorView: View {
                 ForEach($modelRows) { $row in
                     modelRowView($row)
                 }
-                .onChange(of: modelRows.map(\.entry.id)) { _, _ in ensureDefaultModelValid() }
+                // 不在每次按键时校验默认模型：编辑模型 ID 的中途态会被误判为失配而跳走单选。
+                // 默认模型在增行(appendModels)、删行(modelRowView 删除按钮)与保存(save)时已兜底校验。
             }
 
             Button {

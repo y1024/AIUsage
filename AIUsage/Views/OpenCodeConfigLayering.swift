@@ -37,7 +37,13 @@ enum OpenCodeConfigLayering {
                 continue
             }
 
-            guard let key = jsonKey(in: trimmed) else { continue }
+            guard let key = jsonKey(in: trimmed) else {
+                // 无键行（数组元素、多行值等）继承当前容器的归源，避免数组内容不着色。
+                if !trimmed.isEmpty, let marker = stack.last?.marker {
+                    markers[index + 1] = marker
+                }
+                continue
+            }
 
             // 数组/对象内部行继承容器的归源。
             while let last = stack.last, last.depth >= depth {

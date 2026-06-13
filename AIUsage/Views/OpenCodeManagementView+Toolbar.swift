@@ -41,7 +41,8 @@ extension OpenCodeManagementView {
     @ViewBuilder
     var proxyErrorBanner: some View {
         let stopped = proxyOwnerNodes.filter { !proxyRuntime.runningNodeIds.contains($0.id) }
-        if !proxyOwnerNodes.isEmpty, let error = proxyRuntime.lastError {
+        // 仅在确有进程未运行时才报错：进程都在跑时即便残留 stale lastError 也不误报（避免横幅闪现）。
+        if !stopped.isEmpty, let error = proxyRuntime.lastError {
             banner(
                 icon: "bolt.trianglebadge.exclamationmark.fill",
                 tint: .red,
