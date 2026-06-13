@@ -220,29 +220,55 @@ struct LocalTokenUsageHeatmap: View {
 
     // MARK: - Grid
 
+    /// 格子边长上下限：窄窗口优先压缩到 `minCellSide`；连最小格子都放不下时再减少显示周数。
+    private static let minCellSide: CGFloat = 6
+    private static let maxCellSide: CGFloat = 16
+    private static let gridSpacing: CGFloat = 3
+    private static let weekdayLabelWidth: CGFloat = 28
+    private static let monthLabelHeight: CGFloat = 14
+    /// 网格区固定高度：贴合最大格子（16pt）时 月份行 14 + 间距 4 + 7 行格子 130 ≈ 148。
+    private static let gridSectionHeight: CGFloat = 148
+
+    /// 用 GeometryReader 实测可用宽度，自适应推导格子边长与显示周数：
+    /// 宽窗口铺满整年（16pt 格子），窄窗口先压缩格子、连最小格子都放不下时再从最近周向前裁剪，永不溢出卡片。
     private func gridSection(snap: HeatmapSnapshot) -> some View {
         GeometryReader { proxy in
-            let spacing: CGFloat = 3
-            let weekdayLabelWidth: CGFloat = 28
-            let monthLabelHeight: CGFloat = 14
+            let spacing = Self.gridSpacing
+            let weekdayLabelWidth = Self.weekdayLabelWidth
+            let monthLabelHeight = Self.monthLabelHeight
             let availableWidth = max(0, proxy.size.width - weekdayLabelWidth)
-            let cellSide = max(8, min(16, (availableWidth - CGFloat(weeks - 1) * spacing) / CGFloat(weeks)))
+
+            // 先按「最小格子」算出最多能放下多少周，再据此反推真实格子边长。
+            let fitWeeks = max(1, Int((availableWidth + spacing) / (Self.minCellSide + spacing)))
+            let visibleWeeks = max(1, min(weeks, fitWeeks))
+            let weekOffset = weeks - visibleWeeks
+            let cellSide = max(
+                Self.minCellSide,
+                min(Self.maxCellSide, (availableWidth - CGFloat(visibleWeeks - 1) * spacing) / CGFloat(visibleWeeks))
+            )
             let columnPitch = cellSide + spacing
             let gridHeight = cellSide * 7 + spacing * 6
 
             VStack(alignment: .leading, spacing: 4) {
-                monthLabelsRow(cellSide: cellSide, columnPitch: columnPitch, height: monthLabelHeight)
-                    .frame(height: monthLabelHeight)
+                monthLabelsRow(
+                    cellSide: cellSide,
+                    columnPitch: columnPitch,
+                    height: monthLabelHeight,
+                    visibleWeeks: visibleWeeks,
+                    weekOffset: weekOffset
+                )
+                .frame(height: monthLabelHeight)
 
                 HStack(alignment: .top, spacing: 0) {
                     weekdayLabels(cellSide: cellSide, spacing: spacing)
                         .frame(width: weekdayLabelWidth, height: gridHeight, alignment: .topLeading)
 
-                    gridColumns(cellSide: cellSide, spacing: spacing, snap: snap)
+                    gridColumns(cellSide: cellSide, spacing: spacing, snap: snap, visibleWeeks: visibleWeeks, weekOffset: weekOffset)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .overlay {
-                if let hovered = hoveredCell {
+                if let hovered = hoveredCell, hovered.week < visibleWeeks {
                     heatmapTooltipOverlay(
                         cell: hovered,
                         snap: snap,
@@ -251,14 +277,13 @@ struct LocalTokenUsageHeatmap: View {
                         columnPitch: columnPitch,
                         weekdayLabelWidth: weekdayLabelWidth,
                         monthLabelHeight: monthLabelHeight,
-                        containerWidth: proxy.size.width
+                        containerWidth: proxy.size.width,
+                        weekOffset: weekOffset
                     )
                 }
             }
         }
-        // 贴合最大格子（16pt）时的网格实际高度：月份行 14 + 间距 4 + 7 行格子 130 ≈ 148。
-        // 之前固定 170 比内容高出一截，导致网格与下方「合计/活跃」间出现明显空隙。
-        .frame(height: 148)
+        .frame(height: Self.gridSectionHeight)
     }
 
     private static let monthFormatterZh: DateFormatter = {
@@ -275,18 +300,18 @@ struct LocalTokenUsageHeatmap: View {
         return f
     }()
 
-    private func monthLabelsRow(cellSide: CGFloat, columnPitch: CGFloat, height: CGFloat) -> some View {
+    private func monthLabelsRow(cellSide: CGFloat, columnPitch: CGFloat, height: CGFloat, visibleWeeks: Int, weekOffset: Int) -> some View {
         let weekdayLabelWidth: CGFloat = 28
         let formatter = appState.language == "zh" ? Self.monthFormatterZh : Self.monthFormatterEn
 
         let calendar = Calendar.current
         var labels: [(column: Int, text: String)] = []
         var previousMonth = -1
-        for week in 0..<weeks {
-            let day = date(forWeek: week, day: 0)
+        for column in 0..<visibleWeeks {
+            let day = date(forWeek: column + weekOffset, day: 0)
             let month = calendar.component(.month, from: day)
             if month != previousMonth {
-                labels.append((week, formatter.string(from: day)))
+                labels.append((column, formatter.string(from: day)))
                 previousMonth = month
             }
         }
@@ -329,16 +354,16 @@ struct LocalTokenUsageHeatmap: View {
         }
     }
 
-    private func gridColumns(cellSide: CGFloat, spacing: CGFloat, snap: HeatmapSnapshot) -> some View {
+    private func gridColumns(cellSide: CGFloat, spacing: CGFloat, snap: HeatmapSnapshot, visibleWeeks: Int, weekOffset: Int) -> some View {
         let tokens = snap.tokens
         let computedThresholds = snap.thresholds
         let today = Calendar.current.startOfDay(for: Date())
 
         return HStack(alignment: .top, spacing: spacing) {
-            ForEach(0..<weeks, id: \.self) { week in
+            ForEach(0..<visibleWeeks, id: \.self) { week in
                 VStack(spacing: spacing) {
                     ForEach(0..<7, id: \.self) { day in
-                        let cellDate = date(forWeek: week, day: day)
+                        let cellDate = date(forWeek: week + weekOffset, day: day)
                         let isActive = cellDate <= today
                         let count = isActive ? (tokens[cellDate] ?? 0) : 0
                         let binIndex = bin(for: count, thresholds: computedThresholds)
@@ -380,9 +405,11 @@ struct LocalTokenUsageHeatmap: View {
         columnPitch: CGFloat,
         weekdayLabelWidth: CGFloat,
         monthLabelHeight: CGFloat,
-        containerWidth: CGFloat
+        containerWidth: CGFloat,
+        weekOffset: Int
     ) -> some View {
-        let cellDate = date(forWeek: cell.week, day: cell.day)
+        // cell.week 是相对列号（0..<visibleWeeks）：定位用相对列，取日期用绝对周（含偏移）。
+        let cellDate = date(forWeek: cell.week + weekOffset, day: cell.day)
         let today = Calendar.current.startOfDay(for: Date())
         let isActive = cellDate <= today
         let tokens = isActive ? (snap.tokens[cellDate] ?? 0) : 0
