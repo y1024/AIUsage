@@ -91,8 +91,7 @@ extension ProxyViewModel {
 
     /// Immediately flush any pending debounced persistence.
     /// 注意：实际写盘在持久化队列上异步完成；若调用方依赖「文件已落盘」
-    /// 的顺序（如刷新前冻结归档），请使用 `flushPersistenceAsync()` 或
-    /// `flushPersistenceAndWait()`。
+    /// 的顺序（如刷新前冻结归档），请使用 `flushPersistenceAsync()`。
     func flushPersistence() {
         persistenceWorkItem?.cancel()
         persistenceWorkItem = nil
@@ -109,12 +108,6 @@ extension ProxyViewModel {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             ProxyPersistence.queue.async { continuation.resume() }
         }
-    }
-
-    /// Flush 并同步等待后台写盘完成。仅供 App 终止前调用（阻塞一次主线程）。
-    func flushPersistenceAndWait() {
-        flushPersistence()
-        ProxyPersistence.queue.sync {}
     }
 
     /// Fill in pricing for logs that were recorded before their model had a configured price.

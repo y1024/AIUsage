@@ -205,9 +205,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        ProxyViewModel.shared.flushPersistenceAndWait()
-    }
+    // 代理 helper 的退出清理刻意不放在 applicationWillTerminate：纯 SwiftUI App 的该回调在
+    // quit / Cmd-Q / Sparkle 更新等路径并不可靠触发（实测不触发），崩溃 / 被强杀更没有任何
+    // App 侧钩子能兜底。改由 helper（QuotaServer）自带「父进程死亡看门狗」保证随 App 一起退出，
+    // 不留占端口的孤儿——见 QuotaBackend 的 ParentWatchdog；残留孤儿则由下次启动的 reap 兜底。
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard !flag else { return true }

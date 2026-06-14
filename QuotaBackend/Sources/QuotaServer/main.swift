@@ -8,6 +8,9 @@ private let startupLog = Logger(subsystem: "com.aiusage.quotaserver", category: 
 setbuf(stdout, nil)
 setbuf(stderr, nil)
 
+// 父进程（宿主 App）一旦退出/崩溃/被强杀，立即终止自身，避免变成占端口的孤儿 helper。
+ParentWatchdog.install()
+
 // MARK: - QuotaServer Entry Point
 // Usage: swift run QuotaServer [--port 4318] [--host 0.0.0.0]
 //

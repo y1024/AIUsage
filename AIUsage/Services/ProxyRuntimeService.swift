@@ -72,10 +72,22 @@ actor ProxyProcessInspector {
 
     /// 回收本 App 上次会话残留的孤儿 QuotaServer helper（已被 launchd 收养，PPID==1）。
     /// 只杀孤儿，保留仍属其它在跑 AIUsage 实例（PPID 指向活进程）的 helper，兼容多实例。
+    /// SIGTERM → 复核 → 仍存活升级 SIGKILL，确保孤儿真的释放端口（正常退出已不留孤儿，此处为崩溃/强退兜底）。
     func reapOrphanedHelpers() {
-        for pid in ownHelperPids() where parentPid(of: pid) == 1 {
+        let orphans = ownHelperPids().filter { parentPid(of: $0) == 1 }
+        guard !orphans.isEmpty else { return }
+        for pid in orphans {
             log.info("Reaping orphaned proxy helper pid=\(pid, privacy: .public)")
             kill(pid, SIGTERM)
+        }
+        // 复核（最多 ~1s）：仍存活的孤儿强杀，避免「发了 SIGTERM 但进程没退、端口仍被占」。
+        for _ in 0..<10 {
+            usleep(100_000) // 100ms
+            if orphans.allSatisfy({ kill($0, 0) != 0 }) { return }
+        }
+        for pid in orphans where kill(pid, 0) == 0 {
+            log.notice("Force-killing surviving orphaned helper pid=\(pid, privacy: .public)")
+            kill(pid, SIGKILL)
         }
     }
 

@@ -27,20 +27,20 @@ extension OpenCodeManagementView {
         }
     }
 
-    /// 持有本地代理进程的节点：激活的代理节点 + 全部「仅代理」运行中的节点。
-    private var proxyOwnerNodes: [OpenCodeNode] {
-        var owners: [OpenCodeNode] = []
-        if let active = store.activeNode, active.proxyEnabled { owners.append(active) }
-        owners += store.nodes.filter {
-            store.proxyOnlyNodeIds.contains($0.id) && $0.id != store.activeNodeId
-        }
-        return owners
+    /// 运行时本会话接管（建立了 Instance）、但当前进程不在运行且不在启动/重启窗口内的节点
+    /// = 真·故障，需横幅提示。以「运行时是否接管」为准而非持久配置：设置关闭未恢复时为空，
+    /// 不会误报；启动恢复/退避重启期间被 startingNodeIds 抑制，不闪现。
+    private var stoppedManagedNodes: [OpenCodeNode] {
+        proxyRuntime.managedNodeIds
+            .subtracting(proxyRuntime.runningNodeIds)
+            .subtracting(proxyRuntime.startingNodeIds)
+            .compactMap { id in store.nodes.first { $0.id == id } }
     }
 
-    /// 代理进程异常：崩溃多次自动重启失败，或持有进程的节点（激活/仅代理）进程未在运行。
+    /// 代理进程异常：崩溃多次自动重启失败，或运行时接管的节点进程未在运行。
     @ViewBuilder
     var proxyErrorBanner: some View {
-        let stopped = proxyOwnerNodes.filter { !proxyRuntime.runningNodeIds.contains($0.id) }
+        let stopped = stoppedManagedNodes
         // 仅在确有进程未运行时才报错：进程都在跑时即便残留 stale lastError 也不误报（避免横幅闪现）。
         if !stopped.isEmpty, let error = proxyRuntime.lastError {
             banner(

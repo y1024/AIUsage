@@ -22,6 +22,12 @@ final class OpenCodeProxyRuntime: ObservableObject {
 
     /// 进程正在运行的节点 id 集合。
     @Published private(set) var runningNodeIds: Set<String> = []
+    /// 正在启动/恢复/重启中的节点 id（进程尚未就绪）。用于抑制「本地代理未在运行」横幅在
+    /// 启动窗口内的闪现——这些节点既不算运行中、也不该报故障。
+    @Published private(set) var startingNodeIds: Set<String> = []
+    /// 运行时本会话正在「负责保活」的节点 id（建立了 Instance；崩溃后 Instance 仍在、process=nil）。
+    /// 横幅据此判断「该跑却没跑」：未启动恢复（设置关闭）时为空 → 不误报；只反映本会话真实接管的节点。
+    @Published private(set) var managedNodeIds: Set<String> = []
     /// 最近请求日志（全部节点共享环形缓冲，按 configId=节点 id 区分），新→旧，
     /// 最多保留 500 条；落盘持久化（成本恒 0，仅观测不计费）。
     @Published private(set) var requestLogs: [ProxyRequestLog] = []
@@ -60,6 +66,17 @@ final class OpenCodeProxyRuntime: ObservableObject {
         runningNodeIds.contains(nodeId)
     }
 
+    /// 启动恢复开始时，把待恢复节点预标记为「启动中」，覆盖 reap→launch 的整段窗口，
+    /// 避免横幅在进程就绪前闪现（`launch` 完成/失败时会逐个清除自己的标记）。
+    func beginRestoring(nodeIds: [String]) {
+        startingNodeIds.formUnion(nodeIds)
+    }
+
+    /// 启动恢复结束时清除残留标记（个别节点在到达 `launch` 前就抛错时的兜底清理）。
+    func endRestoring(nodeIds: [String]) {
+        startingNodeIds.subtract(nodeIds)
+    }
+
     func start(node: OpenCodeNode) async throws {
         // 幂等：同节点且代理相关参数（协议/上游/Key/端口）未变时复用现有进程。
         // 否则编辑无关字段（通用配置、定价、模型）触发的重新激活会让代理闪断一拍。
@@ -81,6 +98,7 @@ final class OpenCodeProxyRuntime: ObservableObject {
         stopProcess(nodeId: node.id)
         let instance = Instance(node: node)
         instances[node.id] = instance
+        managedNodeIds.insert(node.id)
         lastError = nil
 
         do {
@@ -88,6 +106,7 @@ final class OpenCodeProxyRuntime: ObservableObject {
             instance.restartAttempts = 0
         } catch {
             instances.removeValue(forKey: node.id)
+            managedNodeIds.remove(node.id)
             throw error
         }
     }
@@ -96,6 +115,8 @@ final class OpenCodeProxyRuntime: ObservableObject {
         guard let instance = instances.removeValue(forKey: nodeId) else { return }
         terminate(instance)
         runningNodeIds.remove(nodeId)
+        managedNodeIds.remove(nodeId)
+        startingNodeIds.remove(nodeId)
         if instances.isEmpty { lastError = nil }
     }
 
@@ -151,6 +172,9 @@ final class OpenCodeProxyRuntime: ObservableObject {
 
     private func launch(instance: Instance) async throws {
         let node = instance.node
+        // 启动期间标记「启动中」，结束（成功/失败/抛错）即清除，抑制横幅闪现。
+        startingNodeIds.insert(node.id)
+        defer { startingNodeIds.remove(node.id) }
         // 清掉残留占用端口的旧代理进程（上次未正常退出时）。复用 Claude/Codex 的独立
         // actor，避免在 @MainActor 上同步 lsof.waitUntilExit()+usleep 阻塞 UI。
         // 调用前已确认没有别的受管实例占用该端口，不会误杀自己的子进程。
@@ -259,6 +283,8 @@ final class OpenCodeProxyRuntime: ObservableObject {
 
         instance.restartAttempts += 1
         guard instance.restartAttempts <= Self.maxRestartAttempts else {
+            // 自动重启耗尽：撤掉「启动中」标记，让横幅显式报错（不再抑制）。
+            startingNodeIds.remove(nodeId)
             lastError = AppSettings.shared.t(
                 "The local proxy for node \"\(instance.node.displayName)\" keeps exiting. Requests through it will fail until it is restarted.",
                 "节点「\(instance.node.displayName)」的本地代理持续退出，经由它的请求将失败，请手动重启代理。"
@@ -268,6 +294,8 @@ final class OpenCodeProxyRuntime: ObservableObject {
         }
 
         let attempt = instance.restartAttempts
+        // 整个重启周期（含退避等待）都视为「启动中」，抑制 backoff 间隙的横幅闪现。
+        startingNodeIds.insert(nodeId)
         openCodeProxyLog.notice("Scheduling OpenCode proxy restart attempt \(attempt, privacy: .public)")
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.restartBaseDelayNanos * UInt64(attempt))

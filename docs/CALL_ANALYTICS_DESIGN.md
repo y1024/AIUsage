@@ -194,9 +194,9 @@ public struct CallAnalyticsEntry: Codable, Sendable, Hashable {
 聚合在 `CallEventAccumulator`（`CallAnalyticsSupport.swift`）内完成：以
 `(source, kind, name, server, agent, dayKey)` 为键累加 `count`，并按可选 `success`/`durationMs`
 **有信号才计入对应分母**，最终 `entries()` 吐出 `[CallAnalyticsEntry]`。
-快照 `CallAnalyticsSnapshot`（schema v4）额外携带 `installedSkills` / `installedMCPServers`（均为带来源的 `[InstalledItem]`，零调用按应用用）、
-每源 `sources: [CallSourceStatus]`（区分「无数据/未安装」与「采集失败」）、`windowDays`、`schemaVersion`、`generatedAt`。
-（schema 历史：v2 清单带来源 → v3 加成功率/耗时分量 → v4 加 agent 维度，每次变更自动失效旧缓存。）
+快照 `CallAnalyticsSnapshot`（schema v6）额外携带 `installedSkills` / `installedMCPServers`（均为带来源的 `[InstalledItem]`，零调用按应用用）、
+`agentInvocations`（Claude 各 agent 被调用次数）、每源 `sources: [CallSourceStatus]`（区分「无数据/未安装」与「采集失败」）、`rangeKey`、`schemaVersion`、`generatedAt`。
+（schema 历史：v2 清单带来源 → v3 加成功率/耗时分量 → v4 加 agent 维度 → v5 加 agentInvocations → v6 时间范围由滚动天数 `windowDays` 改日历口径 `rangeKey`，每次变更自动失效旧缓存。）
 
 > 旧规划里的 `ToolCallEvent`（逐事件）/ `CallAnalyticsBucket` / `CallAggKey` 已不复存在——
 > 聚合直接发生在采集累加器里，省一层中间事件，模型更精简。
@@ -222,7 +222,7 @@ public struct CallAnalyticsEntry: Codable, Sendable, Hashable {
 
 性能策略（已落地）：
 - 全程 `actor`（`CallAnalyticsEngine`）化、后台执行；解析结果合并成快照后才回主线程。
-- 时间窗裁剪：`windowDays>0` 时按文件 `mtime` / 库时间跳过窗口外文件（`cutoff`）。
+- 时间范围裁剪：日历口径 `today`/`week`/`month`/`all`（与用量统计同口径）。`cutoff` 非空时先按文件 `mtime` / 库时间跳过窗外文件（省 IO），再对**每条事件**按 `dayKey` 精确闭区间过滤（`cutoff`…`end`），保证「今日」不被跨天会话串味；引擎入参为 `(rangeKey, cutoff, end)`，`end` 仅自定义区间用。
 - 流式按行解析，避免一次性载入大文件；先做廉价子串预筛（`tool_use` / `function_call` / `mcp_tool_call_end`）再 JSON 解析；Claude 单行给 4MB、Codex 给 256KB 缓冲上限。
 - OpenCode 复制 db/-wal/-shm 到临时目录只读打开，`SELECT data FROM part`。
 
@@ -230,9 +230,9 @@ public struct CallAnalyticsEntry: Codable, Sendable, Hashable {
 
 ## 6. 聚合、存储与刷新接入（实现）
 
-- **聚合**：三源各自在 `CallEventAccumulator` 内聚合为 `[CallAnalyticsEntry]`，`CallAnalyticsEngine.computeSnapshot(windowDays:)` 合并成 `CallAnalyticsSnapshot`。
+- **聚合**：三源各自在 `CallEventAccumulator` 内聚合为 `[CallAnalyticsEntry]`，`CallAnalyticsEngine.computeSnapshot(rangeKey:cutoff:end:)` 合并 + 按事件日期精确过滤成 `CallAnalyticsSnapshot`（各源 `eventCount` 以过滤后条目重算，与页脚一致）。
 - **存储**：调用分析**无成本冻结需求**（不像代理用量要逐条冻结价格），因此**不做永久归档**，整份快照落盘缓存到 `~/.config/aiusage/cache/call-analytics-v<schema>.json`（ISO8601 编码，schema 不匹配则丢弃重建）。冷启动先读缓存即时显示，再后台刷新。
-- **刷新接入**：实现为**独立的** `@MainActor` 单例 `CallAnalyticsStore.shared`（`AIUsage/ViewModels/CallAnalyticsStore.swift`），不挂在 `ProviderRefreshCoordinator` 上——语义不同（调用计数 vs token/成本）、刷新时机不同（按窗口切换/手动）。它持有 `@Published snapshot` / `@Published isRefreshing`，`refreshIfNeeded(windowDays:)`（首进或窗口变化）与 `refresh(windowDays:)`（强制）调度 `CallAnalyticsEngine.shared` 后回主线程发布并落盘。
+- **刷新接入**：实现为**独立的** `@MainActor` 单例 `CallAnalyticsStore.shared`（`AIUsage/ViewModels/CallAnalyticsStore.swift`），不挂在 `ProviderRefreshCoordinator` 上——语义不同（调用计数 vs token/成本）、刷新时机不同（按时间范围切换/手动）。它持有 `@Published snapshot` / `@Published isRefreshing`，`refreshIfNeeded(window:)`（首进或时间范围变化）与 `refresh(window:)`（强制）按 `CallWindow` 算出 `cutoff` 后调度 `CallAnalyticsEngine.shared`，回主线程发布并落盘。
 
 ## 7. 零调用检测（清单源，按来源归属，实现）
 
@@ -346,7 +346,7 @@ UI 实现选择：
 1. **规则命中** → ✅ 不做命中次数，改为「技能/MCP 清单 + 零调用检测」（原理无 per-rule 信号）。
 2. **耗时** → Phase 1 不展示，归 Phase 2（仅 OpenCode/Codex-MCP 有数据，Claude 标注无）。
 3. **内置工具** → 保留，单列「工具」lens（与 MCP / 技能并列），不混入 MCP/技能榜。
-4. **时间范围** → 提供窗口选择器（7/30/90/全部），`windowDays` 驱动解析裁剪。
+4. **时间范围** → 日历口径选择器（今日/本周/本月/全部，与用量统计 `ChartTimeRange` 同口径，v6 起取代旧的 7/30/90 滚动天数）；引擎按 `cutoff`/`end` 对每条事件精确过滤。
 5. **Codex 技能（实现后新增决策）** → 启发式按读取 `SKILL.md` 计数（无离散事件，弱信号）；实测确认无更精确信号，不再深挖。
 6. **零调用「可清理」范围（实现后新增决策）** → 仅用户自建技能；插件/内置捆绑技能仍计调用但不算可清理候选。
 7. **零调用按来源归属（实现后新增决策）** → 清单升级为带来源的 `InstalledItem`，零调用卡跟随顶部筛选、与 KPI 同口径（修数字不一致）；技能/MCP 按目录与配置归属到 Claude/Codex/OpenCode（补扫 OpenCode 技能目录、Codex 的 TOML MCP），不再扫 `~/.cursor`（非三家 CLI，避免永久误报僵尸）。schema 升 v2 自动失效旧缓存。

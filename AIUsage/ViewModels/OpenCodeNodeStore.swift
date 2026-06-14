@@ -289,6 +289,17 @@ final class OpenCodeNodeStore: ObservableObject {
     /// 而 opencode.json 仍指向本地端口，必须重新拉起，否则 OpenCode 请求全部失败。
     /// 仅代理节点同样恢复（外部工具可能仍指向这些端口）。
     private func restoreProxyIfNeeded() {
+        // 与 Claude/Codex 一致：受「启动时自动恢复代理」设置控制。关闭时不接管，
+        // 并还原 opencode.json（避免它仍指向不会被拉起的本地端口）。
+        guard AppSettings.shared.proxyAutoRestoreOnLaunch else {
+            if activeNodeId != nil {
+                do { try deactivate() } catch {
+                    openCodeStoreLog.error("Failed to deactivate OpenCode node while auto-restore disabled: \(SensitiveDataRedactor.redactedMessage(for: error), privacy: .public)")
+                }
+            }
+            return
+        }
+
         var toRestore: [OpenCodeNode] = []
         if let active = activeNode, active.proxyEnabled {
             toRestore.append(active)
@@ -299,7 +310,13 @@ final class OpenCodeNodeStore: ObservableObject {
             }
         }
         guard !toRestore.isEmpty else { return }
+        // 预标记待恢复节点为「启动中」，覆盖 reap→launch 整段窗口，避免横幅闪现。
+        let restoreIds = toRestore.map(\.id)
+        proxyRuntime.beginRestoring(nodeIds: restoreIds)
         Task { [proxyRuntime] in
+            // 先回收上次会话残留的孤儿 helper（与 Claude/Codex 启动恢复同序），再拉起，
+            // 避免端口被自家孤儿占住导致绑定失败、横幅误报。
+            await ProxyProcessInspector.shared.reapOrphanedHelpers()
             for node in toRestore {
                 do {
                     try await proxyRuntime.start(node: node)
@@ -307,6 +324,7 @@ final class OpenCodeNodeStore: ObservableObject {
                     openCodeStoreLog.error("Failed to restore OpenCode proxy after relaunch: \(SensitiveDataRedactor.redactedMessage(for: error), privacy: .public)")
                 }
             }
+            proxyRuntime.endRestoring(nodeIds: restoreIds)
         }
     }
 

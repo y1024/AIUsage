@@ -311,4 +311,56 @@ extension ProxyManagementView {
         }
         return agg
     }
+
+    // MARK: - Proxy Runtime Down Banner（与 OpenCode 同款，三轨对齐）
+    // 自动重启耗尽后的 fail-loud 提示：激活态保留，横幅持久提示 + 手动重启，避免静默停用让用户无感失败。
+
+    /// 本家族中被标记为 down（代理进程未在运行、需手动重启）的激活节点。
+    private var familyDownNodes: [ProxyConfiguration] {
+        viewModel.proxyRuntimeDownConfigIds.compactMap { id in
+            viewModel.configurations.first { $0.id == id && family.contains($0.nodeType) }
+        }
+    }
+
+    @ViewBuilder
+    var proxyRuntimeDownBanner: some View {
+        let down = familyDownNodes
+        if !down.isEmpty {
+            let ports = down.map { "127.0.0.1:\($0.port)" }.joined(separator: ", ")
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.orange)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L("Local proxy is not running", "本地代理未在运行"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(L(
+                        "Requests via \(ports) will fail until the proxy is restarted.",
+                        "重启代理前，经 \(ports) 的请求将失败。"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Button(L("Restart Proxy", "重启代理")) {
+                    let ids = Set(down.map(\.id))
+                    Task { await viewModel.restartDownProxyRuntime(ids: ids) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.orange.opacity(colorScheme == .dark ? 0.12 : 0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.orange.opacity(0.22), lineWidth: 1)
+            )
+        }
+    }
 }

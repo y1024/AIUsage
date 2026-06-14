@@ -542,9 +542,7 @@ extension ProxyViewModel: ProxyRuntimeServiceDelegate {
     private func scheduleProxyRuntimeRestart(for config: ProxyConfiguration) {
         let attempt = proxyRuntimeRestartAttempts[config.id, default: 0] + 1
         guard attempt <= Self.maxProxyRuntimeRestartAttempts else {
-            Task { @MainActor [weak self] in
-                await self?.deactivateAfterRuntimeRestartExhausted(config)
-            }
+            markProxyRuntimeDown(config)
             return
         }
 
@@ -566,6 +564,7 @@ extension ProxyViewModel: ProxyRuntimeServiceDelegate {
 
             do {
                 try await self.runtimeService.startProxyOnly(for: latestConfig)
+                self.proxyRuntimeDownConfigIds.remove(latestConfig.id)
                 proxyRuntimeLog.info(
                     "Proxy process restarted for active node \(latestConfig.name, privacy: .public) on attempt \(attempt, privacy: .public)"
                 )
@@ -592,34 +591,15 @@ extension ProxyViewModel: ProxyRuntimeServiceDelegate {
         }
     }
 
-    private func deactivateAfterRuntimeRestartExhausted(_ config: ProxyConfiguration) async {
-        guard isNodeActivated(config.id),
-              !operationInProgressConfigIds.contains(config.id) else {
-            return
-        }
-
+    /// fail-loud：自动重启耗尽后不再静默停用，而是保留激活态、标记 down，由管理页持久横幅
+    /// 提示「本地代理未在运行」并提供手动重启（与 OpenCode 三轨对齐）。
+    /// 不还原 settings.json/config.toml——它们仍指向本地端口，手动重启进程即可恢复，无需重新激活。
+    private func markProxyRuntimeDown(_ config: ProxyConfiguration) {
+        guard isNodeActivated(config.id) else { return }
         proxyRuntimeRestartAttempts.removeValue(forKey: config.id)
-        do {
-            try await deactivateRuntime(for: config)
-        } catch {
-            let redactedMessage = SensitiveDataRedactor.redactedMessage(for: error)
-            proxyRuntimeLog.error(
-                "Failed to restore runtime after proxy restart attempts were exhausted for node \(config.name, privacy: .public): \(redactedMessage, privacy: .public)"
-            )
-        }
-
-        do {
-            try persistActivationSelection(nil, touchLastUsedAt: false, isCodex: config.nodeType.isCodex)
-        } catch {
-            let redactedMessage = SensitiveDataRedactor.redactedMessage(for: error)
-            proxyRuntimeLog.error(
-                "Failed to clear activation after proxy restart attempts were exhausted for node \(config.name, privacy: .public): \(redactedMessage, privacy: .public)"
-            )
-        }
-
-        operationErrorMessage = AppSettings.shared.t(
-            "The active proxy process exited repeatedly and was deactivated. Reconnect the node after checking its configuration.",
-            "当前激活节点的代理进程连续退出，已自动停用。请检查节点配置后重新连接。"
+        proxyRuntimeDownConfigIds.insert(config.id)
+        proxyRuntimeLog.error(
+            "Proxy process for active node \(config.name, privacy: .public) keeps exiting; surfaced as down (manual restart required)"
         )
     }
 }

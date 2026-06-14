@@ -107,6 +107,9 @@ class ProxyViewModel: ObservableObject {
     @Published var operationInProgressConfigIds: Set<String> = []
     @Published var connectivityTestStates: [String: ProxyConnectivityTestState] = [:]
     var proxyRuntimeRestartAttempts: [String: Int] = [:]
+    /// 自动重启已耗尽、确认代理进程未在运行的激活节点（fail-loud：不再静默自动停用，
+    /// 改为保留激活态 + 持久「本地代理未在运行」横幅 + 手动重启，与 OpenCode 三轨对齐）。
+    @Published var proxyRuntimeDownConfigIds: Set<String> = []
     static let maxProxyRuntimeRestartAttempts = 3
     static let proxyRuntimeRestartBaseDelayNanos: UInt64 = 1_000_000_000
     static let proxyRuntimeRestartStabilityWindowNanos: UInt64 = 10_000_000_000
@@ -285,6 +288,31 @@ class ProxyViewModel: ObservableObject {
     /// 某节点是否处于激活态（任一轨道）。
     func isNodeActivated(_ id: String) -> Bool {
         activatedConfigId == id || activatedCodexConfigId == id
+    }
+
+    /// 横幅「重启代理」按钮：手动拉起被标记为 down 的激活节点的代理进程。
+    /// settings.json/config.toml 在 fail-loud 下并未还原（仍指向本地端口），故只需重启进程即可恢复。
+    /// 不传 ids 时重启全部 down 节点；传入则只重启指定家族的节点。
+    func restartDownProxyRuntime(ids: Set<String>? = nil) async {
+        let targets = ids ?? proxyRuntimeDownConfigIds
+        for id in targets {
+            guard isNodeActivated(id),
+                  let config = configurations.first(where: { $0.id == id }),
+                  config.needsProxyProcess else {
+                proxyRuntimeDownConfigIds.remove(id)
+                continue
+            }
+            proxyRuntimeRestartAttempts.removeValue(forKey: id)
+            do {
+                try await runtimeService.startProxyOnly(for: config)
+                proxyRuntimeDownConfigIds.remove(id)
+                proxyRuntimeLog.info("Manually restarted proxy for node \(config.name, privacy: .public)")
+            } catch {
+                let redactedMessage = SensitiveDataRedactor.redactedMessage(for: error)
+                operationErrorMessage = redactedMessage
+                proxyRuntimeLog.error("Manual proxy restart failed for node \(config.name, privacy: .public): \(redactedMessage, privacy: .public)")
+            }
+        }
     }
 
     /// 取指定家族当前激活的节点 id（Codex 走独立轨道）。
@@ -607,6 +635,7 @@ class ProxyViewModel: ObservableObject {
 
         proxyRuntimeLog.info("Node activated: \(config.name, privacy: .public)")
         proxyRuntimeRestartAttempts.removeValue(forKey: config.id)
+        proxyRuntimeDownConfigIds.remove(config.id)
     }
 
     func performDeactivationTransaction(_ id: String) async throws {
@@ -633,6 +662,7 @@ class ProxyViewModel: ObservableObject {
 
         proxyRuntimeLog.info("Node deactivated: \(config.name, privacy: .public)")
         proxyRuntimeRestartAttempts.removeValue(forKey: config.id)
+        proxyRuntimeDownConfigIds.remove(config.id)
     }
 
     func persistActivationSelection(_ activeId: String?, touchLastUsedAt: Bool, isCodex: Bool) throws {

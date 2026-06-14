@@ -77,6 +77,7 @@ struct ProxyManagementView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 16) {
+                        proxyRuntimeDownBanner
                         actionBar
                         summaryStrip
                         if family.isCodex {

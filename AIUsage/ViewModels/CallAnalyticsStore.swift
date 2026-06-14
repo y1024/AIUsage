@@ -26,23 +26,24 @@ final class CallAnalyticsStore: ObservableObject {
         Self.pruneStaleCaches()
     }
 
-    /// 首次进入或窗口变化时刷新；否则沿用当前快照。
-    func refreshIfNeeded(windowDays: Int) async {
-        if hasRefreshedThisSession, snapshot.windowDays == windowDays { return }
-        await refresh(windowDays: windowDays)
+    /// 首次进入或时间范围变化时刷新；否则沿用当前快照。
+    /// `rangeKey` 为该范围的稳定标识（自定义区间含起止日期），用于判断快照是否过期。
+    func refreshIfNeeded(rangeKey: String, cutoff: Date?, end: Date?) async {
+        if hasRefreshedThisSession, snapshot.rangeKey == rangeKey { return }
+        await refresh(rangeKey: rangeKey, cutoff: cutoff, end: end)
     }
 
-    /// 强制重新解析并刷新（手动刷新按钮 / 窗口切换）。
-    func refresh(windowDays: Int) async {
+    /// 强制重新解析并刷新（手动刷新按钮 / 时间范围切换）。
+    func refresh(rangeKey: String, cutoff: Date?, end: Date?) async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
 
-        let result = await engine.computeSnapshot(windowDays: windowDays)
+        let result = await engine.computeSnapshot(rangeKey: rangeKey, cutoff: cutoff, end: end)
         snapshot = result
         hasRefreshedThisSession = true
         Self.saveCache(result)
-        log.debug("Call analytics refreshed: \(result.entries.count, privacy: .public) entries, window \(windowDays, privacy: .public)d")
+        log.debug("Call analytics refreshed: \(result.entries.count, privacy: .public) entries, range \(rangeKey, privacy: .public)")
     }
 
     // MARK: - Cache

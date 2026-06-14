@@ -39,20 +39,24 @@ struct ClaudeCallEventSource {
         ]
     }
 
-    func collect(cutoff: Date?) -> (entries: [CallAnalyticsEntry], status: CallSourceStatus) {
+    func collect(cutoff: Date?) -> (entries: [CallAnalyticsEntry], status: CallSourceStatus, agentInvocations: [AgentInvocationCount]) {
         let clock = CallAnalyticsClock(timeZone: timeZone)
         let roots = resolveProjectRoots().filter { FileManager.default.fileExists(atPath: $0) }
         guard !roots.isEmpty else {
-            return ([], CallSourceStatus(source: .claude, available: false, eventCount: 0, filesScanned: 0, errorCode: nil))
+            return ([], CallSourceStatus(source: .claude, available: false, eventCount: 0, filesScanned: 0, errorCode: nil), [])
         }
 
         let files = collectJSONLFiles(roots: roots, cutoff: cutoff)
         var accumulator = CallEventAccumulator()
+        // 各 agent 的「被调用次数」：一份会话文件 = 一次。主会话（根文件）记 "main"，
+        // 子代理记其具体 agentType（读不到 → "subagent"）。与该 agent 是否调过工具无关。
+        var invocations: [String: Int] = [:]
         for file in files {
             // 路径含 subagents/ 的整文件视为 subagent；其具体类型取边车 agent-<id>.meta.json 的 agentType
             // （如 Explore / Plan），拿不到则归为通用 "subagent"。常规文件再按行内 isSidechain 兜底。
             let isSubagentFile = file.contains("/subagents/")
             let subagentType = isSubagentFile ? readSubagentType(forFile: file) : nil
+            invocations[isSubagentFile ? (subagentType ?? "subagent") : "main", default: 0] += 1
             let fallbackDayKey = clock.dayKey(fileModificationDate(file) ?? Date())
             // 同文件内按 tool_use_id 配对 tool_result（成功率）。配对发生在文件内、顺序保证 result 在 use 之后。
             var pending: [String: PendingCall] = [:]
@@ -79,7 +83,10 @@ struct ClaudeCallEventSource {
             filesScanned: files.count,
             errorCode: nil
         )
-        return (accumulator.entries(), status)
+        let agentInvocations = invocations.map {
+            AgentInvocationCount(source: .claude, agent: $0.key, count: $0.value)
+        }
+        return (accumulator.entries(), status, agentInvocations)
     }
 
     // MARK: - Parsing

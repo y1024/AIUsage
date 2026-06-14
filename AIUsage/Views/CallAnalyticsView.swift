@@ -9,15 +9,101 @@ import QuotaBackend
 struct CallAnalyticsView: View {
     @StateObject var store = CallAnalyticsStore.shared
 
-    @AppStorage("callAnalytics.windowDays") private var windowRaw = CallWindow.month.rawValue
+    @AppStorage("callAnalytics.range") private var windowRaw = CallWindow.month.rawValue
     @AppStorage("callAnalytics.scope") private var scopeRaw = CallScope.all.rawValue
+    /// 自定义区间起止（参考时间，0 = 未设置→回退到默认「最近 7 天」）。
+    @AppStorage("callAnalytics.customStart") private var customStartTS: Double = 0
+    @AppStorage("callAnalytics.customEnd") private var customEndTS: Double = 0
     @State var lens: CallLens = .mcp
     /// MCP 排行里已展开（下钻查看 tool 列表）的 server。
     @State var expandedServers: Set<String> = []
+    /// 自定义区间的日期选择弹层是否展开。
+    @State private var showCustomPopover = false
 
     var window: CallWindow { CallWindow(rawValue: windowRaw) ?? .month }
     var scope: CallScope { CallScope(rawValue: scopeRaw) ?? .all }
     var derived: CallAnalyticsDerived { CallAnalyticsDerived(snapshot: store.snapshot, scope: scope) }
+
+    /// 解析后的时间范围规格：稳定标识 + 闭区间起止界（传给 store/engine）。
+    /// 前四档走 `CallWindow.cutoff`；`custom` 用用户所选起止日期（起 > 止时自动对调）。
+    private struct RangeSpec { let rangeKey: String; let cutoff: Date?; let end: Date? }
+
+    private var rangeSpec: RangeSpec {
+        guard window == .custom else {
+            return RangeSpec(rangeKey: window.rangeKey, cutoff: window.cutoff(), end: nil)
+        }
+        let cal = Calendar.current
+        let a = cal.startOfDay(for: customStartBinding.wrappedValue)
+        let b = cal.startOfDay(for: customEndBinding.wrappedValue)
+        let lo = min(a, b), hi = max(a, b)
+        let key = "custom:\(Self.dayKeyFormatter.string(from: lo)):\(Self.dayKeyFormatter.string(from: hi))"
+        return RangeSpec(rangeKey: key, cutoff: lo, end: hi)
+    }
+
+    /// 可见范围是否坐实为「单天」（今日，或起止同一天的自定义）——此时隐藏「每日调用」卡（单根条无意义）。
+    private var isSingleDayRange: Bool {
+        switch window {
+        case .today:
+            return true
+        case .custom:
+            return Calendar.current.isDate(customStartBinding.wrappedValue,
+                                           inSameDayAs: customEndBinding.wrappedValue)
+        default:
+            return false
+        }
+    }
+
+    /// 仅用于拼接稳定缓存键的日期串（实际过滤由引擎按本地时区 dayKey 完成）。
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// 胶囊按钮上的紧凑日期（同年只显示 MM-dd）。
+    private static let pillDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MM-dd"
+        return f
+    }()
+
+    /// 胶囊按钮文案：`起 → 止`；跨年时退回 `yyyy-MM-dd`。
+    private var customRangeLabel: String {
+        let lo = min(customStartBinding.wrappedValue, customEndBinding.wrappedValue)
+        let hi = max(customStartBinding.wrappedValue, customEndBinding.wrappedValue)
+        let cal = Calendar.current
+        let sameYear = cal.component(.year, from: lo) == cal.component(.year, from: hi)
+        let fmt = sameYear ? Self.pillDateFormatter : Self.dayKeyFormatter
+        return "\(fmt.string(from: lo)) → \(fmt.string(from: hi))"
+    }
+
+    /// 自定义区间默认值：最近 7 天（今天往前 6 天 ~ 今天）。
+    private static func defaultCustomRange() -> (start: Date, end: Date) {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let start = cal.date(byAdding: .day, value: -6, to: today) ?? today
+        return (start, today)
+    }
+
+    private var customStartBinding: Binding<Date> {
+        Binding(
+            get: { customStartTS > 0 ? Date(timeIntervalSinceReferenceDate: customStartTS)
+                                     : Self.defaultCustomRange().start },
+            set: { customStartTS = $0.timeIntervalSinceReferenceDate }
+        )
+    }
+
+    private var customEndBinding: Binding<Date> {
+        Binding(
+            get: { customEndTS > 0 ? Date(timeIntervalSinceReferenceDate: customEndTS)
+                                   : Self.defaultCustomRange().end },
+            set: { customEndTS = $0.timeIntervalSinceReferenceDate }
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -27,7 +113,7 @@ struct CallAnalyticsView: View {
                     emptyState
                 } else {
                     kpiStrip
-                    trendCard
+                    if !isSingleDayRange { trendCard }
                     rankingCard
                     if derived.hasSubagentActivity {
                         agentCard
@@ -40,8 +126,9 @@ struct CallAnalyticsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: windowRaw) {
-            await store.refreshIfNeeded(windowDays: window.rawValue)
+        .task(id: rangeSpec.rangeKey) {
+            let spec = rangeSpec
+            await store.refreshIfNeeded(rangeKey: spec.rangeKey, cutoff: spec.cutoff, end: spec.end)
         }
     }
 
@@ -59,6 +146,9 @@ struct CallAnalyticsView: View {
                 refreshControl
             }
             windowCluster
+            if window == .custom {
+                customRangeRow
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
@@ -104,10 +194,119 @@ struct CallAnalyticsView: View {
             StatsSegmentedControl(
                 CallWindow.allCases,
                 selection: windowBinding,
-                segmentWidth: 48,
+                segmentWidth: 56,
                 tint: .blue
             ) { $0.title }
         }
+    }
+
+    // 仅在「自定义」档显示：一个与其它控件同款的胶囊按钮，点开弹层选日期（含快捷预设）。
+    private var customRangeRow: some View {
+        controlCluster(L("Dates", "起止", key: "calls.range.custom"), systemImage: "calendar.badge.clock") {
+            Button {
+                showCustomPopover.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Text(customRangeLabel)
+                        .font(.caption.monospacedDigit())
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showCustomPopover, arrowEdge: .bottom) {
+                customRangePopover
+            }
+        }
+    }
+
+    // 自定义区间弹层：快捷预设（最近 7/30 天、本月）+ 起止两个日期选择器（UI 即约束 起 ≤ 止 ≤ 今天）。
+    private var customRangePopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L("Quick ranges", "快捷范围", key: "calls.range.presets"))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                presetChip(L("7 days", "最近 7 天", key: "calls.preset.7d")) { applyPreset(days: 7) }
+                presetChip(L("30 days", "最近 30 天", key: "calls.preset.30d")) { applyPreset(days: 30) }
+                presetChip(L("Month", "本月", key: "calls.preset.month")) { applyThisMonth() }
+            }
+            Divider()
+            datePickerRow(L("From", "起始", key: "calls.range.from"),
+                          binding: customStartBinding,
+                          in: ...customEndBinding.wrappedValue)
+            datePickerRow(L("To", "结束", key: "calls.range.to"),
+                          binding: customEndBinding,
+                          in: customStartBinding.wrappedValue...Date())
+        }
+        .padding(14)
+        .frame(width: 248)
+    }
+
+    private func datePickerRow(_ title: String, binding: Binding<Date>, in range: ClosedRange<Date>) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .leading)
+            DatePicker("", selection: binding, in: range, displayedComponents: .date)
+                .labelsHidden()
+                .datePickerStyle(.field)
+        }
+    }
+
+    private func datePickerRow(_ title: String, binding: Binding<Date>, in range: PartialRangeThrough<Date>) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .leading)
+            DatePicker("", selection: binding, in: range, displayedComponents: .date)
+                .labelsHidden()
+                .datePickerStyle(.field)
+        }
+    }
+
+    private func presetChip(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 预设：最近 N 天（今天往前 N-1 天 ~ 今天）。
+    private func applyPreset(days: Int) {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let start = cal.date(byAdding: .day, value: -(days - 1), to: today) ?? today
+        customStartTS = start.timeIntervalSinceReferenceDate
+        customEndTS = today.timeIntervalSinceReferenceDate
+    }
+
+    /// 预设：本月 1 号 ~ 今天。
+    private func applyThisMonth() {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let start = cal.dateInterval(of: .month, for: today)?.start ?? today
+        customStartTS = start.timeIntervalSinceReferenceDate
+        customEndTS = today.timeIntervalSinceReferenceDate
     }
 
     private var refreshControl: some View {
@@ -116,7 +315,8 @@ struct CallAnalyticsView: View {
                 ProgressView().controlSize(.small)
             }
             Button {
-                Task { await store.refresh(windowDays: window.rawValue) }
+                let spec = rangeSpec
+                Task { await store.refresh(rangeKey: spec.rangeKey, cutoff: spec.cutoff, end: spec.end) }
             } label: {
                 Label(L("Rescan", "重新扫描", key: "calls.rescan"), systemImage: "arrow.clockwise")
             }
@@ -175,12 +375,25 @@ struct CallAnalyticsView: View {
 
     // MARK: - Daily trend
 
+    /// 趋势卡副标题：与所选时间范围口径一致（今日/本周/本月/全部历史）。
+    private var trendSubtitle: String {
+        switch window {
+        case .today: return L("Today", "今日", key: "calls.trend.today")
+        case .week:  return L("This week", "本周", key: "calls.trend.week")
+        case .month: return L("This month", "本月", key: "calls.trend.month")
+        case .all:   return L("All history", "全部历史", key: "calls.trend.all")
+        case .custom:
+            let lo = min(customStartBinding.wrappedValue, customEndBinding.wrappedValue)
+            let hi = max(customStartBinding.wrappedValue, customEndBinding.wrappedValue)
+            return "\(Self.dayKeyFormatter.string(from: lo)) – \(Self.dayKeyFormatter.string(from: hi))"
+        }
+    }
+
     private var trendCard: some View {
         let points = derived.dailyCounts
         return cardContainer(
             title: L("Daily Calls", "每日调用", key: "calls.trend.title"),
-            subtitle: window == .all ? L("All history", "全部历史", key: "calls.trend.all")
-                                     : L("Last \(window.rawValue) days", "最近 \(window.rawValue) 天", key: "calls.trend.window")
+            subtitle: trendSubtitle
         ) {
             if points.isEmpty {
                 Text(L("No calls in range", "范围内暂无调用", key: "calls.trend.empty"))
@@ -200,7 +413,7 @@ struct CallAnalyticsView: View {
         let total = max(rows.reduce(0) { $0 + $1.count }, 1)
         return cardContainer(
             title: L("By Agent (Claude)", "按 Agent 分组（Claude）", key: "calls.agent.title"),
-            subtitle: L("Main session vs each subagent type — only Claude exposes this", "主会话 vs 各子代理类型 · 仅 Claude 提供该维度", key: "calls.agent.sub")
+            subtitle: L("Invocations of the main session and each subagent type (by session) — only Claude exposes this", "主会话与各子代理类型的调用次数（按会话计）· 仅 Claude 提供该维度", key: "calls.agent.sub")
         ) {
             VStack(spacing: 8) {
                 ForEach(rows) { agentRow($0, total: total) }
@@ -236,7 +449,8 @@ struct CallAnalyticsView: View {
             }
             .font(isMain ? .callout.weight(.semibold) : .caption)
             .labelStyle(.titleAndIcon)
-            .frame(width: isMain ? 130 : 110, alignment: .leading)
+            .frame(width: 150, alignment: .leading)
+            .help(label)
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.secondary.opacity(0.12))
@@ -245,49 +459,50 @@ struct CallAnalyticsView: View {
                 }
             }
             .frame(height: isMain ? 14 : 11)
-            if let rate = row.successRate {
-                Text(CallAnalyticsView.formatRate(rate))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .trailing)
-                    .help(L("Success rate", "成功率", key: "calls.metric.success.help"))
-            }
             Text("\(row.count)")
                 .font((isMain ? Font.callout : Font.caption).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 48, alignment: .trailing)
+                .help(L("Invocations (by session)", "被调用次数（按会话计）", key: "calls.agent.count.help"))
         }
         .padding(.leading, isMain ? 0 : 14)
     }
 
     /// 按 agent id 给出稳定的图标 + 颜色：主会话/通用子代理固定，具体子代理类型按关键词选图标、按名称哈希取调色板色。
+    /// 关键词按「- / _ / 空格 等非字母数字」分词后整词比对（不是子串），避免「guide 命中 ui」这类误判。
     static func agentStyle(for id: String) -> (icon: String, color: Color) {
         if id == "main" { return ("person.crop.circle.fill", .blue) }
         if id == "subagent" { return ("person.2.fill", .gray) }
 
-        let lower = id.lowercased()
+        let tokens = Set(
+            id.lowercased()
+                .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                .map(String.init)
+        )
+        func has(_ keywords: String...) -> Bool { keywords.contains(where: tokens.contains) }
+
         let icon: String
-        if lower.contains("explore") {
+        if has("explore", "explorer") {
             icon = "magnifyingglass"
-        } else if lower.contains("plan") {
+        } else if has("plan", "planner", "planning") {
             icon = "list.bullet.rectangle"
-        } else if lower.contains("review") {
+        } else if has("review", "reviewer") {
             icon = "checkmark.seal"
-        } else if lower.contains("bug") || lower.contains("debug") {
+        } else if has("bug", "debug", "debugger") {
             icon = "ladybug"
-        } else if lower.contains("test") {
+        } else if has("test", "tester", "testing") {
             icon = "checkmark.diamond"
-        } else if lower.contains("doc") {
+        } else if has("doc", "docs", "documentation") {
             icon = "doc.text"
-        } else if lower.contains("ui") || lower.contains("sketch") || lower.contains("design") {
+        } else if has("ui", "sketch", "sketcher", "design", "designer") {
             icon = "paintbrush.pointed"
-        } else if lower.contains("research") || lower.contains("search") {
+        } else if has("research", "researcher", "search") {
             icon = "magnifyingglass.circle"
-        } else if lower.contains("story") || lower.contains("write") {
+        } else if has("story", "write", "writer", "writing") {
             icon = "square.and.pencil"
-        } else if lower.contains("shell") || lower.contains("command") || lower.contains("terminal") {
+        } else if has("shell", "command", "terminal") {
             icon = "terminal"
-        } else if lower.contains("general") {
+        } else if has("general", "purpose") {
             icon = "sparkles"
         } else {
             icon = "person.2"

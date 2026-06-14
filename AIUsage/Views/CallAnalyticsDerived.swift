@@ -43,20 +43,44 @@ enum CallLens: String, CaseIterable, Identifiable {
     }
 }
 
-/// 解析窗口。
-enum CallWindow: Int, CaseIterable, Identifiable {
-    case week = 7
-    case month = 30
-    case quarter = 90
-    case all = 0
-    var id: Int { rawValue }
+/// 解析时间范围。前四档为日历口径，与「用量统计」的 `ChartTimeRange` 完全一致：
+/// 今日=今天 0 点起、本周=本周一起、本月=本月 1 号起、全部=不设下限；
+/// `custom` 由视图按用户所选起止日期解析（见 `CallAnalyticsView.rangeSpec`）。
+enum CallWindow: String, CaseIterable, Identifiable {
+    case today
+    case week
+    case month
+    case all
+    case custom
+    var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .week: return L("7d", "7天", key: "calls.window.7d")
-        case .month: return L("30d", "30天", key: "calls.window.30d")
-        case .quarter: return L("90d", "90天", key: "calls.window.90d")
-        case .all: return L("All", "全部", key: "calls.window.all")
+        case .today:  return L("Today", "今日", key: "calls.window.today")
+        case .week:   return L("Week", "本周", key: "calls.window.week")
+        case .month:  return L("Month", "本月", key: "calls.window.month")
+        case .all:    return L("All", "全部", key: "calls.window.all")
+        case .custom: return L("Custom", "自定义", key: "calls.window.custom")
+        }
+    }
+
+    /// 该档自身的稳定标识。`custom` 的实际缓存键含起止日期，由视图拼接，不用此值。
+    var rangeKey: String { rawValue }
+
+    /// 起始日界（含）。`nil` = 不设下限（全部）。语义与用量统计 `ChartTimeRange.startDate` 一致。
+    /// `custom` 返回 nil——其起止由视图依用户所选日期解析。
+    func cutoff(now: Date = Date(), calendar: Calendar = .current) -> Date? {
+        switch self {
+        case .today:
+            return calendar.startOfDay(for: now)
+        case .week:
+            let weekday = calendar.component(.weekday, from: now) // 1=Sun（公历）
+            let mondayOffset = (weekday + 5) % 7
+            return calendar.date(byAdding: .day, value: -mondayOffset, to: calendar.startOfDay(for: now))
+        case .month:
+            return calendar.dateInterval(of: .month, for: now)?.start
+        case .all, .custom:
+            return nil
         }
     }
 }
@@ -81,11 +105,10 @@ struct InventoryStatusRow: Identifiable {
     var used: Bool { count > 0 }
 }
 
-/// Claude 按 agent（main/subagent）分组的一行。
+/// Claude 按 agent 分组的一行：`count` = 该 agent 的被调用次数（按会话计），非工具调用数。
 struct AgentBreakdownRow: Identifiable {
-    let id: String          // "main" / "subagent"
+    let id: String          // "main" 或具体 agentType（Explore/Plan/…）；"subagent" = 类型未知
     let count: Int
-    let successRate: Double?
 }
 
 struct CallAnalyticsDerived {
@@ -220,21 +243,24 @@ struct CallAnalyticsDerived {
     // MARK: - Agent breakdown (Claude only)
 
     /// 当前 scope 下是否有 Claude subagent 活动（决定是否显示 agent 分组卡）。
+    /// 口径为「被调用次数」（按会话计），与子代理是否调过工具无关——纯文本输出的子代理也算。
     /// agent 取值：`"main"` = 主会话；其余（具体类型 Explore/Plan… 或兜底 "subagent"）= 子代理。
     var hasSubagentActivity: Bool {
-        entries.contains { $0.source == .claude && $0.agent != nil && $0.agent != "main" && $0.count > 0 }
+        guard scope == .all || scope == .claude else { return false }
+        return snapshot.agentInvocations.contains { $0.source == .claude && $0.agent != "main" && $0.count > 0 }
     }
 
-    /// Claude 按 agent 分组：主会话 + 每个具体子代理类型（Explore/Plan/…）各一行。其它来源无 agent，返回空。
+    /// Claude 按 agent 分组：主会话 + 每个被调用过的子代理类型各一行，`count` = 被调用次数（按会话计）。
+    /// 数据源为 `subagents/*.meta.json` 边车统计，故纯文本输出 / 自定义子代理都会出现。其它来源无此维度。
     func agentBreakdown() -> [AgentBreakdownRow] {
-        let claude = entries.filter { $0.source == .claude && $0.agent != nil }
-        guard !claude.isEmpty else { return [] }
-        var aggs: [String: RankAgg] = [:]
-        for entry in claude { aggs[entry.agent ?? "main", default: RankAgg()].add(entry) }
-        return aggs.map { key, agg in
-            AgentBreakdownRow(id: key, count: agg.count, successRate: agg.successRate)
+        guard scope == .all || scope == .claude else { return [] }
+        var merged: [String: Int] = [:]
+        for inv in snapshot.agentInvocations where inv.source == .claude && inv.count > 0 {
+            merged[inv.agent, default: 0] += inv.count
         }
-        .sorted(by: Self.agentOrder)
+        guard !merged.isEmpty else { return [] }
+        return merged.map { AgentBreakdownRow(id: $0.key, count: $0.value) }
+            .sorted(by: Self.agentOrder)
     }
 
     /// 排序：主会话永远第一；其余子代理类型按次数降序 → 名称升序。

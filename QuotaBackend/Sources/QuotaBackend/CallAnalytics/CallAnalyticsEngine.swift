@@ -22,10 +22,15 @@ public actor CallAnalyticsEngine {
         self.environment = environment
     }
 
-    /// 计算调用分析快照。`windowDays > 0` 时只解析最近 N 天（按文件修改时间 / 库时间裁剪）；0 为全部历史。
-    public func computeSnapshot(windowDays: Int) -> CallAnalyticsSnapshot {
-        let cutoff = cutoffDate(windowDays: windowDays)
-
+    /// 计算调用分析快照。
+    /// - Parameters:
+    ///   - rangeKey: 时间范围标识（`today`/`week`/`month`/`all` 或自定义键），仅作快照/缓存身份用。
+    ///   - cutoff: 起始日界（含）。`nil` = 不设下限（全部历史）。文件预筛 + 按事件日期精确过滤都用它。
+    ///   - end: 结束日界（含）。`nil` = 不设上限（到现在）。日历口径恒为 `nil`，仅自定义区间用到。
+    ///
+    /// 注：`cutoff` 既用于「按文件 mtime / 库时间」预筛跳过窗外文件（省 IO），也用于对**每条事件**按
+    /// `dayKey` 精确过滤——后者保证「今日」只含今天的调用，不被跨天会话的旧调用串味。
+    public func computeSnapshot(rangeKey: String, cutoff: Date?, end: Date? = nil) -> CallAnalyticsSnapshot {
         // 先建清单：OpenCode 已装 MCP server 名要回灌给其事件源做精确前缀匹配。
         let inventory = CallAnalyticsInventory(homeDirectory: homeDirectory)
         let installedSkills = inventory.installedSkills()
@@ -46,22 +51,42 @@ public actor CallAnalyticsEngine {
         entries.append(contentsOf: claude.entries)
         entries.append(contentsOf: codex.entries)
         entries.append(contentsOf: opencode.entries)
+        entries = filterByDay(entries, cutoff: cutoff, end: end)
+
+        // 各源对外展示的「调用次数」以过滤后的实际条目为准，避免页脚 M 次调用与上方 KPI 对不上。
+        let rawStatuses = [claude.status, codex.status, opencode.status]
+        let statuses = rawStatuses.map { status -> CallSourceStatus in
+            let count = entries.filter { $0.source == status.source }.reduce(0) { $0 + $1.count }
+            return CallSourceStatus(
+                source: status.source,
+                available: status.available,
+                eventCount: count,
+                filesScanned: status.filesScanned,
+                errorCode: status.errorCode
+            )
+        }
 
         return CallAnalyticsSnapshot(
             generatedAt: Date(),
-            windowDays: windowDays,
+            rangeKey: rangeKey,
             entries: entries,
             installedSkills: installedSkills,
             installedMCPServers: installedMCP,
-            sources: [claude.status, codex.status, opencode.status]
+            agentInvocations: claude.agentInvocations,
+            sources: statuses
         )
     }
 
-    private func cutoffDate(windowDays: Int) -> Date? {
-        guard windowDays > 0 else { return nil }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        let startOfToday = calendar.startOfDay(for: Date())
-        return calendar.date(byAdding: .day, value: -(windowDays - 1), to: startOfToday)
+    /// 按事件 `dayKey`（yyyy-MM-dd，可字典序比较）做闭区间过滤。两端任意为 nil 即该侧不设限。
+    private func filterByDay(_ entries: [CallAnalyticsEntry], cutoff: Date?, end: Date?) -> [CallAnalyticsEntry] {
+        guard cutoff != nil || end != nil else { return entries }
+        let clock = CallAnalyticsClock(timeZone: timeZone)
+        let lowerKey = cutoff.map { clock.dayKey($0) }
+        let upperKey = end.map { clock.dayKey($0) }
+        return entries.filter { entry in
+            if let lowerKey, entry.dayKey < lowerKey { return false }
+            if let upperKey, entry.dayKey > upperKey { return false }
+            return true
+        }
     }
 }

@@ -108,6 +108,23 @@ public struct InstalledItem: Codable, Sendable, Hashable {
     }
 }
 
+/// 一个 agent 被「启动」的次数（Claude 专属）。
+/// 主会话 `"main"` = 根会话文件数；子代理 = `subagents/` 下该 `agentType` 的会话数
+/// （一份 `agent-<id>.jsonl` = 一次调用）。与「该 agent 调了多少工具」无关——
+/// 纯文本输出、不调任何工具的子代理也会被计入，自定义子代理类型同样如此。
+public struct AgentInvocationCount: Codable, Sendable, Hashable {
+    public let source: CallSourceKind
+    /// `"main"` 或具体 `agentType`（Explore / Plan / ui-sketcher…，读不到类型时为 `"subagent"`）。
+    public let agent: String
+    public let count: Int
+
+    public init(source: CallSourceKind, agent: String, count: Int) {
+        self.source = source
+        self.agent = agent
+        self.count = count
+    }
+}
+
 /// 单个来源的采集状态，供 UI 区分「无数据」与「采集失败」。
 public struct CallSourceStatus: Codable, Sendable {
     public let source: CallSourceKind
@@ -132,43 +149,53 @@ public struct CallAnalyticsSnapshot: Codable, Sendable {
     // v2：installedSkills / installedMCPServers 从 [String] 升级为带来源的 [InstalledItem]，支持按应用做零调用检测。
     // v3：CallAnalyticsEntry 追加成功率 / 平均耗时聚合分量（Phase 2 第一批）。
     // v4：CallAnalyticsEntry 追加 agent 维度（Claude main/subagent，Phase 2 第二批）。版本号变更会令旧缓存自动失效、整份重建。
-    public static let currentSchemaVersion = 4
+    // v5：新增 agentInvocations（Claude 各 agent 的「被调用次数」，按会话计），「按 Agent 分组」改用此口径——
+    //     不再受「子代理是否调过工具」影响，纯文本输出 / 自定义子代理也能显示。
+    // v6：解析窗口从「滚动天数 windowDays」改为「日历口径 rangeKey」（today/week/month/all，与用量统计同口径），
+    //     并按事件日期精确过滤。字段类型变更会令旧缓存自动失效、整份重建。
+    public static let currentSchemaVersion = 6
 
     public let schemaVersion: Int
     public let generatedAt: Date
-    /// 解析窗口（天）。0 表示全部历史。
-    public let windowDays: Int
+    /// 解析时间范围标识：`today` / `week` / `month` / `all`，或自定义区间键（如 `custom:2026-06-01:2026-06-10`）。
+    /// 仅作缓存/快照身份标识用；实际裁剪由引擎按 cutoff/end 精确完成。
+    public let rangeKey: String
     public let entries: [CallAnalyticsEntry]
     /// 本地已安装的 skill（带来源，用于按应用做零调用检测）。
     public let installedSkills: [InstalledItem]
     /// 本地已配置的 MCP server（带来源，用于按应用做零调用检测）。
     public let installedMCPServers: [InstalledItem]
+    /// 各 agent 的被调用次数（当前仅 Claude 提供），供「按 Agent 分组」展示。
+    public let agentInvocations: [AgentInvocationCount]
     public let sources: [CallSourceStatus]
 
     public init(
         schemaVersion: Int = CallAnalyticsSnapshot.currentSchemaVersion,
         generatedAt: Date,
-        windowDays: Int,
+        rangeKey: String,
         entries: [CallAnalyticsEntry],
         installedSkills: [InstalledItem],
         installedMCPServers: [InstalledItem],
+        agentInvocations: [AgentInvocationCount] = [],
         sources: [CallSourceStatus]
     ) {
         self.schemaVersion = schemaVersion
         self.generatedAt = generatedAt
-        self.windowDays = windowDays
+        self.rangeKey = rangeKey
         self.entries = entries
         self.installedSkills = installedSkills
         self.installedMCPServers = installedMCPServers
+        self.agentInvocations = agentInvocations
         self.sources = sources
     }
 
     public static let empty = CallAnalyticsSnapshot(
         generatedAt: .distantPast,
-        windowDays: 0,
+        rangeKey: "all",
         entries: [],
         installedSkills: [],
         installedMCPServers: [],
+        agentInvocations: [],
         sources: []
     )
 
