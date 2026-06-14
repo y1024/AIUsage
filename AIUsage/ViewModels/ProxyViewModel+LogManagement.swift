@@ -50,6 +50,14 @@ extension ProxyViewModel {
         let totalTime = stats.averageResponseTime * Double(stats.totalRequests - 1) + log.responseTimeMs
         stats.averageResponseTime = totalTime / Double(stats.totalRequests)
 
+        // 首字时间 TTFT 仅在流式请求里可采，单独累计样本数做运行平均，
+        // 非流式 / 旧日志（firstTokenMs == nil）不污染该均值。
+        if let firstTokenMs = log.firstTokenMs {
+            let prevTotal = stats.averageFirstTokenTime * Double(stats.firstTokenSamples)
+            stats.firstTokenSamples += 1
+            stats.averageFirstTokenTime = (prevTotal + firstTokenMs) / Double(stats.firstTokenSamples)
+        }
+
         stats.requestsByModel[log.upstreamModel, default: 0] += 1
 
         statistics[log.configId] = stats
@@ -138,6 +146,7 @@ extension ProxyViewModel {
                         method: log.method, path: log.path,
                         claudeModel: log.claudeModel, upstreamModel: log.upstreamModel,
                         success: log.success, responseTimeMs: log.responseTimeMs,
+                        firstTokenMs: log.firstTokenMs,
                         tokensInput: log.tokensInput, tokensOutput: log.tokensOutput,
                         tokensCacheRead: log.tokensCacheRead,
                         tokensCacheCreation: log.tokensCacheCreation,

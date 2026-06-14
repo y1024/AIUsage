@@ -47,7 +47,10 @@ enum SidebarNavigation {
                        tint: .primary, isHideable: true),
         SidebarNavItem(section: .costTracking, titleEn: "Usage Stats", titleZh: "用量统计",
                        localizationKey: "nav.cost_tracking", icon: .system("chart.bar.xaxis"),
-                       tint: .green, isHideable: true)
+                       tint: .green, isHideable: true),
+        SidebarNavItem(section: .callAnalytics, titleEn: "Call Analytics", titleZh: "调用分析",
+                       localizationKey: "nav.call_analytics", icon: .system("puzzlepiece.extension"),
+                       tint: .purple, isHideable: true)
     ]
 
     /// 分隔线下方的次分组（消息 + 设置）。

@@ -224,6 +224,7 @@ extension QuotaHTTPServer {
 
     func handlePassthroughStreaming(_ connection: NWConnection, upstreamRequest: URLRequest, requestModel: String, upstreamModel: String, startTime: Date) async {
         let streamer = StreamingResponse(connection: connection)
+        var firstTokenAt: Date?
 
         do {
             let (bytes, response) = try await URLSession.shared.bytes(for: upstreamRequest)
@@ -301,6 +302,8 @@ extension QuotaHTTPServer {
             }
 
             for try await byte in bytes {
+                // 首个上游字节到达即为首字时间（TTFT）。
+                if firstTokenAt == nil { firstTokenAt = Date() }
                 lineBuffer.append(byte)
 
                 if byte == 0x0A {
@@ -334,6 +337,7 @@ extension QuotaHTTPServer {
             }
 
             let elapsed = Date().timeIntervalSince(startTime) * 1000
+            let firstTokenMs = firstTokenAt.map { Int($0.timeIntervalSince(startTime) * 1000) }
             let isSuccess = statusCode < 400
             let usageDict: [String: Any] = [
                 "input_tokens": totalInputTokens,
@@ -346,6 +350,7 @@ extension QuotaHTTPServer {
                 upstreamModel: upstreamModel,
                 usage: usageDict,
                 responseTimeMs: Int(elapsed),
+                firstTokenMs: firstTokenMs,
                 success: isSuccess,
                 errorType: !isSuccess ? passthroughErrorType(forHTTPStatus: statusCode) : nil,
                 errorMessage: !isSuccess ? "HTTP \(statusCode)" : nil,
@@ -355,11 +360,13 @@ extension QuotaHTTPServer {
             await streamer.finish()
         } catch {
             let elapsed = Date().timeIntervalSince(startTime) * 1000
+            let firstTokenMs = firstTokenAt.map { Int($0.timeIntervalSince(startTime) * 1000) }
             emitPassthroughLog(
                 model: requestModel,
                 upstreamModel: upstreamModel,
                 usage: [:],
                 responseTimeMs: Int(elapsed),
+                firstTokenMs: firstTokenMs,
                 success: false,
                 errorType: "network_error",
                 errorMessage: error.localizedDescription,
@@ -416,6 +423,7 @@ extension QuotaHTTPServer {
         upstreamModel: String? = nil,
         usage: [String: Any],
         responseTimeMs: Int,
+        firstTokenMs: Int? = nil,
         success: Bool,
         errorType: String? = nil,
         errorMessage: String? = nil,
@@ -438,6 +446,7 @@ extension QuotaHTTPServer {
             "cache_read_tokens": cacheRead,
             "cache_tokens": cacheCreation + cacheRead,
         ]
+        if let firstTokenMs { log["first_token_ms"] = firstTokenMs }
         if let errorType { log["error_type"] = errorType }
         if let errorMessage { log["error"] = errorMessage }
         if let statusCode { log["status_code"] = statusCode }

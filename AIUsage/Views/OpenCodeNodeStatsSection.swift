@@ -168,11 +168,14 @@ struct OpenCodeNodeStatisticsSection: View {
                     help: L("From local proxy logs (proxy mode only).", "来自本地代理日志（仅代理模式）。")
                 )
                 statsCard(
-                    title: L("Avg Response", "平均响应"),
+                    title: L("Avg Duration", "平均生成耗时"),
                     value: averageResponse(proxyLogs: proxyLogs),
                     icon: "timer",
                     color: .orange,
-                    help: L("From per-message durations in opencode.db.", "来自 opencode.db 的单条消息耗时。")
+                    help: L(
+                        "Average full generation time per message (from opencode.db). Not time-to-first-token.",
+                        "每条消息的平均整段生成耗时（来自 opencode.db），并非首字时间。"
+                    )
                 )
             }
 
@@ -235,7 +238,7 @@ struct OpenCodeNodeStatisticsSection: View {
         )
     }
 
-    /// 平均响应：优先 db 单条耗时（直连/代理都有），无则回退代理日志。
+    /// 平均生成耗时：优先 db 单条整段生成耗时（直连/代理都有），无则回退代理日志总耗时。非首字时间。
     private func averageResponse(proxyLogs: [ProxyRequestLog]) -> String {
         let durations = statsStore.recentMessages(for: node).compactMap(\.durationMs)
         if !durations.isEmpty {

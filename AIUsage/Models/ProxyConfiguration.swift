@@ -383,7 +383,12 @@ struct ProxyStatistics: Codable, Equatable {
     var estimatedCostUSD: Double
     var requestsByModel: [String: Int]
     var lastRequestAt: Date?
+    /// 整段响应平均总耗时（ms），受输出长度影响。
     var averageResponseTime: Double
+    /// 平均首字时间 TTFT（ms），仅基于带 firstTokenMs 的流式请求。
+    var averageFirstTokenTime: Double
+    /// 参与 TTFT 平均的样本数（非流式 / 旧日志不计入）。
+    var firstTokenSamples: Int
 
     static var empty: ProxyStatistics {
         ProxyStatistics(
@@ -397,7 +402,9 @@ struct ProxyStatistics: Codable, Equatable {
             estimatedCostUSD: 0,
             requestsByModel: [:],
             lastRequestAt: nil,
-            averageResponseTime: 0
+            averageResponseTime: 0,
+            averageFirstTokenTime: 0,
+            firstTokenSamples: 0
         )
     }
 
@@ -433,6 +440,8 @@ struct ProxyStatistics: Codable, Equatable {
         case requestsByModel
         case lastRequestAt
         case averageResponseTime
+        case averageFirstTokenTime
+        case firstTokenSamples
     }
 
     init(
@@ -446,7 +455,9 @@ struct ProxyStatistics: Codable, Equatable {
         estimatedCostUSD: Double,
         requestsByModel: [String: Int],
         lastRequestAt: Date?,
-        averageResponseTime: Double
+        averageResponseTime: Double,
+        averageFirstTokenTime: Double = 0,
+        firstTokenSamples: Int = 0
     ) {
         self.totalRequests = totalRequests
         self.successfulRequests = successfulRequests
@@ -459,6 +470,8 @@ struct ProxyStatistics: Codable, Equatable {
         self.requestsByModel = requestsByModel
         self.lastRequestAt = lastRequestAt
         self.averageResponseTime = averageResponseTime
+        self.averageFirstTokenTime = averageFirstTokenTime
+        self.firstTokenSamples = firstTokenSamples
     }
 
     init(from decoder: Decoder) throws {
@@ -486,6 +499,8 @@ struct ProxyStatistics: Codable, Equatable {
         requestsByModel = try c.decode([String: Int].self, forKey: .requestsByModel)
         lastRequestAt = try c.decodeIfPresent(Date.self, forKey: .lastRequestAt)
         averageResponseTime = try c.decode(Double.self, forKey: .averageResponseTime)
+        averageFirstTokenTime = try c.decodeIfPresent(Double.self, forKey: .averageFirstTokenTime) ?? 0
+        firstTokenSamples = try c.decodeIfPresent(Int.self, forKey: .firstTokenSamples) ?? 0
     }
 
     func encode(to encoder: Encoder) throws {
@@ -502,6 +517,8 @@ struct ProxyStatistics: Codable, Equatable {
         try c.encode(requestsByModel, forKey: .requestsByModel)
         try c.encodeIfPresent(lastRequestAt, forKey: .lastRequestAt)
         try c.encode(averageResponseTime, forKey: .averageResponseTime)
+        try c.encode(averageFirstTokenTime, forKey: .averageFirstTokenTime)
+        try c.encode(firstTokenSamples, forKey: .firstTokenSamples)
     }
 }
 
@@ -516,7 +533,11 @@ struct ProxyRequestLog: Codable, Identifiable {
     let claudeModel: String
     let upstreamModel: String
     let success: Bool
+    /// 整段响应总耗时（请求开始到流式结束）。衡量「这次答了多长」，受输出长度影响。
     let responseTimeMs: Double
+    /// 首字时间 TTFT（请求开始到收到第一个上游响应分片）。衡量「响应快不快」。
+    /// 仅流式代理路径可采，非流式 / 旧日志为 nil。
+    let firstTokenMs: Double?
     let tokensInput: Int
     let tokensOutput: Int
     let tokensCacheRead: Int
@@ -540,6 +561,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         upstreamModel: String,
         success: Bool,
         responseTimeMs: Double,
+        firstTokenMs: Double? = nil,
         tokensInput: Int = 0,
         tokensOutput: Int = 0,
         tokensCacheRead: Int = 0,
@@ -559,6 +581,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         self.upstreamModel = upstreamModel
         self.success = success
         self.responseTimeMs = responseTimeMs
+        self.firstTokenMs = firstTokenMs
         self.tokensInput = tokensInput
         self.tokensOutput = tokensOutput
         self.tokensCacheRead = tokensCacheRead
@@ -580,6 +603,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         case upstreamModel
         case success
         case responseTimeMs
+        case firstTokenMs
         case tokensInput
         case tokensOutput
         case tokensCache              // legacy combined cache
@@ -603,6 +627,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         upstreamModel = try c.decode(String.self, forKey: .upstreamModel)
         success = try c.decode(Bool.self, forKey: .success)
         responseTimeMs = try c.decode(Double.self, forKey: .responseTimeMs)
+        firstTokenMs = try c.decodeIfPresent(Double.self, forKey: .firstTokenMs)
         tokensInput = try c.decode(Int.self, forKey: .tokensInput)
         tokensOutput = try c.decode(Int.self, forKey: .tokensOutput)
 
@@ -635,6 +660,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         try c.encode(upstreamModel, forKey: .upstreamModel)
         try c.encode(success, forKey: .success)
         try c.encode(responseTimeMs, forKey: .responseTimeMs)
+        try c.encodeIfPresent(firstTokenMs, forKey: .firstTokenMs)
         try c.encode(tokensInput, forKey: .tokensInput)
         try c.encode(tokensOutput, forKey: .tokensOutput)
         try c.encode(tokensCacheRead, forKey: .tokensCacheRead)

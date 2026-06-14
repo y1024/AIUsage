@@ -36,9 +36,11 @@ extension ProxyManagementView {
                     color: .red
                 )
                 statsCard(
-                    title: L("Avg Response", "平均响应"),
-                    value: String(format: "%.0fms", stats.averageResponseTime),
-                    icon: "timer",
+                    title: L("Avg TTFT", "平均首字"),
+                    value: stats.firstTokenSamples > 0
+                        ? String(format: "%.0fms", stats.averageFirstTokenTime)
+                        : "—",
+                    icon: "bolt.horizontal",
                     color: .orange
                 )
             }

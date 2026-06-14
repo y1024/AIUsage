@@ -72,7 +72,7 @@ extension MenuBarView {
                         Task { await proxyVM.deactivateConfiguration(activeId) }
                     }
                 } label: {
-                    Label(L("Stop proxy node", "停止代理节点"), systemImage: "stop.circle")
+                    Label(L("Deactivate node", "停用当前节点"), systemImage: "stop.circle")
                 }
                 .disabled(activeId == nil)
             }
@@ -90,8 +90,8 @@ extension MenuBarView {
     }
 
     // MARK: - OpenCode Track Switcher
-    // OpenCode 节点切换器：节点列表（勾选当前生效）+ 还原 opencode.json。
-    // 与 Claude/Codex 切换器同一套外观；激活/还原委托 OpenCodeNodeStore（代理模式
+    // OpenCode 节点切换器：节点列表（勾选当前生效）+ 停用当前节点（还原 opencode.json）。
+    // 与 Claude/Codex 切换器同一套外观；激活/停用委托 OpenCodeNodeStore（代理模式
     // 节点会顺带拉起/回收本地透传进程）。
 
     func openCodeTrackSwitcher() -> some View {
@@ -111,7 +111,7 @@ extension MenuBarView {
                 Button {
                     try? openCodeStore.deactivate()
                 } label: {
-                    Label(L("Restore opencode.json", "还原 opencode.json"), systemImage: "stop.circle")
+                    Label(L("Deactivate node", "停用当前节点"), systemImage: "stop.circle")
                 }
             }
         } label: {

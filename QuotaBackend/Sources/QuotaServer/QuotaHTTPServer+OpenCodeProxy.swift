@@ -166,6 +166,7 @@ extension QuotaHTTPServer {
 
         let requestModel = Self.peekChatModel(from: request.body)
         let streamStartTime = Date()
+        var firstTokenAt: Date?
         let streamer = StreamingResponse(connection: connection)
         await streamer.sendHeaders(status: 200, headers: [
             "Content-Type": "text/event-stream",
@@ -180,6 +181,8 @@ extension QuotaHTTPServer {
                 rawBody: request.body,
                 inboundHeaders: request.headers
             ) { data in
+                // 首个上游帧到达即为首字时间（TTFT）。
+                if firstTokenAt == nil { firstTokenAt = Date() }
                 // usage 仅出现在带 stream_options.include_usage 的末帧；
                 // 廉价子串判定避免对每个 delta 帧做 JSON 解析（"usage": null 会被解析步骤过滤）。
                 if data.contains("\"usage\""), let usage = OpenCodeProxyService.parseUsage(fromStreamFrame: data) {
@@ -189,12 +192,14 @@ extension QuotaHTTPServer {
             }
 
             let elapsed = Date().timeIntervalSince(streamStartTime) * 1000
+            let firstTokenMs = firstTokenAt.map { $0.timeIntervalSince(streamStartTime) * 1000 }
             let usage = await usageRef.get()
             emitRequestLog(
                 claudeModel: requestModel,
                 upstreamModel: requestModel,
                 success: true,
                 responseTimeMs: elapsed,
+                firstTokenMs: firstTokenMs,
                 inputTokens: usage?.inputTokens ?? 0,
                 outputTokens: usage?.outputTokens ?? 0,
                 cacheCreationTokens: 0,
@@ -211,11 +216,13 @@ extension QuotaHTTPServer {
             await streamer.sendSSEEvent(event: nil, data: "[DONE]")
 
             let elapsed = Date().timeIntervalSince(streamStartTime) * 1000
+            let firstTokenMs = firstTokenAt.map { $0.timeIntervalSince(streamStartTime) * 1000 }
             emitRequestLog(
                 claudeModel: requestModel,
                 upstreamModel: requestModel,
                 success: false,
                 responseTimeMs: elapsed,
+                firstTokenMs: firstTokenMs,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
                 statusCode: errorResult.statusCode

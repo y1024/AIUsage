@@ -41,6 +41,9 @@ extension ProxyViewModel {
 
     func restoreActivatedNode() {
         Task {
+            // 启动时先回收上次会话残留的孤儿 QuotaServer（崩溃/强退后被 launchd 收养、仍占着端口），
+            // 再恢复激活态，避免恢复/激活时因端口被自家孤儿占用而失败（旧版表现为 code 9）。
+            await ProxyProcessInspector.shared.reapOrphanedHelpers()
             await restoreActivatedNodeAsync()
             await restoreActivatedCodexNodeAsync()
             await restoreProxyOnlyNodes()
@@ -665,6 +668,7 @@ extension ProxyViewModel {
             upstreamModel: upstreamModel,
             success: json["success"] as? Bool ?? false,
             responseTimeMs: Double(json["response_time_ms"] as? Int ?? 0),
+            firstTokenMs: (json["first_token_ms"] as? Int).map(Double.init),
             tokensInput: tokensInput,
             tokensOutput: tokensOutput,
             tokensCacheRead: tokensCacheRead,

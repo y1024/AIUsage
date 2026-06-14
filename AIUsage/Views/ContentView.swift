@@ -124,6 +124,9 @@ struct ContentView: View {
                 case .costTracking:
                     StatsHubView()
                         .navigationTitle(L("Usage Stats", "用量统计"))
+                case .callAnalytics:
+                    CallAnalyticsView()
+                        .navigationTitle(L("Call Analytics", "调用分析"))
                 case .proxyManagement:
                     ProxyManagementView()
                         .navigationTitle(L("Claude Code Proxy", "Claude Code 代理"))

@@ -8,6 +8,7 @@ enum AppSection: String, Hashable {
     case dashboard
     case providers
     case costTracking
+    case callAnalytics
     case proxyManagement
     case codexProxyManagement
     case opencodeManagement

@@ -580,6 +580,7 @@ extension QuotaHTTPServer {
         httpLog.debug("→ POST /v1/messages (streaming, model: \(claudeRequest.model))")
 
         let streamStartTime = Date()
+        var firstTokenAt: Date?
         let streamer = StreamingResponse(connection: connection)
 
         // Send SSE headers
@@ -665,6 +666,8 @@ extension QuotaHTTPServer {
             }
 
             try await proxy.sendStreamingClaudeRequest(claudeRequest) { upstreamEvent in
+                // 首个上游分片到达即为首字时间（TTFT）。
+                if firstTokenAt == nil { firstTokenAt = Date() }
                 let canonicalEvents = canonicalMapper.map(upstreamEvent).map { event -> CanonicalStreamEvent in
                     guard case .messageStarted(let start) = event else { return event }
                     return .messageStarted(CanonicalStreamMessageStarted(
@@ -700,12 +703,14 @@ extension QuotaHTTPServer {
             }
 
             let elapsed = Date().timeIntervalSince(streamStartTime) * 1000
+            let firstTokenMs = firstTokenAt.map { $0.timeIntervalSince(streamStartTime) * 1000 }
             let finalOutputTokens = max(1, reportedOutputTokens ?? outputTokens)
             emitRequestLog(
                 claudeModel: claudeRequest.model,
                 upstreamModel: upstreamModel,
                 success: true,
                 responseTimeMs: elapsed,
+                firstTokenMs: firstTokenMs,
                 inputTokens: reportedInputTokens ?? 0,
                 outputTokens: finalOutputTokens,
                 cacheCreationTokens: reportedCacheCreation ?? 0,
@@ -721,12 +726,14 @@ extension QuotaHTTPServer {
             await streamer.sendSSEEvent(event: "error", data: errMsg)
 
             let elapsed = Date().timeIntervalSince(streamStartTime) * 1000
+            let firstTokenMs = firstTokenAt.map { $0.timeIntervalSince(streamStartTime) * 1000 }
             let errUpstreamModel = await proxy.mapModel(claudeRequest.model)
             emitRequestLog(
                 claudeModel: claudeRequest.model,
                 upstreamModel: errUpstreamModel,
                 success: false,
                 responseTimeMs: elapsed,
+                firstTokenMs: firstTokenMs,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
                 statusCode: errorResult.statusCode
@@ -741,6 +748,7 @@ extension QuotaHTTPServer {
         upstreamModel: String,
         success: Bool,
         responseTimeMs: Double,
+        firstTokenMs: Double? = nil,
         inputTokens: Int = 0,
         outputTokens: Int = 0,
         cacheCreationTokens: Int = 0,
@@ -761,6 +769,9 @@ extension QuotaHTTPServer {
             "\"cache_read_tokens\":\(cacheReadTokens)",
             "\"cache_tokens\":\(cacheCreationTokens + cacheReadTokens)"
         ]
+        if let firstTokenMs {
+            parts.append("\"first_token_ms\":\(Int(firstTokenMs))")
+        }
         if let err = errorMessage {
             parts.append("\"error\":\(escapeJSON(err))")
         }
