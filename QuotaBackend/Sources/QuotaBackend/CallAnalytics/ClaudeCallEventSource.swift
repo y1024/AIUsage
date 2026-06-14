@@ -14,7 +14,17 @@ struct ClaudeCallEventSource {
     /// Claude 单行可能含 thinking 长文，给足缓冲以保证 tool_use 行被完整解析。
     private static let maxLineBytes = 4 * 1024 * 1024
     private static let toolUseNeedle = Data("\"tool_use\"".utf8)
+    private static let toolResultNeedle = Data("\"tool_result\"".utf8)
     private static let webSearchTools: Set<String> = ["WebSearch", "WebFetch"]
+
+    /// 已解析待配对的 tool_use（等其 tool_result 确定成功/失败后再计入累加器）。
+    private struct PendingCall {
+        let kind: CallKind
+        let name: String
+        let server: String?
+        let agent: String   // "main" / "subagent"
+        let dayKey: String
+    }
 
     func resolveProjectRoots() -> [String] {
         if let env = environment["CLAUDE_CONFIG_DIR"]?.trimmingCharacters(in: .whitespacesAndNewlines), !env.isEmpty {
@@ -39,13 +49,26 @@ struct ClaudeCallEventSource {
         let files = collectJSONLFiles(roots: roots, cutoff: cutoff)
         var accumulator = CallEventAccumulator()
         for file in files {
+            // 路径含 subagents/ 的整文件视为 subagent；其具体类型取边车 agent-<id>.meta.json 的 agentType
+            // （如 Explore / Plan），拿不到则归为通用 "subagent"。常规文件再按行内 isSidechain 兜底。
+            let isSubagentFile = file.contains("/subagents/")
+            let subagentType = isSubagentFile ? readSubagentType(forFile: file) : nil
             let fallbackDayKey = clock.dayKey(fileModificationDate(file) ?? Date())
+            // 同文件内按 tool_use_id 配对 tool_result（成功率）。配对发生在文件内、顺序保证 result 在 use 之后。
+            var pending: [String: PendingCall] = [:]
             CallAnalyticsLineReader.forEachLine(
                 path: file,
-                needles: [Self.toolUseNeedle],
+                needles: [Self.toolUseNeedle, Self.toolResultNeedle],
                 maxLineBytes: Self.maxLineBytes
             ) { line in
-                parseLine(line, clock: clock, fallbackDayKey: fallbackDayKey, into: &accumulator)
+                parseLine(line, clock: clock, fallbackDayKey: fallbackDayKey,
+                          isSubagentFile: isSubagentFile, subagentType: subagentType,
+                          pending: &pending, into: &accumulator)
+            }
+            // 文件结束仍未配到 tool_result 的 tool_use：只计数，成功率未知（不计入分母）。
+            for call in pending.values {
+                accumulator.add(source: .claude, kind: call.kind, name: call.name,
+                                server: call.server, dayKey: call.dayKey, agent: call.agent, success: nil)
             }
         }
 
@@ -65,57 +88,100 @@ struct ClaudeCallEventSource {
         _ line: Data,
         clock: CallAnalyticsClock,
         fallbackDayKey: String,
+        isSubagentFile: Bool,
+        subagentType: String?,
+        pending: inout [String: PendingCall],
         into accumulator: inout CallEventAccumulator
     ) {
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-              (object["type"] as? String) == "assistant",
+              let type = object["type"] as? String,
               let message = object["message"] as? [String: Any],
               let content = message["content"] as? [[String: Any]] else {
             return
         }
 
-        let dayKey: String
-        if let ts = object["timestamp"] as? String, let date = clock.date(fromISO: ts) {
-            dayKey = clock.dayKey(date)
-        } else {
-            dayKey = fallbackDayKey
-        }
-
-        for item in content {
-            guard (item["type"] as? String) == "tool_use",
-                  let rawName = item["name"] as? String, !rawName.isEmpty else {
-                continue
+        switch type {
+        case "assistant":
+            let dayKey: String
+            if let ts = object["timestamp"] as? String, let date = clock.date(fromISO: ts) {
+                dayKey = clock.dayKey(date)
+            } else {
+                dayKey = fallbackDayKey
             }
-            classify(rawName: rawName, input: item["input"] as? [String: Any], dayKey: dayKey, into: &accumulator)
+            // agent：子代理文件用其具体类型（拿不到→"subagent"）；常规文件按行 isSidechain 兜底；否则 "main"。
+            let agent: String
+            if isSubagentFile {
+                agent = subagentType ?? "subagent"
+            } else if (object["isSidechain"] as? Bool) == true {
+                agent = "subagent"
+            } else {
+                agent = "main"
+            }
+            for item in content {
+                guard (item["type"] as? String) == "tool_use",
+                      let rawName = item["name"] as? String, !rawName.isEmpty else {
+                    continue
+                }
+                let call = makeCall(rawName: rawName, input: item["input"] as? [String: Any], agent: agent, dayKey: dayKey)
+                if let id = (item["id"] as? String), !id.isEmpty {
+                    pending[id] = call   // 等 tool_result 再计入（带成功/失败）
+                } else {
+                    // 无 id 无法配对：只计数，成功率未知。
+                    accumulator.add(source: .claude, kind: call.kind, name: call.name,
+                                    server: call.server, dayKey: call.dayKey, agent: call.agent, success: nil)
+                }
+            }
+
+        case "user":
+            // 用户行里的 tool_result 给出对应 tool_use 的成功/失败：is_error==true→失败，false/缺省→成功。
+            for item in content {
+                guard (item["type"] as? String) == "tool_result",
+                      let id = item["tool_use_id"] as? String,
+                      let call = pending.removeValue(forKey: id) else {
+                    continue
+                }
+                let isError = (item["is_error"] as? Bool) == true
+                accumulator.add(source: .claude, kind: call.kind, name: call.name,
+                                server: call.server, dayKey: call.dayKey, agent: call.agent, success: !isError)
+            }
+
+        default:
+            return
         }
     }
 
-    private func classify(
-        rawName: String,
-        input: [String: Any]?,
-        dayKey: String,
-        into accumulator: inout CallEventAccumulator
-    ) {
+    private func makeCall(rawName: String, input: [String: Any]?, agent: String, dayKey: String) -> PendingCall {
         if let mcp = CallAnalyticsNaming.parseClaudeMCP(rawName) {
-            accumulator.add(
-                source: .claude,
+            return PendingCall(
                 kind: .mcp,
                 name: CallAnalyticsNaming.mcpDisplayName(server: mcp.server, tool: mcp.tool),
                 server: mcp.server,
+                agent: agent,
                 dayKey: dayKey
             )
-            return
         }
 
         if rawName == "Skill" {
             let trimmed = (input?["skill"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let skillName = trimmed.isEmpty ? "(unknown)" : trimmed
-            accumulator.add(source: .claude, kind: .skill, name: skillName, server: nil, dayKey: dayKey)
-            return
+            return PendingCall(kind: .skill, name: skillName, server: nil, agent: agent, dayKey: dayKey)
         }
 
         let kind: CallKind = Self.webSearchTools.contains(rawName) ? .webSearch : .builtin
-        accumulator.add(source: .claude, kind: kind, name: rawName, server: nil, dayKey: dayKey)
+        return PendingCall(kind: kind, name: rawName, server: nil, agent: agent, dayKey: dayKey)
+    }
+
+    /// 读取子代理边车 `agent-<id>.meta.json` 的 `agentType`（如 Explore / Plan）。拿不到返回 nil。
+    private func readSubagentType(forFile file: String) -> String? {
+        guard file.hasSuffix(".jsonl") else { return nil }
+        let metaPath = String(file.dropLast(".jsonl".count)) + ".meta.json"
+        guard let data = FileManager.default.contents(atPath: metaPath),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = (object["agentType"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !type.isEmpty else {
+            return nil
+        }
+        return type
     }
 
     // MARK: - File discovery

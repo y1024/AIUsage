@@ -66,6 +66,12 @@ struct RankedRow: Identifiable {
     let name: String
     let count: Int
     let sources: Set<CallSourceKind>
+    /// 成功率（0...1）。无结果信号时为 nil（UI 留白，不显示 0%）。
+    var successRate: Double? = nil
+    /// 平均耗时（毫秒）。无计时数据时为 nil。
+    var avgDurationMs: Double? = nil
+    /// 该行是否为可下钻的 MCP server（其下还有具体 tool）。
+    var isDrillable: Bool = false
 }
 
 struct InventoryStatusRow: Identifiable {
@@ -73,6 +79,13 @@ struct InventoryStatusRow: Identifiable {
     let name: String
     let count: Int
     var used: Bool { count > 0 }
+}
+
+/// Claude 按 agent（main/subagent）分组的一行。
+struct AgentBreakdownRow: Identifiable {
+    let id: String          // "main" / "subagent"
+    let count: Int
+    let successRate: Double?
 }
 
 struct CallAnalyticsDerived {
@@ -132,18 +145,54 @@ struct CallAnalyticsDerived {
         }
     }
 
-    /// MCP 维度按 server 折叠（一个 server 的所有 tool 合并计数）。
+    /// 一组条目按指定键聚合的累加器（计数 + 成功率/耗时分量 + 来源集合）。
+    private struct RankAgg {
+        var count = 0
+        var outcomeKnown = 0
+        var success = 0
+        var durationSamples = 0
+        var durationMsTotal = 0.0
+        var sources: Set<CallSourceKind> = []
+
+        mutating func add(_ entry: CallAnalyticsEntry) {
+            count += entry.count
+            outcomeKnown += entry.outcomeKnownCount
+            success += entry.successCount
+            durationSamples += entry.durationSampleCount
+            durationMsTotal += entry.durationMsTotal
+            sources.insert(entry.source)
+        }
+
+        var successRate: Double? { outcomeKnown > 0 ? Double(success) / Double(outcomeKnown) : nil }
+        var avgDurationMs: Double? { durationSamples > 0 ? durationMsTotal / Double(durationSamples) : nil }
+    }
+
+    /// MCP 维度按 server 折叠（一个 server 的所有 tool 合并计数 + 指标），并标记可下钻。
     func rankedByServer() -> [RankedRow] {
         let mcp = entries.filter { $0.kind == .mcp }
-        var counts: [String: Int] = [:]
-        var sources: [String: Set<CallSourceKind>] = [:]
+        var aggs: [String: RankAgg] = [:]
         for entry in mcp {
-            let key = entry.server ?? entry.name
-            counts[key, default: 0] += entry.count
-            sources[key, default: []].insert(entry.source)
+            aggs[entry.server ?? entry.name, default: RankAgg()].add(entry)
         }
-        return counts.map { RankedRow(id: $0.key, name: $0.key, count: $0.value, sources: sources[$0.key] ?? []) }
-            .sorted(by: Self.rankOrder)
+        return aggs.map { key, agg in
+            RankedRow(id: key, name: key, count: agg.count, sources: agg.sources,
+                      successRate: agg.successRate, avgDurationMs: agg.avgDurationMs, isDrillable: true)
+        }
+        .sorted(by: Self.rankOrder)
+    }
+
+    /// 单个 MCP server 下的具体 tool 列表（下钻用），name 仅取 tool 段。
+    func mcpTools(forServer server: String) -> [RankedRow] {
+        let subset = entries.filter { $0.kind == .mcp && ($0.server ?? $0.name) == server }
+        var aggs: [String: RankAgg] = [:]
+        for entry in subset { aggs[entry.name, default: RankAgg()].add(entry) }
+        let prefix = server + "/"
+        return aggs.map { fullName, agg in
+            let tool = fullName.hasPrefix(prefix) ? String(fullName.dropFirst(prefix.count)) : fullName
+            return RankedRow(id: fullName, name: tool, count: agg.count, sources: agg.sources,
+                             successRate: agg.successRate, avgDurationMs: agg.avgDurationMs)
+        }
+        .sorted(by: Self.rankOrder)
     }
 
     /// MCP 维度展开到具体 tool（server/tool）。
@@ -152,14 +201,13 @@ struct CallAnalyticsDerived {
     }
 
     private func ranked(_ subset: [CallAnalyticsEntry]) -> [RankedRow] {
-        var counts: [String: Int] = [:]
-        var sources: [String: Set<CallSourceKind>] = [:]
-        for entry in subset {
-            counts[entry.name, default: 0] += entry.count
-            sources[entry.name, default: []].insert(entry.source)
+        var aggs: [String: RankAgg] = [:]
+        for entry in subset { aggs[entry.name, default: RankAgg()].add(entry) }
+        return aggs.map { key, agg in
+            RankedRow(id: key, name: key, count: agg.count, sources: agg.sources,
+                      successRate: agg.successRate, avgDurationMs: agg.avgDurationMs)
         }
-        return counts.map { RankedRow(id: $0.key, name: $0.key, count: $0.value, sources: sources[$0.key] ?? []) }
-            .sorted(by: Self.rankOrder)
+        .sorted(by: Self.rankOrder)
     }
 
     /// 排行排序：次数降序 → 名称升序。
@@ -167,6 +215,33 @@ struct CallAnalyticsDerived {
     private static func rankOrder(_ a: RankedRow, _ b: RankedRow) -> Bool {
         if a.count != b.count { return a.count > b.count }
         return a.name < b.name
+    }
+
+    // MARK: - Agent breakdown (Claude only)
+
+    /// 当前 scope 下是否有 Claude subagent 活动（决定是否显示 agent 分组卡）。
+    /// agent 取值：`"main"` = 主会话；其余（具体类型 Explore/Plan… 或兜底 "subagent"）= 子代理。
+    var hasSubagentActivity: Bool {
+        entries.contains { $0.source == .claude && $0.agent != nil && $0.agent != "main" && $0.count > 0 }
+    }
+
+    /// Claude 按 agent 分组：主会话 + 每个具体子代理类型（Explore/Plan/…）各一行。其它来源无 agent，返回空。
+    func agentBreakdown() -> [AgentBreakdownRow] {
+        let claude = entries.filter { $0.source == .claude && $0.agent != nil }
+        guard !claude.isEmpty else { return [] }
+        var aggs: [String: RankAgg] = [:]
+        for entry in claude { aggs[entry.agent ?? "main", default: RankAgg()].add(entry) }
+        return aggs.map { key, agg in
+            AgentBreakdownRow(id: key, count: agg.count, successRate: agg.successRate)
+        }
+        .sorted(by: Self.agentOrder)
+    }
+
+    /// 排序：主会话永远第一；其余子代理类型按次数降序 → 名称升序。
+    private static func agentOrder(_ a: AgentBreakdownRow, _ b: AgentBreakdownRow) -> Bool {
+        if a.id == "main" || b.id == "main" { return a.id == "main" && b.id != "main" }
+        if a.count != b.count { return a.count > b.count }
+        return a.id < b.id
     }
 
     // MARK: - Daily trend

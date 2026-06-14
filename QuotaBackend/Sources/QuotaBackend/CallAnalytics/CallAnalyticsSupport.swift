@@ -175,6 +175,51 @@ enum CallAnalyticsJSON {
         return nil
     }
 
+    /// 读取 `"key": <number>` 的整数值（不带引号，如 duration 的 secs/nanos）。失败返回 nil。
+    static func intValue(forKey key: String, in data: Data, range: Range<Data.Index>? = nil) -> Int64? {
+        let searchRange = range ?? data.startIndex..<data.endIndex
+        let needle = Data("\"\(key)\"".utf8)
+        guard let keyRange = data.range(of: needle, options: [], in: searchRange) else { return nil }
+        var index = keyRange.upperBound
+        skipWhitespace(in: data, index: &index, end: searchRange.upperBound)
+        guard index < searchRange.upperBound, data[index] == 0x3A else { return nil } // ':'
+        index += 1
+        skipWhitespace(in: data, index: &index, end: searchRange.upperBound)
+        var negative = false
+        if index < searchRange.upperBound, data[index] == 0x2D { negative = true; index += 1 } // '-'
+        var value: Int64 = 0
+        var hasDigit = false
+        while index < searchRange.upperBound, data[index] >= 0x30, data[index] <= 0x39 {
+            value = value * 10 + Int64(data[index] - 0x30)
+            hasDigit = true
+            index += 1
+        }
+        guard hasDigit else { return nil }
+        return negative ? -value : value
+    }
+
+    /// 返回对象（range 含首尾大括号）的第一个 key 名。用于判定 `result` 是 `Ok` 还是 `Err`，
+    /// 避免用整行子串搜索把嵌套正文里的 "Ok"/"Err" 误判。空对象/异常返回 nil。
+    static func firstKey(inObject range: Range<Data.Index>, in data: Data) -> String? {
+        var index = range.lowerBound
+        guard index < range.upperBound, data[index] == 0x7B else { return nil } // '{'
+        index += 1
+        skipWhitespace(in: data, index: &index, end: range.upperBound)
+        guard index < range.upperBound, data[index] == 0x22 else { return nil } // '"'
+        index += 1
+        var bytes: [UInt8] = []
+        var escaped = false
+        while index < range.upperBound {
+            let byte = data[index]
+            index += 1
+            if escaped { bytes.append(byte); escaped = false }
+            else if byte == 0x5C { escaped = true }
+            else if byte == 0x22 { return String(bytes: bytes, encoding: .utf8) }
+            else { bytes.append(byte) }
+        }
+        return nil
+    }
+
     /// 返回 `"key": { ... }` 对象（含大括号）的字节范围。
     static func objectRange(forKey key: String, in data: Data, from start: Data.Index? = nil) -> Range<Data.Index>? {
         let begin = start ?? data.startIndex
@@ -232,33 +277,67 @@ enum CallAnalyticsJSON {
 // MARK: - Aggregator
 
 /// 把单条调用累加为「日 × 来源 × 类别 × 名称(× server)」计数。
+/// Phase 2：可选 `success` / `durationMs` 按「有信号才计入分母」累加，缺失则只加 `count`。
 struct CallEventAccumulator {
     private struct Key: Hashable {
         let source: CallSourceKind
         let kind: CallKind
         let name: String
         let server: String?
+        let agent: String?
         let dayKey: String
     }
 
-    private var counts: [Key: Int] = [:]
+    private struct Agg {
+        var count = 0
+        var outcomeKnown = 0
+        var success = 0
+        var durationSamples = 0
+        var durationMsTotal = 0.0
+    }
+
+    private var counts: [Key: Agg] = [:]
     private(set) var eventCount = 0
 
-    mutating func add(source: CallSourceKind, kind: CallKind, name: String, server: String?, dayKey: String) {
-        let key = Key(source: source, kind: kind, name: name, server: server, dayKey: dayKey)
-        counts[key, default: 0] += 1
+    mutating func add(
+        source: CallSourceKind,
+        kind: CallKind,
+        name: String,
+        server: String?,
+        dayKey: String,
+        agent: String? = nil,
+        success: Bool? = nil,
+        durationMs: Double? = nil
+    ) {
+        let key = Key(source: source, kind: kind, name: name, server: server, agent: agent, dayKey: dayKey)
+        var agg = counts[key] ?? Agg()
+        agg.count += 1
+        if let success {
+            agg.outcomeKnown += 1
+            if success { agg.success += 1 }
+        }
+        if let durationMs, durationMs >= 0 {
+            agg.durationSamples += 1
+            agg.durationMsTotal += durationMs
+        }
+        counts[key] = agg
         eventCount += 1
     }
 
     func entries() -> [CallAnalyticsEntry] {
-        counts.map { key, value in
+        counts.map { key, agg in
             CallAnalyticsEntry(
                 source: key.source,
                 kind: key.kind,
                 name: key.name,
                 server: key.server,
+                agent: key.agent,
                 dayKey: key.dayKey,
-                count: value
+                count: agg.count,
+                outcomeKnownCount: agg.outcomeKnown,
+                successCount: agg.success,
+                durationSampleCount: agg.durationSamples,
+                durationMsTotal: agg.durationMsTotal
             )
         }
     }

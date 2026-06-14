@@ -87,18 +87,23 @@ struct OpenCodeCallEventSource {
         into accumulator: inout CallEventAccumulator
     ) {
         let lower = tool.lowercased()
+        // OpenCode 每条 tool part 自带 status 与 time，故成功率/耗时对所有类别（MCP/技能/工具）通用。
+        let success = Self.outcome(from: state)
+        let durationMs = Self.durationMs(from: state)
 
         if lower == "skill" {
             let input = state?["input"] as? [String: Any]
             let raw = (input?["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let skillName = raw.isEmpty ? "(unknown)" : raw
-            accumulator.add(source: .opencode, kind: .skill, name: skillName, server: nil, dayKey: dayKey)
+            accumulator.add(source: .opencode, kind: .skill, name: skillName, server: nil, dayKey: dayKey,
+                            success: success, durationMs: durationMs)
             return
         }
 
         if Self.builtinTools.contains(lower) {
             let kind: CallKind = lower == "webfetch" ? .webSearch : .builtin
-            accumulator.add(source: .opencode, kind: kind, name: tool, server: nil, dayKey: dayKey)
+            accumulator.add(source: .opencode, kind: kind, name: tool, server: nil, dayKey: dayKey,
+                            success: success, durationMs: durationMs)
             return
         }
 
@@ -109,7 +114,9 @@ struct OpenCodeCallEventSource {
                 kind: .mcp,
                 name: CallAnalyticsNaming.mcpDisplayName(server: match.server, tool: match.tool),
                 server: match.server,
-                dayKey: dayKey
+                dayKey: dayKey,
+                success: success,
+                durationMs: durationMs
             )
             return
         }
@@ -124,13 +131,35 @@ struct OpenCodeCallEventSource {
                     kind: .mcp,
                     name: CallAnalyticsNaming.mcpDisplayName(server: server, tool: toolName),
                     server: server,
-                    dayKey: dayKey
+                    dayKey: dayKey,
+                    success: success,
+                    durationMs: durationMs
                 )
                 return
             }
         }
 
-        accumulator.add(source: .opencode, kind: .other, name: tool, server: nil, dayKey: dayKey)
+        accumulator.add(source: .opencode, kind: .other, name: tool, server: nil, dayKey: dayKey,
+                        success: success, durationMs: durationMs)
+    }
+
+    /// 从 part.state 判定成功/失败：completed→成功，error→失败，其余（pending/running 等）→nil（不计入分母）。
+    private static func outcome(from state: [String: Any]?) -> Bool? {
+        guard let status = (state?["status"] as? String)?.lowercased() else { return nil }
+        switch status {
+        case "completed": return true
+        case "error": return false
+        default: return nil
+        }
+    }
+
+    /// 从 part.state.time.{start,end}（毫秒时间戳）算耗时；缺失或非法返回 nil。
+    private static func durationMs(from state: [String: Any]?) -> Double? {
+        guard let time = state?["time"] as? [String: Any],
+              let start = (time["start"] as? NSNumber)?.doubleValue,
+              let end = (time["end"] as? NSNumber)?.doubleValue,
+              end >= start else { return nil }
+        return end - start
     }
 
     /// 在已装 server 名里找能作为 `tool` 前缀的最长者（`<server>_<tool>`）。

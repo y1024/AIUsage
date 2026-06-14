@@ -34,6 +34,10 @@ public enum CallSourceKind: String, Codable, Sendable, CaseIterable {
 }
 
 /// 一条按「日 × 来源 × 类别 × 名称(× MCP server)」聚合后的调用计数。
+///
+/// Phase 2：在 `count` 之外追加「成功率 / 平均耗时」的可累加分量。两者**分母独立**——
+/// 只对真正提供该信号的样本计入（`outcomeKnownCount` / `durationSampleCount`），
+/// 缺信号的来源（如 Claude 无逐工具计时）不会被计入分母，避免把均值/成功率拉低或显示成 0。
 public struct CallAnalyticsEntry: Codable, Sendable, Hashable {
     public let source: CallSourceKind
     public let kind: CallKind
@@ -41,16 +45,54 @@ public struct CallAnalyticsEntry: Codable, Sendable, Hashable {
     public let name: String
     /// 仅 MCP 有值，便于「按 server 折叠」。
     public let server: String?
+    /// 执行该调用的 agent：Claude 为 `"main"` / `"subagent"`（按 isSidechain 或 subagents/ 路径判定）；
+    /// 其余来源无此概念为 nil。仅用于 Claude 的「按 agent 分组」，不影响既有排行（排行按名聚合时忽略）。
+    public let agent: String?
     public let dayKey: String        // yyyy-MM-dd（本地时区）
     public var count: Int
+    /// 有「成功/失败」结果信号的样本数（成功率分母）。无信号来源为 0。
+    public var outcomeKnownCount: Int
+    /// 其中判定为成功的样本数（成功率分子）。
+    public var successCount: Int
+    /// 有耗时数据的样本数（平均耗时分母）。无计时来源为 0。
+    public var durationSampleCount: Int
+    /// 耗时总和（毫秒，平均耗时分子）。
+    public var durationMsTotal: Double
 
-    public init(source: CallSourceKind, kind: CallKind, name: String, server: String?, dayKey: String, count: Int) {
+    public init(
+        source: CallSourceKind,
+        kind: CallKind,
+        name: String,
+        server: String?,
+        agent: String? = nil,
+        dayKey: String,
+        count: Int,
+        outcomeKnownCount: Int = 0,
+        successCount: Int = 0,
+        durationSampleCount: Int = 0,
+        durationMsTotal: Double = 0
+    ) {
         self.source = source
         self.kind = kind
         self.name = name
         self.server = server
+        self.agent = agent
         self.dayKey = dayKey
         self.count = count
+        self.outcomeKnownCount = outcomeKnownCount
+        self.successCount = successCount
+        self.durationSampleCount = durationSampleCount
+        self.durationMsTotal = durationMsTotal
+    }
+
+    /// 成功率（0...1）。无结果信号时为 nil（UI 应显式留白，而非显示 0%）。
+    public var successRate: Double? {
+        outcomeKnownCount > 0 ? Double(successCount) / Double(outcomeKnownCount) : nil
+    }
+
+    /// 平均耗时（毫秒）。无计时数据时为 nil。
+    public var avgDurationMs: Double? {
+        durationSampleCount > 0 ? durationMsTotal / Double(durationSampleCount) : nil
     }
 }
 
@@ -87,9 +129,10 @@ public struct CallSourceStatus: Codable, Sendable {
 
 /// 调用分析快照（可缓存落盘、可整份重建，无成本冻结需求）。
 public struct CallAnalyticsSnapshot: Codable, Sendable {
-    // v2：installedSkills / installedMCPServers 从 [String] 升级为带来源的 [InstalledItem]，
-    // 支持按应用做零调用检测。版本号变更会令旧缓存自动失效、整份重建。
-    public static let currentSchemaVersion = 2
+    // v2：installedSkills / installedMCPServers 从 [String] 升级为带来源的 [InstalledItem]，支持按应用做零调用检测。
+    // v3：CallAnalyticsEntry 追加成功率 / 平均耗时聚合分量（Phase 2 第一批）。
+    // v4：CallAnalyticsEntry 追加 agent 维度（Claude main/subagent，Phase 2 第二批）。版本号变更会令旧缓存自动失效、整份重建。
+    public static let currentSchemaVersion = 4
 
     public let schemaVersion: Int
     public let generatedAt: Date

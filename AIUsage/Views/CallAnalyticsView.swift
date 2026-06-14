@@ -12,6 +12,8 @@ struct CallAnalyticsView: View {
     @AppStorage("callAnalytics.windowDays") private var windowRaw = CallWindow.month.rawValue
     @AppStorage("callAnalytics.scope") private var scopeRaw = CallScope.all.rawValue
     @State var lens: CallLens = .mcp
+    /// MCP 排行里已展开（下钻查看 tool 列表）的 server。
+    @State var expandedServers: Set<String> = []
 
     var window: CallWindow { CallWindow(rawValue: windowRaw) ?? .month }
     var scope: CallScope { CallScope(rawValue: scopeRaw) ?? .all }
@@ -27,6 +29,9 @@ struct CallAnalyticsView: View {
                     kpiStrip
                     trendCard
                     rankingCard
+                    if derived.hasSubagentActivity {
+                        agentCard
+                    }
                     zeroCallCard
                 }
                 sourceFooter
@@ -133,6 +138,112 @@ struct CallAnalyticsView: View {
                     .frame(height: 64)
             }
         }
+    }
+
+    // MARK: - Agent breakdown (Claude main vs subagent)
+
+    private var agentCard: some View {
+        let rows = derived.agentBreakdown()
+        let total = max(rows.reduce(0) { $0 + $1.count }, 1)
+        return cardContainer(
+            title: L("By Agent (Claude)", "按 Agent 分组（Claude）", key: "calls.agent.title"),
+            subtitle: L("Main session vs each subagent type — only Claude exposes this", "主会话 vs 各子代理类型 · 仅 Claude 提供该维度", key: "calls.agent.sub")
+        ) {
+            VStack(spacing: 8) {
+                ForEach(rows) { agentRow($0, total: total) }
+            }
+        }
+    }
+
+    private func agentRow(_ row: AgentBreakdownRow, total: Int) -> some View {
+        // id: "main" = 主会话；"subagent" = 类型未知的子代理；其余 = 具体子代理类型名（Explore/Plan…）。
+        let isMain = row.id == "main"
+        let label: String
+        if isMain {
+            label = L("Main", "主会话", key: "calls.agent.label.main")
+        } else if row.id == "subagent" {
+            label = L("Subagents", "子代理", key: "calls.agent.label.sub")
+        } else {
+            label = row.id
+        }
+        let style = CallAnalyticsView.agentStyle(for: row.id)
+        let ratio = CGFloat(row.count) / CGFloat(total)
+        // 主会话齐左、加粗、条更高；子代理整体右移并带「↳」层级线索、字号与条高更小，凸显从属关系。
+        return HStack(spacing: 8) {
+            if !isMain {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 12)
+            }
+            Label {
+                Text(label).lineLimit(1).truncationMode(.tail)
+            } icon: {
+                Image(systemName: style.icon).foregroundStyle(style.color)
+            }
+            .font(isMain ? .callout.weight(.semibold) : .caption)
+            .labelStyle(.titleAndIcon)
+            .frame(width: isMain ? 130 : 110, alignment: .leading)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.12))
+                    Capsule().fill(style.color.opacity(isMain ? 0.9 : 0.6))
+                        .frame(width: max(4, proxy.size.width * ratio))
+                }
+            }
+            .frame(height: isMain ? 14 : 11)
+            if let rate = row.successRate {
+                Text(CallAnalyticsView.formatRate(rate))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .trailing)
+                    .help(L("Success rate", "成功率", key: "calls.metric.success.help"))
+            }
+            Text("\(row.count)")
+                .font((isMain ? Font.callout : Font.caption).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 48, alignment: .trailing)
+        }
+        .padding(.leading, isMain ? 0 : 14)
+    }
+
+    /// 按 agent id 给出稳定的图标 + 颜色：主会话/通用子代理固定，具体子代理类型按关键词选图标、按名称哈希取调色板色。
+    static func agentStyle(for id: String) -> (icon: String, color: Color) {
+        if id == "main" { return ("person.crop.circle.fill", .blue) }
+        if id == "subagent" { return ("person.2.fill", .gray) }
+
+        let lower = id.lowercased()
+        let icon: String
+        if lower.contains("explore") {
+            icon = "magnifyingglass"
+        } else if lower.contains("plan") {
+            icon = "list.bullet.rectangle"
+        } else if lower.contains("review") {
+            icon = "checkmark.seal"
+        } else if lower.contains("bug") || lower.contains("debug") {
+            icon = "ladybug"
+        } else if lower.contains("test") {
+            icon = "checkmark.diamond"
+        } else if lower.contains("doc") {
+            icon = "doc.text"
+        } else if lower.contains("ui") || lower.contains("sketch") || lower.contains("design") {
+            icon = "paintbrush.pointed"
+        } else if lower.contains("research") || lower.contains("search") {
+            icon = "magnifyingglass.circle"
+        } else if lower.contains("story") || lower.contains("write") {
+            icon = "square.and.pencil"
+        } else if lower.contains("shell") || lower.contains("command") || lower.contains("terminal") {
+            icon = "terminal"
+        } else if lower.contains("general") {
+            icon = "sparkles"
+        } else {
+            icon = "person.2"
+        }
+
+        let palette: [Color] = [.orange, .purple, .green, .pink, .teal, .indigo, .mint, .cyan]
+        var hash: UInt64 = 1469598103934665603 // FNV-1a 偏移基
+        for byte in id.utf8 { hash = (hash ^ UInt64(byte)) &* 1099511628211 }
+        return (icon, palette[Int(hash % UInt64(palette.count))])
     }
 
     // MARK: - Source footer

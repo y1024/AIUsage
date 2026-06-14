@@ -44,6 +44,7 @@ enum ProxyRuntimeError: LocalizedError {
     case configurationNotFound
     case quotaServerNotFound
     case proxyStartFailed(String)
+    case proxyPortInUse(Int)
     case activationStatePersistFailed
     case deactivationStatePersistFailed
 
@@ -58,6 +59,11 @@ enum ProxyRuntimeError: LocalizedError {
             )
         case .proxyStartFailed(let reason):
             return AppSettings.shared.t("Failed to start proxy: \(reason)", "启动代理失败：\(reason)")
+        case .proxyPortInUse(let port):
+            return AppSettings.shared.t(
+                "Port \(port) is already in use by another process. Quit the program occupying it (or restart AIUsage to clear leftover proxies), then try again.",
+                "端口 \(port) 已被其它进程占用。请关闭占用该端口的程序（或重启 AIUsage 清理残留代理）后重试。"
+            )
         case .activationStatePersistFailed:
             return AppSettings.shared.t("The node started, but AIUsage could not persist the activated state.", "节点已启动，但 AIUsage 无法保存激活状态。")
         case .deactivationStatePersistFailed:

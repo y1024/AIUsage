@@ -1,33 +1,148 @@
 import Foundation
 import QuotaBackend
 import os.log
+import Darwin
 
-/// 端口残留进程清理：lsof + SIGTERM。放在独立 actor 上执行，避免在主线程同步阻塞
+/// 端口残留进程清理 + 孤儿 helper 回收。放在独立 actor 上执行，避免在主线程同步阻塞
 /// （Claude/Codex/OpenCode 三轨共用，统一并发语义）。
+///
+/// 设计要点：
+/// - 只清理「本 App 的 QuotaServer helper」（按可执行名识别），绝不误杀占用同端口的外部进程。
+/// - SIGTERM → 复核端口 → 仍占用则升级 SIGKILL → 再复核，避免「发了信号但端口没真正释放」。
+/// - 端口被外部进程占用时不杀，交由上层给出清晰报错，而不是让新进程绑定失败后以 code 9 退出。
 actor ProxyProcessInspector {
     static let shared = ProxyProcessInspector()
 
+    /// 本 App helper 的可执行名（见 QuotaServerLocator：bundle Helpers/QuotaServer 或 .build/*/QuotaServer）。
+    private static let helperExecutableName = "QuotaServer"
+
+    /// proc_pidpath 路径缓冲区大小。等价于 sys/proc_info.h 的 PROC_PIDPATHINFO_MAXSIZE (4*MAXPATHLEN)，
+    /// 但该宏引用 MAXPATHLEN 无法被 Swift 导入，这里直接用其常量值。
+    private static let pidPathMaxSize = 4 * 1024
+
+    private let log = Logger(subsystem: "com.aiusage.desktop", category: "ProxyRuntime")
+
+    // MARK: - 端口回收（激活/启动前）
+
+    /// 尽力释放端口：仅针对本 App 的 QuotaServer helper，SIGTERM→复核→SIGKILL→复核。
+    /// 不动占用端口的外部进程（交由 `isPortOccupied` + 上层报错处理）。
+    /// 保留原方法名与 `throws` 签名，OpenCode 轨道无需改动。
     func killStaleProcesses(port: Int, currentProcessIdentifier: Int32) throws {
-        let processLog = Logger(
-            subsystem: "com.aiusage.desktop",
-            category: "ProxyRuntime"
-        )
+        let ownHelpers = pids(onPort: port)
+            .filter { $0 != currentProcessIdentifier && isOwnHelper(pid: $0) }
+        guard !ownHelpers.isEmpty else { return }
+
+        for pid in ownHelpers {
+            log.info("Killing stale proxy helper on port \(port, privacy: .public): pid=\(pid, privacy: .public)")
+            kill(pid, SIGTERM)
+        }
+        if waitUntilPortFree(port, excluding: currentProcessIdentifier) { return }
+
+        // SIGTERM 后端口仍被本 App helper 占用 → 升级 SIGKILL，避免孤儿进程拖死激活。
+        let survivors = pids(onPort: port)
+            .filter { $0 != currentProcessIdentifier && isOwnHelper(pid: $0) }
+        for pid in survivors {
+            log.notice("Force-killing unresponsive proxy helper on port \(port, privacy: .public): pid=\(pid, privacy: .public)")
+            kill(pid, SIGKILL)
+        }
+        _ = waitUntilPortFree(port, excluding: currentProcessIdentifier)
+    }
+
+    /// 端口是否仍被占用。用本地连接探测（不依赖 lsof 能否正常 spawn），作为启动前的最终判定。
+    /// 连接到 127.0.0.1:port 成功即表示有进程在监听。
+    func isPortOccupied(_ port: Int) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(UInt16(truncatingIfNeeded: port).bigEndian)
+        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+
+        let connected = withUnsafePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockAddr in
+                connect(fd, sockAddr, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return connected == 0
+    }
+
+    // MARK: - 孤儿回收（App 启动时）
+
+    /// 回收本 App 上次会话残留的孤儿 QuotaServer helper（已被 launchd 收养，PPID==1）。
+    /// 只杀孤儿，保留仍属其它在跑 AIUsage 实例（PPID 指向活进程）的 helper，兼容多实例。
+    func reapOrphanedHelpers() {
+        for pid in ownHelperPids() where parentPid(of: pid) == 1 {
+            log.info("Reaping orphaned proxy helper pid=\(pid, privacy: .public)")
+            kill(pid, SIGTERM)
+        }
+    }
+
+    // MARK: - Internals
+
+    /// 轮询复核端口是否已空闲（最多 ~1.5s）。
+    private func waitUntilPortFree(_ port: Int, excluding currentPid: Int32, attempts: Int = 15) -> Bool {
+        for _ in 0..<attempts {
+            usleep(100_000) // 100ms
+            if pids(onPort: port).allSatisfy({ $0 == currentPid }) { return true }
+        }
+        return false
+    }
+
+    /// 通过 lsof 取占用指定端口的 pid 列表。spawn 失败时返回空（上层再用连接探测兜底）。
+    private func pids(onPort port: Int) -> [Int32] {
         let lsof = Process()
         lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
         lsof.arguments = ["-ti", "tcp:\(port)"]
         let pipe = Pipe()
         lsof.standardOutput = pipe
         lsof.standardError = FileHandle.nullDevice
-        try lsof.run()
-        lsof.waitUntilExit()
-
-        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        for pidStr in output.components(separatedBy: .whitespacesAndNewlines) where !pidStr.isEmpty {
-            guard let pid = Int32(pidStr), pid != currentProcessIdentifier else { continue }
-            processLog.info("Killing stale proxy process on port \(port, privacy: .public): pid=\(pid, privacy: .public)")
-            kill(pid, SIGTERM)
-            usleep(200_000)
+        do {
+            try lsof.run()
+        } catch {
+            log.error("lsof spawn failed while inspecting port \(port, privacy: .public): \(String(describing: error), privacy: .public)")
+            return []
         }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        lsof.waitUntilExit()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        return output.components(separatedBy: .whitespacesAndNewlines).compactMap { Int32($0) }
+    }
+
+    /// pid 的可执行文件是否为本 App 的 QuotaServer helper。
+    private func isOwnHelper(pid: Int32) -> Bool {
+        var buffer = [CChar](repeating: 0, count: Self.pidPathMaxSize)
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return false }
+        let path = String(cString: buffer)
+        return (path as NSString).lastPathComponent == Self.helperExecutableName
+    }
+
+    /// 枚举所有进程，筛出本 App 的 QuotaServer helper。
+    private func ownHelperPids() -> [Int32] {
+        let capacity = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
+        guard capacity > 0 else { return [] }
+        let slotCount = Int(capacity) / MemoryLayout<pid_t>.stride
+        var pids = [pid_t](repeating: 0, count: slotCount)
+        let written = proc_listpids(
+            UInt32(PROC_ALL_PIDS),
+            0,
+            &pids,
+            Int32(slotCount * MemoryLayout<pid_t>.stride)
+        )
+        guard written > 0 else { return [] }
+        let actual = Int(written) / MemoryLayout<pid_t>.stride
+        return pids.prefix(actual).filter { $0 > 0 && isOwnHelper(pid: $0) }
+    }
+
+    /// pid 的父进程号（libproc，避免再 spawn 外部命令）。失败返回 -1。
+    private func parentPid(of pid: Int32) -> Int32 {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.stride)
+        let result = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size)
+        guard result > 0 else { return -1 }
+        return Int32(bitPattern: info.pbi_ppid)
     }
 }
 
@@ -302,6 +417,13 @@ final class ProxyRuntimeService {
             )
         } catch {
             proxyRuntimeLog.error("Failed to inspect stale proxy process on port \(config.port, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+
+        // 清理后端口仍被占用（多为外部进程或无法回收的残留）→ 提前给出清晰报错，
+        // 而不是放任新 helper 绑定失败后以 code 9 退出、对用户只显示无意义的退出码。
+        if await ProxyProcessInspector.shared.isPortOccupied(config.port) {
+            runtimeLog.error("Port \(config.port, privacy: .public) still in use after cleanup for node \(config.name, privacy: .public)")
+            throw ProxyRuntimeError.proxyPortInUse(config.port)
         }
 
         var environment = ProcessInfo.processInfo.environment

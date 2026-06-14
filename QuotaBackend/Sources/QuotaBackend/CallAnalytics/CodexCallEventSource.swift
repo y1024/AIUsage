@@ -93,7 +93,9 @@ struct CodexCallEventSource {
                 kind: .mcp,
                 name: CallAnalyticsNaming.mcpDisplayName(server: server, tool: tool),
                 server: server,
-                dayKey: dayKey
+                dayKey: dayKey,
+                success: Self.mcpSuccess(in: line),
+                durationMs: Self.mcpDurationMs(in: line)
             )
             return
         }
@@ -109,6 +111,27 @@ struct CodexCallEventSource {
                 accumulator.add(source: .codex, kind: .skill, name: skill, server: nil, dayKey: dayKey)
             }
         }
+    }
+
+    /// 判定 MCP 调用成功/失败：result 对象首 key 为 `Ok`→成功、`Err`→失败，缺失/截断→nil。
+    /// 用「对象首 key」而非整行子串，避免正文里的 "Ok"/"Err" 误判（大行可能被 256KB 截断 → nil，优雅降级）。
+    private static func mcpSuccess(in line: Data) -> Bool? {
+        guard let resultRange = CallAnalyticsJSON.objectRange(forKey: "result", in: line),
+              let key = CallAnalyticsJSON.firstKey(inObject: resultRange, in: line) else { return nil }
+        switch key {
+        case "Ok": return true
+        case "Err": return false
+        default: return nil
+        }
+    }
+
+    /// 从 `"duration":{"secs":S,"nanos":N}` 算耗时（毫秒）。缺失/截断返回 nil。
+    private static func mcpDurationMs(in line: Data) -> Double? {
+        guard let durationRange = CallAnalyticsJSON.objectRange(forKey: "duration", in: line) else { return nil }
+        let secs = CallAnalyticsJSON.intValue(forKey: "secs", in: line, range: durationRange) ?? 0
+        let nanos = CallAnalyticsJSON.intValue(forKey: "nanos", in: line, range: durationRange) ?? 0
+        if secs == 0 && nanos == 0 { return nil }
+        return Double(secs) * 1000 + Double(nanos) / 1_000_000
     }
 
     /// 从 function_call 行内提取被读取的技能名（skills/<name>/SKILL.md 的父目录名）。
