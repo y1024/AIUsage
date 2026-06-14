@@ -46,31 +46,68 @@ struct CallAnalyticsView: View {
     }
 
     // MARK: - Control deck
+    // 统一控制台：左「来源」、中「时间范围」（紧凑等宽分段控件，与「用量统计」同款），右「重新扫描」。
+    // 窄宽时 ViewThatFits 自动从「单行」回退为「两行」，永不横向溢出。
 
+    // 固定两行（对齐「用量统计」的稳定布局）：第一行「来源」+「重新扫描」，第二行「时间范围」。
+    // 不做单行/两行自适应切换——避免拉伸时布局来回跳变。两簇标签等宽，分段控件左缘对齐。
     private var controlDeck: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { scopeControl; windowControl; Spacer(); refreshControl }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) { scopeControl; windowControl; Spacer() }
-                HStack(spacing: 12) { Spacer(); refreshControl }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                sourceCluster
+                Spacer(minLength: 8)
+                refreshControl
             }
+            windowCluster
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private func controlCluster<Content: View>(
+        _ title: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 9) {
+            Label(title, systemImage: systemImage)
+                .font(.caption2.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.secondary)
+                .frame(width: 66, alignment: .leading)
+            content()
         }
     }
 
-    private var scopeControl: some View {
-        Picker(L("Source", "来源", key: "calls.source"), selection: $scopeRaw) {
-            ForEach(CallScope.allCases) { Text($0.title).tag($0.rawValue) }
+    private var sourceCluster: some View {
+        controlCluster(L("Source", "来源", key: "calls.source"), systemImage: "square.stack.3d.up") {
+            StatsSegmentedControl(
+                CallScope.allCases,
+                selection: scopeBinding,
+                segmentWidth: 84,
+                tint: .indigo
+            ) { $0.title }
         }
-        .pickerStyle(.menu)
-        .fixedSize()
     }
 
-    private var windowControl: some View {
-        Picker(L("Range", "时间范围", key: "calls.range"), selection: $windowRaw) {
-            ForEach(CallWindow.allCases) { Text($0.title).tag($0.rawValue) }
+    private var windowCluster: some View {
+        controlCluster(L("Range", "时间范围", key: "calls.range"), systemImage: "calendar") {
+            StatsSegmentedControl(
+                CallWindow.allCases,
+                selection: windowBinding,
+                segmentWidth: 48,
+                tint: .blue
+            ) { $0.title }
         }
-        .pickerStyle(.menu)
-        .fixedSize()
     }
 
     private var refreshControl: some View {
@@ -83,8 +120,24 @@ struct CallAnalyticsView: View {
             } label: {
                 Label(L("Rescan", "重新扫描", key: "calls.rescan"), systemImage: "arrow.clockwise")
             }
+            .controlSize(.small)
             .disabled(store.isRefreshing)
         }
+    }
+
+    /// @AppStorage 存的是 rawValue，这里桥接成枚举 Binding 供分段控件使用。
+    private var scopeBinding: Binding<CallScope> {
+        Binding(
+            get: { CallScope(rawValue: scopeRaw) ?? .all },
+            set: { scopeRaw = $0.rawValue }
+        )
+    }
+
+    private var windowBinding: Binding<CallWindow> {
+        Binding(
+            get: { CallWindow(rawValue: windowRaw) ?? .month },
+            set: { windowRaw = $0.rawValue }
+        )
     }
 
     // MARK: - KPI

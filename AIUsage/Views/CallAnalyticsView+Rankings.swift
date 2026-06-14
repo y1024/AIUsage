@@ -13,11 +13,12 @@ extension CallAnalyticsView {
         // 当前维度若至少一行有成功率/耗时，才显示指标列（技能/工具维度通常无 → 不占位）。
         let showMetrics = rows.contains { $0.successRate != nil || $0.avgDurationMs != nil }
         return cardContainer(title: rankingTitle, subtitle: rankingSubtitle) {
-            Picker("", selection: $lens) {
-                ForEach(CallLens.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            StatsSegmentedControl(
+                CallLens.allCases,
+                selection: $lens,
+                segmentWidth: 60,
+                tint: .purple
+            ) { $0.title }
             .onChange(of: lens) { _, _ in expandedServers.removeAll() }
 
             if rows.isEmpty {
@@ -31,7 +32,7 @@ extension CallAnalyticsView {
                     ForEach(rows) { row in
                         rankingRow(row, maxCount: maxCount, showMetrics: showMetrics, isChild: false)
                         if lens == .mcp, row.isDrillable, expandedServers.contains(row.id) {
-                            drillDown(server: row.id, showMetrics: showMetrics)
+                            drillDown(server: row.id, maxCount: maxCount, showMetrics: showMetrics)
                         }
                     }
                 }
@@ -73,17 +74,20 @@ extension CallAnalyticsView {
     }
 
     /// 某个 server 下钻：展开其具体 tool 行（缩进、字号更小）。
+    /// 子项进度条沿用母级（全局）maxCount，而非子项内部最大值——这样每个 tool 的条长
+    /// 与同 count 的顶层行一致，且必然 ≤ 母级 server 条（母级 = 各 tool 之和），不会出现“子比母长”。
     @ViewBuilder
-    private func drillDown(server: String, showMetrics: Bool) -> some View {
+    private func drillDown(server: String, maxCount: Int, showMetrics: Bool) -> some View {
         let tools = derived.mcpTools(forServer: server)
-        let toolMax = max(tools.map(\.count).max() ?? 1, 1)
         if tools.isEmpty {
             EmptyView()
         } else {
+            // 缩进 34 = 母级「chevron(12)+间距(10)+名列(200)」与子级「名列(188)+间距(10)」对齐，
+            // 使子条与母条同一左缘起点；子名相对母名再缩进一个 chevron 宽度，体现层级。
             VStack(spacing: 6) {
-                ForEach(tools) { rankingRow($0, maxCount: toolMax, showMetrics: showMetrics, isChild: true) }
+                ForEach(tools) { rankingRow($0, maxCount: maxCount, showMetrics: showMetrics, isChild: true) }
             }
-            .padding(.leading, 22)
+            .padding(.leading, 34)
             .padding(.vertical, 2)
         }
     }

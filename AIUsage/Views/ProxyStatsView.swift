@@ -375,7 +375,9 @@ struct ProxyStatsView: View {
     }
 }
 
-private struct StatsSegmentedControl<Option: Hashable>: View {
+/// 紧凑等宽分段控件，App 内统一的「分段切换」外观（用量统计 / 调用分析共用）。
+/// 比原生 segmented picker 更可控：固定每段宽度，避免在多选项时被压缩变形。
+struct StatsSegmentedControl<Option: Hashable>: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let options: [Option]
