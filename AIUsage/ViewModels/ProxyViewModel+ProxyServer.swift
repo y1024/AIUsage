@@ -665,6 +665,7 @@ extension ProxyViewModel {
             upstreamModel: upstreamModel,
             success: json["success"] as? Bool ?? false,
             responseTimeMs: Double(json["response_time_ms"] as? Int ?? 0),
+            firstTokenMs: (json["first_token_ms"] as? Int).map(Double.init),
             tokensInput: tokensInput,
             tokensOutput: tokensOutput,
             tokensCacheRead: tokensCacheRead,

@@ -199,6 +199,7 @@ extension QuotaHTTPServer {
     ) async {
         let requestModel = Self.peekModel(from: request.body)
         let streamStartTime = Date()
+        var firstTokenAt: Date?
         let streamer = StreamingResponse(connection: connection)
         await streamer.sendHeaders(status: 200, headers: [
             "Content-Type": "text/event-stream",
@@ -213,6 +214,8 @@ extension QuotaHTTPServer {
                 rawBody: request.body,
                 inboundHeaders: request.headers
             ) { event, data in
+                // 首个上游帧到达即为首字时间（TTFT）。
+                if firstTokenAt == nil { firstTokenAt = Date() }
                 // usage 仅出现在 response.completed 帧；用廉价子串判定避免对每个 delta 帧做 JSON 解析。
                 if data.contains("\"usage\""), let usage = CodexProxyService.parseUsage(fromStreamFrame: data) {
                     await usageRef.set(usage)
@@ -221,6 +224,7 @@ extension QuotaHTTPServer {
             }
 
             let elapsed = Date().timeIntervalSince(streamStartTime) * 1000
+            let firstTokenMs = firstTokenAt.map { $0.timeIntervalSince(streamStartTime) * 1000 }
             let upstreamModel = await proxy.mapModel(requestModel)
             let usage = await usageRef.get()
             emitRequestLog(
@@ -228,6 +232,7 @@ extension QuotaHTTPServer {
                 upstreamModel: upstreamModel,
                 success: true,
                 responseTimeMs: elapsed,
+                firstTokenMs: firstTokenMs,
                 inputTokens: usage?.inputTokens ?? 0,
                 outputTokens: usage?.outputTokens ?? 0,
                 cacheCreationTokens: 0,
@@ -242,12 +247,14 @@ extension QuotaHTTPServer {
             await streamer.sendSSEEvent(event: "response.failed", data: errMsg)
 
             let elapsed = Date().timeIntervalSince(streamStartTime) * 1000
+            let firstTokenMs = firstTokenAt.map { $0.timeIntervalSince(streamStartTime) * 1000 }
             let upstreamModel = await proxy.mapModel(requestModel)
             emitRequestLog(
                 claudeModel: requestModel,
                 upstreamModel: upstreamModel,
                 success: false,
                 responseTimeMs: elapsed,
+                firstTokenMs: firstTokenMs,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
                 statusCode: errorResult.statusCode

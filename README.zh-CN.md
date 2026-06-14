@@ -44,6 +44,7 @@
 - [界面预览](#界面预览)
 - [安装](#安装)
 - [代理](#代理)
+- [调用分析](#调用分析)
 - [致谢](#致谢)
 - [赞助商](#赞助商)
 - [支持作者](#支持作者)
@@ -59,6 +60,7 @@
 | **Claude Code 代理** | 用 Claude Code 跑 DeepSeek、GPT、Ollama 等任意 OpenAI 兼容模型；Anthropic 透传模式记录用量 |
 | **Codex 代理** | 把 Codex CLI 指向任意 OpenAI 兼容上游；订阅账号与 API 节点统一切换器，外科式合并 `config.toml` |
 | **OpenCode 代理** | 通过受管 `opencode.json` 块切换 OpenCode 上游——支持 OpenAI 兼容、Anthropic、Responses 三种协议，节点级用量归因、每模型定价、可选请求日志 |
+| **调用分析** | 解析 Claude Code、Codex、OpenCode 的本地会话日志，统计 MCP / 技能 / 工具调用次数 —— Top-N 排行、每日趋势、按应用的零调用（「僵尸技能/MCP」）检测；只读、零埋点 |
 | **菜单栏快览** | 多账号状态栏图标 + 配额/费用指标、各代理节点切换器，快览弹窗含摘要统计、彩色进度条、费用追踪 |
 | **凭证保险库** | macOS Keychain 安全存储 |
 
@@ -96,6 +98,12 @@
   <tr>
     <td align="center"><strong>用量统计（Claude、Codex 与 OpenCode）</strong></td>
     <td align="center"><strong>菜单栏</strong></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/images/Call_analytics.png" alt="调用分析"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><strong>调用分析 · MCP / 技能 / 工具用量</strong></td>
   </tr>
 </table>
 
@@ -146,6 +154,21 @@ AIUsage 内置三套相互独立的代理 —— 分别面向 **Claude Code**、
 **快速开始：** 打开 AIUsage → OpenCode 代理 → 新建节点 → 配置模型与定价 → 激活。`~/.config/opencode/opencode.json` 自动接管（用量统计需 OpenCode ≥ 1.2）。
 
 Claude Code 与 Codex 的用量、计费、缓存和归档细节见 [docs/USAGE_AND_BILLING.md](docs/USAGE_AND_BILLING.md)。OpenCode 的费用直接读取其本地会话账本（`opencode.db`），按 [models.dev](https://models.dev) 预先定价。
+
+---
+
+## 调用分析
+
+看清你**真正在用哪些 MCP、技能和工具**。AIUsage 解析 Claude Code、Codex、OpenCode 的本地会话日志（只读、零埋点），把工具调用变成可用的洞察：识别高频依赖的 MCP，清理那些装了却从未调用的「僵尸技能」。
+
+| 能力 | 说明 |
+|------|------|
+| **Top-N 排行** | MCP（按 server 折叠）、技能、内置工具按调用次数排行，同分稳定排序 |
+| **每日趋势** | 按所选 7 / 30 / 90 天或全部历史窗口统计每日调用量 |
+| **零调用检测** | 标出装了但从未调用的技能、配了却没用的 MCP —— 按应用归属，各工具自己的可清理候选一目了然 |
+| **按来源筛选** | 可按 Claude Code / Codex / OpenCode 或全部查看；技能与 MCP 按各工具自己的技能目录与配置文件归属 |
+
+> Codex 技能调用为启发式估算 —— Codex 没有离散的技能调用事件，靠读取 `SKILL.md` 推断。不统计「规则命中」：规则是上下文注入，并非离散调用。
 
 ---
 

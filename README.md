@@ -44,6 +44,7 @@
 - [Preview](#preview)
 - [Install](#install)
 - [Proxies](#proxies)
+- [Call Analytics](#call-analytics)
 - [Acknowledgements](#acknowledgements)
 - [Sponsor](#sponsor)
 - [Support the Author](#support-the-author)
@@ -59,6 +60,7 @@
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
 | **Codex Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
 | **OpenCode Proxy** | Switch OpenCode across upstreams via a managed `opencode.json` block — OpenAI-compatible, Anthropic and Responses protocols, per-node usage attribution, per-model pricing and optional request logging |
+| **Call Analytics** | Count MCP / Skill / tool calls across Claude Code, Codex & OpenCode from local session logs — Top-N rankings, daily trend, and per-app zero-call ("zombie" skill/MCP) detection; read-only, zero instrumentation |
 | **Menu Bar** | Multi-account status bar icons, quota/cost metrics, per-proxy node switchers, quick-glance popover, colored progress bars |
 | **Credential Vault** | macOS Keychain storage for all managed credentials |
 
@@ -96,6 +98,12 @@
   <tr>
     <td align="center"><strong>Usage Stats (Claude, Codex &amp; OpenCode)</strong></td>
     <td align="center"><strong>Menu Bar</strong></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/images/Call_analytics_en.png" alt="Call Analytics"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><strong>Call Analytics · MCP / Skill / Tool Usage</strong></td>
   </tr>
 </table>
 
@@ -146,6 +154,21 @@ Switch OpenCode between any number of upstreams without hand-editing `opencode.j
 **Quick start:** Open AIUsage → OpenCode Proxy → New Node → Configure models & pricing → Activate. `~/.config/opencode/opencode.json` is taken over automatically (requires OpenCode ≥ 1.2 for usage tracking).
 
 Usage and billing details for Claude Code and Codex are documented in [docs/USAGE_AND_BILLING.md](docs/USAGE_AND_BILLING.md). OpenCode cost is read directly from its local session ledger (`opencode.db`), pre-priced per [models.dev](https://models.dev).
+
+---
+
+## Call Analytics
+
+See which **MCP servers, skills and tools** you actually use. AIUsage parses the local session logs of Claude Code, Codex and OpenCode — read-only, with zero instrumentation — and turns tool calls into usage insights: spot the MCP servers you rely on, and clean up "zombie" skills that were installed but never called.
+
+| Capability | What it does |
+|------------|-------------|
+| **Top-N rankings** | MCP servers (folded by server), skills and built-in tools ranked by call count, with stable tie-breaking |
+| **Daily trend** | Per-day call volume over the selected 7 / 30 / 90-day or all-time window |
+| **Zero-call detection** | Flags installed-but-never-called skills and configured-but-unused MCP servers — scoped per app, so each tool's own cleanup candidates are actionable |
+| **Per-source scope** | Filter by Claude Code / Codex / OpenCode or view all; skills and MCP are attributed to each tool by its own skill directories and config files |
+
+> Codex skill calls are heuristic — Codex has no discrete skill-invocation event, so they are inferred from `SKILL.md` reads. Rule-hit counts are not tracked: rules are injected as context, not discrete calls.
 
 ---
 

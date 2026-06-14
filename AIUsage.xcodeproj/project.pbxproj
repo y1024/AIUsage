@@ -17,14 +17,7 @@
 		5EF87F012F8D0E9E002FE291 /* ProxyConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */; };
 		5EF87F042F8D0ED3002FE291 /* ProxyViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */; };
 		5EF87F072F8D0EED002FE291 /* ProxyConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */; };
-		C1AA000100000000000000B1 /* JSONWebEditorAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */; };
-		C1AA000200000000000000B2 /* ProxyConfigEditorView+JSONTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */; };
-		C1AA000300000000000000B3 /* ProxyModelLibraryEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000300000000000000A3 /* ProxyModelLibraryEditor.swift */; };
 		5EF87F082F8D0EED002FE291 /* ProxyManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF87F062F8D0EED002FE291 /* ProxyManagementView.swift */; };
-		C1PM00022FB0000300B26789 /* ProxyManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */; };
-		C1PM00042FB0000300B26789 /* ProxyManagementView+List.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00032FB0000300B26789 /* ProxyManagementView+List.swift */; };
-		C1PM00062FB0000300B26789 /* ProxyManagementView+Detail.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00052FB0000300B26789 /* ProxyManagementView+Detail.swift */; };
-		C1PM00082FB0000300B26789 /* ProxyManagementView+Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00072FB0000300B26789 /* ProxyManagementView+Card.swift */; };
 		5EFACT012F94000100A15674 /* ProviderActivationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFACT002F94000100A15674 /* ProviderActivationManager.swift */; };
 		5EFAD7702F87AFE700A15674 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5EFAD7422F87AC7100A15674 /* Assets.xcassets */; };
 		5EFAD7712F87AFE700A15674 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5EFAD7402F87AC7100A15674 /* Preview Assets.xcassets */; };
@@ -37,28 +30,6 @@
 		5EFAD7792F87AFE700A15674 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7462F87AC7100A15674 /* ContentView.swift */; };
 		5EFAD77A2F87AFE700A15674 /* AIUsageApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD74E2F87AC7100A15674 /* AIUsageApp.swift */; };
 		5EFAD77B2F87AFE700A15674 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7482F87AC7100A15674 /* MenuBarView.swift */; };
-		C1MB00022FB0000400B26789 /* MenuBarView+TrackSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */; };
-		C1MB00042FB0000400B26789 /* MenuBarView+CostTracking.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00032FB0000400B26789 /* MenuBarView+CostTracking.swift */; };
-		C1MB00062FB0000400B26789 /* MenuBarAccountRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */; };
-		C1MB00082FB0000400B26789 /* MenuBarRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00072FB0000400B26789 /* MenuBarRows.swift */; };
-		C1MB000A2FB0000400B26789 /* MenuBarSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00092FB0000400B26789 /* MenuBarSupport.swift */; };
-		C1OE00022FB0002000B26789 /* OpenCodeNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00012FB0002000B26789 /* OpenCodeNode.swift */; };
-		C1OE00042FB0002000B26789 /* OpenCodeConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00032FB0002000B26789 /* OpenCodeConfigManager.swift */; };
-		C1OE00062FB0002000B26789 /* OpenCodeNodeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */; };
-		C1OE00082FB0002000B26789 /* OpenCodeManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */; };
-		C1OE001C2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */; };
-		C1OE000A2FB0002000B26789 /* OpenCodeNodeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */; };
-		C1OE000C2FB0002000B26789 /* QuotaServerLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */; };
-		C1OE00242FB0007000B26789 /* CCSwitchLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */; };
-		C1OE000E2FB0002000B26789 /* OpenCodeProxyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */; };
-		C1OE001A2FB0004000B26789 /* OpenCodeConnectivityTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */; };
-		C1OE001E2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */; };
-		C1OE00202FB0005000B26789 /* OpenCodeConfigLayering.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001F2FB0005000B26789 /* OpenCodeConfigLayering.swift */; };
-		C1OE00222FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */; };
-		C1OE00122FB0003000B26789 /* ModelSuggestionField.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */; };
-		C1OE00142FB0004000B26789 /* OpenCodeNodeStatsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */; };
-		C1OE00162FB0004000B26789 /* OpenCodeNodeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00152FB0004000B26789 /* OpenCodeNodeCard.swift */; };
-		C1OE00182FB0004000B26789 /* OpenCodeNodeStatsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */; };
 		5EFAD77C2F87AFE700A15674 /* ProviderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD73E2F87AC7100A15674 /* ProviderModels.swift */; };
 		5EFAD77D2F87AFE700A15674 /* ProviderDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7512F87AC7200A15674 /* ProviderDetailView.swift */; };
 		5EFAD77E2F87AFE700A15674 /* ProviderIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7522F87AC7200A15674 /* ProviderIconView.swift */; };
@@ -74,7 +45,6 @@
 		5EFAD78D2F87B10500A15674 /* AccountNoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD78E2F87B10500A15674 /* AccountNoteEditorView.swift */; };
 		5EFAD78F2F87B10600A15674 /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFAD7902F87B10600A15674 /* Utilities.swift */; };
 		5EFHMP012F99002100A15674 /* DashboardView+Heatmap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */; };
-		5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSNV002F99003300A15674 /* SidebarNavigation.swift */; };
 		5EFPA0122F91000100A15674 /* ProviderAuthTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0112F91000100A15674 /* ProviderAuthTypes.swift */; };
 		5EFPA0222F91000200A15674 /* ProviderManagedImportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */; };
 		5EFPA0322F91000300A15674 /* CLIExecutableResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */; };
@@ -89,6 +59,8 @@
 		5EFREF222F93000100A15674 /* ProviderRefreshCoordinator+FetchPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFREF212F93000100A15674 /* ProviderRefreshCoordinator+FetchPipeline.swift */; };
 		5EFREF322F93000100A15674 /* ProviderRefreshCoordinator+Conversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFREF312F93000100A15674 /* ProviderRefreshCoordinator+Conversion.swift */; };
 		5EFSCD012F99003100A15674 /* DashboardStatCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSCD002F99003100A15674 /* DashboardStatCards.swift */; };
+		5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSNV002F99003300A15674 /* SidebarNavigation.swift */; };
+		5EFSSB012F99003400A15674 /* SettingsView+Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */; };
 		5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSTC002F99003200A15674 /* DashboardStateCards.swift */; };
 		7EFAD0022F87AC7100A15674 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EFAD0012F87AC7100A15674 /* AppSettings.swift */; };
 		A1ACCS022F92000000A15674 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1ACCS012F92000000A15674 /* AccountStore.swift */; };
@@ -106,8 +78,6 @@
 		A2B3C4EA2F96001000A15674 /* CostTrackingView+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4E92F96001000A15674 /* CostTrackingView+Helpers.swift */; };
 		A2B3C4EC2F96001000A15674 /* CostTrackingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4EB2F96001000A15674 /* CostTrackingCard.swift */; };
 		A2B3C4EE2F96001000A15674 /* SettingsView+Cards.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4ED2F96001000A15674 /* SettingsView+Cards.swift */; };
-		C1SV00022FB0000500B26789 /* SettingsView+MenuBarPins.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1SV00012FB0000500B26789 /* SettingsView+MenuBarPins.swift */; };
-		5EFSSB012F99003400A15674 /* SettingsView+Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */; };
 		A2B3C4F02F96001000A15674 /* SettingsView+Chrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4EF2F96001000A15674 /* SettingsView+Chrome.swift */; };
 		A2B3C4F02F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4EF2F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift */; };
 		A2B3C4F12F96001000A15699 /* ProviderLoginStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4F02F96001000A15699 /* ProviderLoginStatusCard.swift */; };
@@ -125,6 +95,9 @@
 		B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */; };
 		B3943D26F03B43809C53419E /* ProxyStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */; };
 		BC961583AC5E99AF1F7040E3 /* ProxyUsageArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5474125839BFE89230DB2B31 /* ProxyUsageArchive.swift */; };
+		C1AA000100000000000000B1 /* JSONWebEditorAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */; };
+		C1AA000200000000000000B2 /* ProxyConfigEditorView+JSONTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */; };
+		C1AA000300000000000000B3 /* ProxyModelLibraryEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000300000000000000A3 /* ProxyModelLibraryEditor.swift */; };
 		C1CG10012FB0001000B26789 /* CodexGlobalConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CG10002FB0001000B26789 /* CodexGlobalConfig.swift */; };
 		C1CX00012FB0000100B26789 /* CodexConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00002FB0000100B26789 /* CodexConfigManager.swift */; };
 		C1CX00032FB0000200B26789 /* CodexProxyManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */; };
@@ -134,14 +107,46 @@
 		C1GC00012FA0000100B26789 /* GlobalConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1GC00002FA0000100B26789 /* GlobalConfig.swift */; };
 		C1GC00032FA0000200B26789 /* GlobalConfigSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1GC00022FA0000200B26789 /* GlobalConfigSection.swift */; };
 		C1GC00052FA0000300B26789 /* LocalSettingsEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1GC00042FA0000300B26789 /* LocalSettingsEditorView.swift */; };
+		C1MB00022FB0000400B26789 /* MenuBarView+TrackSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */; };
+		C1MB00042FB0000400B26789 /* MenuBarView+CostTracking.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00032FB0000400B26789 /* MenuBarView+CostTracking.swift */; };
+		C1MB00062FB0000400B26789 /* MenuBarAccountRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */; };
+		C1MB00082FB0000400B26789 /* MenuBarRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00072FB0000400B26789 /* MenuBarRows.swift */; };
+		C1MB000A2FB0000400B26789 /* MenuBarSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00092FB0000400B26789 /* MenuBarSupport.swift */; };
 		C1NP00012F9C000100A15674 /* NodeProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00002F9C000100A15674 /* NodeProfile.swift */; };
 		C1NP00032F9C000200A15674 /* NodeProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00022F9C000200A15674 /* NodeProfileStore.swift */; };
 		C1NP00052F9C000300A15674 /* JSONRawEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00042F9C000300A15674 /* JSONRawEditorView.swift */; };
 		C1NP00072F9C000400A15674 /* SettingsVisualEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00062F9C000400A15674 /* SettingsVisualEditorView.swift */; };
 		C1NP00092F9C000500A15674 /* ProfileExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00082F9C000500A15674 /* ProfileExportView.swift */; };
+		C1OE00022FB0002000B26789 /* OpenCodeNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00012FB0002000B26789 /* OpenCodeNode.swift */; };
+		C1OE00042FB0002000B26789 /* OpenCodeConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00032FB0002000B26789 /* OpenCodeConfigManager.swift */; };
+		C1OE00062FB0002000B26789 /* OpenCodeNodeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */; };
+		C1OE00082FB0002000B26789 /* OpenCodeManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */; };
+		C1OE000A2FB0002000B26789 /* OpenCodeNodeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */; };
+		C1OE000C2FB0002000B26789 /* QuotaServerLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */; };
+		C1OE000E2FB0002000B26789 /* OpenCodeProxyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */; };
+		C1OE00122FB0003000B26789 /* ModelSuggestionField.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */; };
+		C1OE00142FB0004000B26789 /* OpenCodeNodeStatsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */; };
+		C1CA00022FCA005000B26789 /* CallAnalyticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */; };
+		C1CA00042FCA005000B26789 /* CallAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00032FCA005000B26789 /* CallAnalyticsView.swift */; };
+		C1CA00062FCA005000B26789 /* CallAnalyticsView+Rankings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00052FCA005000B26789 /* CallAnalyticsView+Rankings.swift */; };
+		C1CA00082FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00072FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift */; };
+		C1CA000A2FCA005000B26789 /* CallAnalyticsDerived.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00092FCA005000B26789 /* CallAnalyticsDerived.swift */; };
+		C1OE00162FB0004000B26789 /* OpenCodeNodeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00152FB0004000B26789 /* OpenCodeNodeCard.swift */; };
+		C1OE00182FB0004000B26789 /* OpenCodeNodeStatsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */; };
+		C1OE001A2FB0004000B26789 /* OpenCodeConnectivityTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */; };
+		C1OE001C2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */; };
+		C1OE001E2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */; };
+		C1OE00202FB0005000B26789 /* OpenCodeConfigLayering.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001F2FB0005000B26789 /* OpenCodeConfigLayering.swift */; };
+		C1OE00222FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */; };
+		C1OE00242FB0007000B26789 /* CCSwitchLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */; };
+		C1PM00022FB0000300B26789 /* ProxyManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */; };
+		C1PM00042FB0000300B26789 /* ProxyManagementView+List.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00032FB0000300B26789 /* ProxyManagementView+List.swift */; };
+		C1PM00062FB0000300B26789 /* ProxyManagementView+Detail.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00052FB0000300B26789 /* ProxyManagementView+Detail.swift */; };
+		C1PM00082FB0000300B26789 /* ProxyManagementView+Card.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00072FB0000300B26789 /* ProxyManagementView+Card.swift */; };
 		C1SP00012FB0000500B26789 /* SystemProxyDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1SP00002FB0000500B26789 /* SystemProxyDetector.swift */; };
 		C1SP00032FB0000600B26789 /* CodexNoProxyFixer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1SP00022FB0000600B26789 /* CodexNoProxyFixer.swift */; };
 		C1SP00052FB0000700B26789 /* SystemProxyWarningBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1SP00042FB0000700B26789 /* SystemProxyWarningBanner.swift */; };
+		C1SV00022FB0000500B26789 /* SettingsView+MenuBarPins.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1SV00012FB0000500B26789 /* SettingsView+MenuBarPins.swift */; };
 		D7F43642D7D9AACEEF2315DF /* ProxyStatsView+Trend.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4778326415BF371DC5B6E6D /* ProxyStatsView+Trend.swift */; };
 		F1A2B3C4D5E60001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F1A2B3C4D5E60002 /* Sparkle */; };
 /* End PBXBuildFile section */
@@ -157,14 +162,7 @@
 		5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyConfiguration.swift; sourceTree = "<group>"; };
 		5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyViewModel.swift; sourceTree = "<group>"; };
 		5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyConfigEditorView.swift; sourceTree = "<group>"; };
-		C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONWebEditorAssets.swift; sourceTree = "<group>"; };
-		C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyConfigEditorView+JSONTab.swift"; sourceTree = "<group>"; };
-		C1AA000300000000000000A3 /* ProxyModelLibraryEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyModelLibraryEditor.swift; sourceTree = "<group>"; };
 		5EF87F062F8D0EED002FE291 /* ProxyManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyManagementView.swift; sourceTree = "<group>"; };
-		C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Toolbar.swift"; sourceTree = "<group>"; };
-		C1PM00032FB0000300B26789 /* ProxyManagementView+List.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+List.swift"; sourceTree = "<group>"; };
-		C1PM00052FB0000300B26789 /* ProxyManagementView+Detail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Detail.swift"; sourceTree = "<group>"; };
-		C1PM00072FB0000300B26789 /* ProxyManagementView+Card.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Card.swift"; sourceTree = "<group>"; };
 		5EFACT002F94000100A15674 /* ProviderActivationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderActivationManager.swift; sourceTree = "<group>"; };
 		5EFAD72F2F87AC3300A15674 /* AIUsage.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIUsage.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5EFAD73D2F87AC7100A15674 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
@@ -175,28 +173,6 @@
 		5EFAD7462F87AC7100A15674 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		5EFAD7472F87AC7100A15674 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		5EFAD7482F87AC7100A15674 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
-		C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MenuBarView+TrackSwitcher.swift"; sourceTree = "<group>"; };
-		C1MB00032FB0000400B26789 /* MenuBarView+CostTracking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MenuBarView+CostTracking.swift"; sourceTree = "<group>"; };
-		C1OE00012FB0002000B26789 /* OpenCodeNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNode.swift; sourceTree = "<group>"; };
-		C1OE00032FB0002000B26789 /* OpenCodeConfigManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConfigManager.swift; sourceTree = "<group>"; };
-		C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStore.swift; sourceTree = "<group>"; };
-		C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagementView.swift; sourceTree = "<group>"; };
-		C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeManagementView+Toolbar.swift"; sourceTree = "<group>"; };
-		C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeEditorView.swift; sourceTree = "<group>"; };
-		C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaServerLocator.swift; sourceTree = "<group>"; };
-		C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCSwitchLocator.swift; sourceTree = "<group>"; };
-		C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeProxyRuntime.swift; sourceTree = "<group>"; };
-		C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConnectivityTester.swift; sourceTree = "<group>"; };
-		C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGlobalConfigSection.swift; sourceTree = "<group>"; };
-		C1OE001F2FB0005000B26789 /* OpenCodeConfigLayering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConfigLayering.swift; sourceTree = "<group>"; };
-		C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeNodeStore+CCSwitchSync.swift"; sourceTree = "<group>"; };
-		C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSuggestionField.swift; sourceTree = "<group>"; };
-		C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStatsStore.swift; sourceTree = "<group>"; };
-		C1OE00152FB0004000B26789 /* OpenCodeNodeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeCard.swift; sourceTree = "<group>"; };
-		C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStatsSection.swift; sourceTree = "<group>"; };
-		C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarAccountRow.swift; sourceTree = "<group>"; };
-		C1MB00072FB0000400B26789 /* MenuBarRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarRows.swift; sourceTree = "<group>"; };
-		C1MB00092FB0000400B26789 /* MenuBarSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSupport.swift; sourceTree = "<group>"; };
 		5EFAD7492F87AC7100A15674 /* ProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderCard.swift; sourceTree = "<group>"; };
 		5EFAD74A2F87AC7100A15674 /* ProvidersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProvidersView.swift; sourceTree = "<group>"; };
 		5EFAD74B2F87AC7100A15674 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -217,7 +193,6 @@
 		5EFAD78E2F87B10500A15674 /* AccountNoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountNoteEditorView.swift; sourceTree = "<group>"; };
 		5EFAD7902F87B10600A15674 /* Utilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Utilities.swift; sourceTree = "<group>"; };
 		5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DashboardView+Heatmap.swift"; sourceTree = "<group>"; };
-		5EFSNV002F99003300A15674 /* SidebarNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarNavigation.swift; sourceTree = "<group>"; };
 		5EFPA0112F91000100A15674 /* ProviderAuthTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderAuthTypes.swift; sourceTree = "<group>"; };
 		5EFPA0212F91000200A15674 /* ProviderManagedImportStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderManagedImportStore.swift; sourceTree = "<group>"; };
 		5EFPA0312F91000300A15674 /* CLIExecutableResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIExecutableResolver.swift; sourceTree = "<group>"; };
@@ -232,6 +207,8 @@
 		5EFREF212F93000100A15674 /* ProviderRefreshCoordinator+FetchPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProviderRefreshCoordinator+FetchPipeline.swift"; sourceTree = "<group>"; };
 		5EFREF312F93000100A15674 /* ProviderRefreshCoordinator+Conversion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProviderRefreshCoordinator+Conversion.swift"; sourceTree = "<group>"; };
 		5EFSCD002F99003100A15674 /* DashboardStatCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStatCards.swift; sourceTree = "<group>"; };
+		5EFSNV002F99003300A15674 /* SidebarNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarNavigation.swift; sourceTree = "<group>"; };
+		5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Sidebar.swift"; sourceTree = "<group>"; };
 		5EFSTC002F99003200A15674 /* DashboardStateCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStateCards.swift; sourceTree = "<group>"; };
 		7EFAD0012F87AC7100A15674 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		9E3E7768D2A94C7B19550E40 /* ProxyViewModel+UsageArchive.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProxyViewModel+UsageArchive.swift"; sourceTree = "<group>"; };
@@ -249,8 +226,6 @@
 		A2B3C4E92F96001000A15674 /* CostTrackingView+Helpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CostTrackingView+Helpers.swift"; sourceTree = "<group>"; };
 		A2B3C4EB2F96001000A15674 /* CostTrackingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CostTrackingCard.swift; sourceTree = "<group>"; };
 		A2B3C4ED2F96001000A15674 /* SettingsView+Cards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Cards.swift"; sourceTree = "<group>"; };
-		C1SV00012FB0000500B26789 /* SettingsView+MenuBarPins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+MenuBarPins.swift"; sourceTree = "<group>"; };
-		5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Sidebar.swift"; sourceTree = "<group>"; };
 		A2B3C4EF2F96001000A15674 /* SettingsView+Chrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Chrome.swift"; sourceTree = "<group>"; };
 		A2B3C4EF2F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyViewModel+ProxyOnlyMode.swift"; sourceTree = "<group>"; };
 		A2B3C4F02F96001000A15699 /* ProviderLoginStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderLoginStatusCard.swift; sourceTree = "<group>"; };
@@ -266,6 +241,9 @@
 		B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyRuntimeService.swift; sourceTree = "<group>"; };
 		B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRefreshResult.swift; sourceTree = "<group>"; };
 		B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TLSCertificateManager.swift; sourceTree = "<group>"; };
+		C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONWebEditorAssets.swift; sourceTree = "<group>"; };
+		C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyConfigEditorView+JSONTab.swift"; sourceTree = "<group>"; };
+		C1AA000300000000000000A3 /* ProxyModelLibraryEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyModelLibraryEditor.swift; sourceTree = "<group>"; };
 		C1CG10002FB0001000B26789 /* CodexGlobalConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGlobalConfig.swift; sourceTree = "<group>"; };
 		C1CX00002FB0000100B26789 /* CodexConfigManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigManager.swift; sourceTree = "<group>"; };
 		C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProxyManagementView.swift; sourceTree = "<group>"; };
@@ -275,14 +253,46 @@
 		C1GC00002FA0000100B26789 /* GlobalConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalConfig.swift; sourceTree = "<group>"; };
 		C1GC00022FA0000200B26789 /* GlobalConfigSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalConfigSection.swift; sourceTree = "<group>"; };
 		C1GC00042FA0000300B26789 /* LocalSettingsEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalSettingsEditorView.swift; sourceTree = "<group>"; };
+		C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MenuBarView+TrackSwitcher.swift"; sourceTree = "<group>"; };
+		C1MB00032FB0000400B26789 /* MenuBarView+CostTracking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MenuBarView+CostTracking.swift"; sourceTree = "<group>"; };
+		C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarAccountRow.swift; sourceTree = "<group>"; };
+		C1MB00072FB0000400B26789 /* MenuBarRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarRows.swift; sourceTree = "<group>"; };
+		C1MB00092FB0000400B26789 /* MenuBarSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSupport.swift; sourceTree = "<group>"; };
 		C1NP00002F9C000100A15674 /* NodeProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeProfile.swift; sourceTree = "<group>"; };
 		C1NP00022F9C000200A15674 /* NodeProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeProfileStore.swift; sourceTree = "<group>"; };
 		C1NP00042F9C000300A15674 /* JSONRawEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONRawEditorView.swift; sourceTree = "<group>"; };
 		C1NP00062F9C000400A15674 /* SettingsVisualEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsVisualEditorView.swift; sourceTree = "<group>"; };
 		C1NP00082F9C000500A15674 /* ProfileExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileExportView.swift; sourceTree = "<group>"; };
+		C1OE00012FB0002000B26789 /* OpenCodeNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNode.swift; sourceTree = "<group>"; };
+		C1OE00032FB0002000B26789 /* OpenCodeConfigManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConfigManager.swift; sourceTree = "<group>"; };
+		C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStore.swift; sourceTree = "<group>"; };
+		C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagementView.swift; sourceTree = "<group>"; };
+		C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeEditorView.swift; sourceTree = "<group>"; };
+		C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaServerLocator.swift; sourceTree = "<group>"; };
+		C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeProxyRuntime.swift; sourceTree = "<group>"; };
+		C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSuggestionField.swift; sourceTree = "<group>"; };
+		C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStatsStore.swift; sourceTree = "<group>"; };
+		C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsStore.swift; sourceTree = "<group>"; };
+		C1CA00032FCA005000B26789 /* CallAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsView.swift; sourceTree = "<group>"; };
+		C1CA00052FCA005000B26789 /* CallAnalyticsView+Rankings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallAnalyticsView+Rankings.swift"; sourceTree = "<group>"; };
+		C1CA00072FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallAnalyticsView+ZeroCall.swift"; sourceTree = "<group>"; };
+		C1CA00092FCA005000B26789 /* CallAnalyticsDerived.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsDerived.swift; sourceTree = "<group>"; };
+		C1OE00152FB0004000B26789 /* OpenCodeNodeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeCard.swift; sourceTree = "<group>"; };
+		C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStatsSection.swift; sourceTree = "<group>"; };
+		C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConnectivityTester.swift; sourceTree = "<group>"; };
+		C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeManagementView+Toolbar.swift"; sourceTree = "<group>"; };
+		C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGlobalConfigSection.swift; sourceTree = "<group>"; };
+		C1OE001F2FB0005000B26789 /* OpenCodeConfigLayering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConfigLayering.swift; sourceTree = "<group>"; };
+		C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeNodeStore+CCSwitchSync.swift"; sourceTree = "<group>"; };
+		C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCSwitchLocator.swift; sourceTree = "<group>"; };
+		C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Toolbar.swift"; sourceTree = "<group>"; };
+		C1PM00032FB0000300B26789 /* ProxyManagementView+List.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+List.swift"; sourceTree = "<group>"; };
+		C1PM00052FB0000300B26789 /* ProxyManagementView+Detail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Detail.swift"; sourceTree = "<group>"; };
+		C1PM00072FB0000300B26789 /* ProxyManagementView+Card.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Card.swift"; sourceTree = "<group>"; };
 		C1SP00002FB0000500B26789 /* SystemProxyDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemProxyDetector.swift; sourceTree = "<group>"; };
 		C1SP00022FB0000600B26789 /* CodexNoProxyFixer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexNoProxyFixer.swift; sourceTree = "<group>"; };
 		C1SP00042FB0000700B26789 /* SystemProxyWarningBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemProxyWarningBanner.swift; sourceTree = "<group>"; };
+		C1SV00012FB0000500B26789 /* SettingsView+MenuBarPins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+MenuBarPins.swift"; sourceTree = "<group>"; };
 		E2D13F2156D366B8A69BC697 /* ProxyStatsView+Summary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProxyStatsView+Summary.swift"; sourceTree = "<group>"; };
 		E4778326415BF371DC5B6E6D /* ProxyStatsView+Trend.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProxyStatsView+Trend.swift"; sourceTree = "<group>"; };
 		F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyStatsView.swift; sourceTree = "<group>"; };
@@ -311,6 +321,7 @@
 				C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */,
 				C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */,
 				C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */,
+				C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */,
 				5EF87F022F8D0ED3002FE291 /* ProxyViewModel.swift */,
 				A2B3C4D32F96001000A15674 /* ProxyViewModel+LogManagement.swift */,
 				A2B3C4D52F96001000A15674 /* ProxyViewModel+ProxyServer.swift */,
@@ -420,6 +431,10 @@
 				C1SP00042FB0000700B26789 /* SystemProxyWarningBanner.swift */,
 				5EFAD7462F87AC7100A15674 /* ContentView.swift */,
 				5EFSNV002F99003300A15674 /* SidebarNavigation.swift */,
+				C1CA00032FCA005000B26789 /* CallAnalyticsView.swift */,
+				C1CA00052FCA005000B26789 /* CallAnalyticsView+Rankings.swift */,
+				C1CA00072FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift */,
+				C1CA00092FCA005000B26789 /* CallAnalyticsDerived.swift */,
 				5EFAD7472F87AC7100A15674 /* DashboardView.swift */,
 				5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */,
 				5EFSCD002F99003100A15674 /* DashboardStatCards.swift */,
@@ -662,6 +677,11 @@
 				C1OE001E2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift in Sources */,
 				C1OE00202FB0005000B26789 /* OpenCodeConfigLayering.swift in Sources */,
 				C1OE00142FB0004000B26789 /* OpenCodeNodeStatsStore.swift in Sources */,
+				C1CA00022FCA005000B26789 /* CallAnalyticsStore.swift in Sources */,
+				C1CA00042FCA005000B26789 /* CallAnalyticsView.swift in Sources */,
+				C1CA00062FCA005000B26789 /* CallAnalyticsView+Rankings.swift in Sources */,
+				C1CA00082FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift in Sources */,
+				C1CA000A2FCA005000B26789 /* CallAnalyticsDerived.swift in Sources */,
 				C1OE00162FB0004000B26789 /* OpenCodeNodeCard.swift in Sources */,
 				C1OE00182FB0004000B26789 /* OpenCodeNodeStatsSection.swift in Sources */,
 				C1MB00062FB0000400B26789 /* MenuBarAccountRow.swift in Sources */,
