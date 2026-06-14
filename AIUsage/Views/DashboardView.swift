@@ -204,8 +204,12 @@ struct DashboardView: View {
     
     // MARK: - Providers Grid
 
+    /// 排除被侧边栏隐藏的 agent——其概览 Token/费用、热力图随之从仪表盘消失（全隐藏则回到空态）。
     private var costTrackingProviders: [ProviderData] {
-        deduplicatedProviders(appState.localCostProviders(from: refreshCoordinator.providers))
+        let hiddenIds = AgentVisibility.hiddenCostProviderIds(hidden: appState.settings.hiddenSidebarSections)
+        let providers = deduplicatedProviders(appState.localCostProviders(from: refreshCoordinator.providers))
+        guard !hiddenIds.isEmpty else { return providers }
+        return providers.filter { !hiddenIds.contains($0.baseProviderId) }
     }
 
     private var claudeLocalProviders: [ProviderData] {

@@ -7,6 +7,7 @@ import QuotaBackend
 // 数据只读、零埋点；规则命中因原理不可得不在此统计。设计见 docs/CALL_ANALYTICS_DESIGN.md。
 
 struct CallAnalyticsView: View {
+    @EnvironmentObject var appState: AppState
     @StateObject var store = CallAnalyticsStore.shared
 
     @AppStorage("callAnalytics.range") private var windowRaw = CallWindow.month.rawValue
@@ -21,8 +22,35 @@ struct CallAnalyticsView: View {
     @State private var showCustomPopover = false
 
     var window: CallWindow { CallWindow(rawValue: windowRaw) ?? .month }
-    var scope: CallScope { CallScope(rawValue: scopeRaw) ?? .all }
-    var derived: CallAnalyticsDerived { CallAnalyticsDerived(snapshot: store.snapshot, scope: scope) }
+
+    /// 被侧边栏隐藏的来源——「来源」分段隐藏其选项，「全部」聚合也排除它。
+    private var hiddenSources: Set<CallSourceKind> {
+        AgentVisibility.hiddenCallSources(hidden: appState.settings.hiddenSidebarSections)
+    }
+
+    /// 持久化选中的来源若其 agent 已被隐藏，则回退到「全部」（取消隐藏后自动恢复）。
+    var scope: CallScope {
+        let stored = CallScope(rawValue: scopeRaw) ?? .all
+        if let kind = stored.sourceKind, hiddenSources.contains(kind) { return .all }
+        return stored
+    }
+
+    /// 来源分段仅列出未隐藏的 agent（「全部」常驻）。
+    var visibleScopes: [CallScope] {
+        CallScope.allCases.filter { item in
+            guard let kind = item.sourceKind else { return true }
+            return !hiddenSources.contains(kind)
+        }
+    }
+
+    /// 排行图例/页脚用：未隐藏的来源种类。
+    var visibleSourceKinds: [CallSourceKind] {
+        CallSourceKind.allCases.filter { !hiddenSources.contains($0) }
+    }
+
+    var derived: CallAnalyticsDerived {
+        CallAnalyticsDerived(snapshot: store.snapshot, scope: scope, hiddenSources: hiddenSources)
+    }
 
     /// 解析后的时间范围规格：稳定标识 + 闭区间起止界（传给 store/engine）。
     /// 前四档走 `CallWindow.cutoff`；`custom` 用用户所选起止日期（起 > 止时自动对调）。
@@ -181,7 +209,7 @@ struct CallAnalyticsView: View {
     private var sourceCluster: some View {
         controlCluster(L("Source", "来源", key: "calls.source"), systemImage: "square.stack.3d.up") {
             StatsSegmentedControl(
-                CallScope.allCases,
+                visibleScopes,
                 selection: scopeBinding,
                 segmentWidth: 84,
                 tint: .indigo
@@ -528,7 +556,7 @@ struct CallAnalyticsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(store.snapshot.sources, id: \.source) { status in
+            ForEach(store.snapshot.sources.filter { !hiddenSources.contains($0.source) }, id: \.source) { status in
                 HStack(spacing: 6) {
                     Circle()
                         .fill(status.errorCode != nil ? Color.red : (status.available ? Color.green : Color.secondary.opacity(0.4)))

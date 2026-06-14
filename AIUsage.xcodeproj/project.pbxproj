@@ -11,6 +11,7 @@
 		1E871734213E6EFD191F8398 /* StatsDataAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D613C7828C6DACECB0171A7 /* StatsDataAdapter.swift */; };
 		209C10AAE060E83BB8399585 /* ProxyStatsView+Summary.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2D13F2156D366B8A69BC697 /* ProxyStatsView+Summary.swift */; };
 		3502209AABD60A3013084D55 /* UsageTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A12FE22E8E59EF630BA439 /* UsageTrack.swift */; };
+		A1AGNT012F92000000A15674 /* AgentVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGNT002F92000000A15674 /* AgentVisibility.swift */; };
 		5EF0C0D22F95000100A15674 /* ProviderCard+MultiWindowQuota.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF0C0D12F95000100A15674 /* ProviderCard+MultiWindowQuota.swift */; };
 		5EF0C0D42F95000100A15674 /* ProviderCard+QuotaIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF0C0D32F95000100A15674 /* ProviderCard+QuotaIndicator.swift */; };
 		5EF0C0D62F95000100A15674 /* ProviderCard+ResetCountdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF0C0D52F95000100A15674 /* ProviderCard+ResetCountdown.swift */; };
@@ -153,6 +154,7 @@
 
 /* Begin PBXFileReference section */
 		00A12FE22E8E59EF630BA439 /* UsageTrack.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageTrack.swift; sourceTree = "<group>"; };
+		A1AGNT002F92000000A15674 /* AgentVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentVisibility.swift; sourceTree = "<group>"; };
 		2A97BD3A13311949E62C066C /* ProxyStatsView+Distribution.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProxyStatsView+Distribution.swift"; sourceTree = "<group>"; };
 		2D613C7828C6DACECB0171A7 /* StatsDataAdapter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StatsDataAdapter.swift; sourceTree = "<group>"; };
 		5474125839BFE89230DB2B31 /* ProxyUsageArchive.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProxyUsageArchive.swift; sourceTree = "<group>"; };
@@ -371,6 +373,7 @@
 				5EFAD73E2F87AC7100A15674 /* ProviderModels.swift */,
 				5474125839BFE89230DB2B31 /* ProxyUsageArchive.swift */,
 				00A12FE22E8E59EF630BA439 /* UsageTrack.swift */,
+				A1AGNT002F92000000A15674 /* AgentVisibility.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -774,6 +777,7 @@
 				BC961583AC5E99AF1F7040E3 /* ProxyUsageArchive.swift in Sources */,
 				16107C5456181DB224F92CB4 /* ProxyViewModel+UsageArchive.swift in Sources */,
 				3502209AABD60A3013084D55 /* UsageTrack.swift in Sources */,
+				A1AGNT012F92000000A15674 /* AgentVisibility.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

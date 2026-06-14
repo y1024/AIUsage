@@ -38,7 +38,9 @@ struct ProviderDetailView: View {
     }
     
     var body: some View {
-        ScrollView {
+        VStack(spacing: 0) {
+            detailTopBar
+            ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 // 头部
                 headerSection
@@ -84,6 +86,7 @@ struct ProviderDetailView: View {
                 }
             }
             .padding(24)
+            }
         }
         .frame(width: 600, height: 700)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -120,6 +123,30 @@ struct ProviderDetailView: View {
         }
     }
     
+    // MARK: - Top Bar (close)
+    // 详情面板是无标题栏 sheet，过去只能靠 ESC 退出（见 issue #29）。这里固定一个右上角关闭按钮，
+    // 所有服务商通用；ESC 仍可用（.cancelAction）。
+    private var detailTopBar: some View {
+        HStack {
+            Spacer()
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.title2)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help(L("Close", "关闭"))
+            .accessibilityLabel(L("Close", "关闭"))
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 2)
+    }
+
     // MARK: - Header Section
     
     private var headerSection: some View {

@@ -35,14 +35,39 @@ struct ProxyStatsView: View {
             case .opencode: return .opencode
             }
         }
+
+        /// 对应的 agent（用于侧边栏隐藏联动）；`.all` 无对应 agent。
+        var agentKind: AgentKind? {
+            switch self {
+            case .all:      return nil
+            case .claude:   return .claude
+            case .codex:    return .codex
+            case .opencode: return .opencode
+            }
+        }
     }
 
     // MARK: - Data
 
     static let adapter = StatsDataAdapter()
 
+    /// 用户在侧边栏隐藏的 section（隐藏 agent 据此从本页彻底剔除）。
+    private var hiddenSections: Set<String> { appState.settings.hiddenSidebarSections }
+
+    /// 排除被隐藏 agent 后的本地 cost provider——「综合」聚合、热力图、空态判断均以此为准。
     var localProviders: [ProviderData] {
-        appState.localCostProviders(from: refreshCoordinator.providers)
+        let hiddenIds = AgentVisibility.hiddenCostProviderIds(hidden: hiddenSections)
+        let all = appState.localCostProviders(from: refreshCoordinator.providers)
+        guard !hiddenIds.isEmpty else { return all }
+        return all.filter { !hiddenIds.contains($0.baseProviderId) }
+    }
+
+    /// 数据源分段仅列出未隐藏的 agent（「综合」常驻）。
+    var visibleSourceFamilies: [SourceFamily] {
+        SourceFamily.allCases.filter { family in
+            guard let agent = family.agentKind else { return true }
+            return AgentVisibility.isVisible(agent, hidden: hiddenSections)
+        }
     }
 
     var claudeLocalProviders: [ProviderData] {
@@ -57,8 +82,13 @@ struct ProxyStatsView: View {
         localProviders.filter { $0.baseProviderId == "opencode" }
     }
 
+    /// 持久化选中的家族若其 agent 已被隐藏，则回退到「综合」（不改写偏好，取消隐藏后自动恢复）。
     var sourceFamily: SourceFamily {
-        SourceFamily(rawValue: familyRaw) ?? .all
+        let stored = SourceFamily(rawValue: familyRaw) ?? .all
+        if let agent = stored.agentKind, AgentVisibility.isHidden(agent, hidden: hiddenSections) {
+            return .all
+        }
+        return stored
     }
 
     var familyBinding: Binding<SourceFamily> {
@@ -224,7 +254,7 @@ struct ProxyStatsView: View {
     // 控制簇内的两个分段控件：窄宽下用 ViewThatFits 自动从「并排」回退为「上下两行」，永不横向溢出。
     private var familyControl: some View {
         StatsSegmentedControl(
-            SourceFamily.allCases,
+            visibleSourceFamilies,
             selection: familyBinding,
             segmentWidth: 84,
             tint: .indigo

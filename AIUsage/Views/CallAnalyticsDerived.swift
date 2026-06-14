@@ -114,11 +114,16 @@ struct AgentBreakdownRow: Identifiable {
 struct CallAnalyticsDerived {
     let snapshot: CallAnalyticsSnapshot
     let scope: CallScope
+    /// 被侧边栏隐藏的来源——即使在「全部」聚合下也彻底排除（与用量统计一致）。
+    var hiddenSources: Set<CallSourceKind> = []
 
-    /// 按来源 scope 过滤后的条目。
+    /// 按来源 scope 过滤后的条目；「全部」时排除被隐藏的来源。
     var entries: [CallAnalyticsEntry] {
-        guard let kind = scope.sourceKind else { return snapshot.entries }
-        return snapshot.entries.filter { $0.source == kind }
+        if let kind = scope.sourceKind {
+            return snapshot.entries.filter { $0.source == kind }
+        }
+        guard !hiddenSources.isEmpty else { return snapshot.entries }
+        return snapshot.entries.filter { !hiddenSources.contains($0.source) }
     }
 
     // MARK: - KPI
@@ -135,20 +140,20 @@ struct CallAnalyticsDerived {
         Set(entries.filter { $0.kind == .skill }.map { $0.name })
     }
 
-    /// 当前 scope 下「已安装」的技能名。指定来源时只取该来源装的；scope=全部 取并集。
+    /// 当前 scope 下「已安装」的技能名。指定来源时只取该来源装的；scope=全部 取并集（排除隐藏来源）。
     var installedSkillNames: Set<String> {
         if let kind = scope.sourceKind {
             return Set(snapshot.installedSkills.filter { $0.source == kind }.map(\.name))
         }
-        return Set(snapshot.installedSkills.map(\.name))
+        return Set(snapshot.installedSkills.filter { !hiddenSources.contains($0.source) }.map(\.name))
     }
 
-    /// 当前 scope 下「已配置」的 MCP server 名。
+    /// 当前 scope 下「已配置」的 MCP server 名（scope=全部 时排除隐藏来源）。
     var installedServerNames: Set<String> {
         if let kind = scope.sourceKind {
             return Set(snapshot.installedMCPServers.filter { $0.source == kind }.map(\.name))
         }
-        return Set(snapshot.installedMCPServers.map(\.name))
+        return Set(snapshot.installedMCPServers.filter { !hiddenSources.contains($0.source) }.map(\.name))
     }
 
     var zombieSkillCount: Int {
@@ -247,6 +252,7 @@ struct CallAnalyticsDerived {
     /// agent 取值：`"main"` = 主会话；其余（具体类型 Explore/Plan… 或兜底 "subagent"）= 子代理。
     var hasSubagentActivity: Bool {
         guard scope == .all || scope == .claude else { return false }
+        guard !hiddenSources.contains(.claude) else { return false }
         return snapshot.agentInvocations.contains { $0.source == .claude && $0.agent != "main" && $0.count > 0 }
     }
 
@@ -254,6 +260,7 @@ struct CallAnalyticsDerived {
     /// 数据源为 `subagents/*.meta.json` 边车统计，故纯文本输出 / 自定义子代理都会出现。其它来源无此维度。
     func agentBreakdown() -> [AgentBreakdownRow] {
         guard scope == .all || scope == .claude else { return [] }
+        guard !hiddenSources.contains(.claude) else { return [] }
         var merged: [String: Int] = [:]
         for inv in snapshot.agentInvocations where inv.source == .claude && inv.count > 0 {
             merged[inv.agent, default: 0] += inv.count

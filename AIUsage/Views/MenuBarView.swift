@@ -29,17 +29,24 @@ struct MenuBarView: View {
         .background(VisualEffectBlur())
     }
 
-    // 轨道顺序与侧边栏一致：Codex → OpenCode → Claude Code。
+    // 轨道顺序与侧边栏一致：Codex → OpenCode → Claude Code。被侧边栏隐藏的 agent 同步隐藏其切换器。
     private var controlDeck: some View {
-        HStack(spacing: 0) {
+        let hidden = settings.hiddenSidebarSections
+        return HStack(spacing: 0) {
             compactAccountsBadge
                 .frame(maxWidth: .infinity)
-            proxyTrackSwitcher(family: .codex)
-                .frame(maxWidth: .infinity)
-            openCodeTrackSwitcher()
-                .frame(maxWidth: .infinity)
-            proxyTrackSwitcher(family: .claude)
-                .frame(maxWidth: .infinity)
+            if AgentVisibility.isVisible(.codex, hidden: hidden) {
+                proxyTrackSwitcher(family: .codex)
+                    .frame(maxWidth: .infinity)
+            }
+            if AgentVisibility.isVisible(.opencode, hidden: hidden) {
+                openCodeTrackSwitcher()
+                    .frame(maxWidth: .infinity)
+            }
+            if AgentVisibility.isVisible(.claude, hidden: hidden) {
+                proxyTrackSwitcher(family: .claude)
+                    .frame(maxWidth: .infinity)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)

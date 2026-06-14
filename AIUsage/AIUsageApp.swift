@@ -165,15 +165,9 @@ struct AIUsageApp: App {
             }
         }
         
-        Settings {
-            SettingsView()
-                .environmentObject(appState)
-                .environmentObject(ProviderActivationManager.shared)
-                .environmentObject(ProviderRefreshCoordinator.shared)
-                .environmentObject(AccountStore.shared)
-                .environmentObject(appSettings)
-                .environmentObject(sparkle)
-        }
+        // 不再声明 SwiftUI `Settings {}` 场景：它会额外生成一个系统偏好设置弹窗（issue #26 里的英文小窗），
+        // 与 App 自带的嵌入式「设置」区段重复。统一走 `presentMainWindow(section: .settings)`（见上方
+        // 「Preferences…」命令与菜单栏入口），保持单一入口、语言与交互一致。
     }
 }
 

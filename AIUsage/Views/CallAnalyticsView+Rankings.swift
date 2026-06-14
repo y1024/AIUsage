@@ -57,7 +57,7 @@ extension CallAnalyticsView {
             }
             if scope == .all {
                 HStack(spacing: 9) {
-                    ForEach(CallSourceKind.allCases, id: \.self) { source in
+                    ForEach(visibleSourceKinds, id: \.self) { source in
                         HStack(spacing: 4) {
                             Circle().fill(CallAnalyticsView.color(for: source)).frame(width: 6, height: 6)
                             Text(source.displayName)

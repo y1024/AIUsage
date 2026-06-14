@@ -56,7 +56,9 @@ extension MenuBarView {
     /// 用 cost provider 而非代理节点判定，故仅有非代理用量（无代理节点）也会展示。
     var costSourceRows: [CostSourceRow] {
         let providers = appState.localCostProviders(from: refreshCoordinator.providers)
+        let hiddenIds = AgentVisibility.hiddenCostProviderIds(hidden: AppSettings.shared.hiddenSidebarSections)
         return Self.costSourceDescriptors.compactMap { descriptor in
+            guard !hiddenIds.contains(descriptor.providerId) else { return nil }
             guard let summary = providers.first(where: { $0.baseProviderId == descriptor.providerId })?.costSummary else {
                 return nil
             }
