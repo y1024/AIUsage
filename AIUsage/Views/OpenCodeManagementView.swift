@@ -183,6 +183,11 @@ struct OpenCodeManagementView: View {
                 )
                 .padding(.top, 8)
                 .padding(.bottom, 4)
+                OpenCodeNodeAvailabilitySection(
+                    node: node,
+                    proxyRuntime: proxyRuntime
+                )
+                .padding(.bottom, 4)
                 OpenCodeNodeRecentRequestsSection(
                     node: node,
                     statsStore: statsStore,

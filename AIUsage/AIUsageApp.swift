@@ -190,13 +190,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.accessory)
         }
 
+        // issue #30：静默自启动——开启后启动即收起主窗口，仅驻留菜单栏。
+        // SwiftUI 的 Window 场景会在启动流程中自动创建并显示，didFinishLaunching 时可能尚未建好，
+        // 故轮询等它出现后立刻 orderOut（隐藏而非关闭，避免触发关窗退出、且后台数据刷新照常进行）。
+        if UserDefaults.standard.bool(forKey: DefaultsKey.launchHidden) {
+            hideMainWindowForSilentLaunch()
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             AppState.shared.refreshAllProviders()
         }
     }
 
+    /// 启动静默：等主窗口创建后立即收起到菜单栏。轮询上限约 0.5s，超时则放弃（不影响正常使用）。
+    private func hideMainWindowForSilentLaunch(attempt: Int = 0) {
+        let mainWindows = NSApp.windows.filter { !($0 is NSPanel) && $0.canBecomeMain }
+        if !mainWindows.isEmpty {
+            mainWindows.forEach { $0.orderOut(nil) }
+            return
+        }
+        guard attempt < 50 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
+            self?.hideMainWindowForSilentLaunch(attempt: attempt + 1)
+        }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        false
+        // issue #31：Dock 显示与后台运行解耦。
+        // 隐藏 Dock（仅菜单栏模式）必须常驻，否则关窗即无入口；
+        // Dock 可见时按用户的「保持后台运行」开关，缺省 true（保持历史行为，关窗不退出）。
+        if UserDefaults.standard.bool(forKey: DefaultsKey.hideDockIcon) { return false }
+        let keepRunning = UserDefaults.standard.object(forKey: DefaultsKey.keepRunningInBackground) as? Bool ?? true
+        return !keepRunning
     }
 
     // 代理 helper 的退出清理刻意不放在 applicationWillTerminate：纯 SwiftUI App 的该回调在
@@ -306,6 +331,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showContextMenu(from sender: NSStatusBarButton) {
         let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: L("Show Main Window", "显示主窗口"), action: #selector(showMainWindow), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: L("Open Dashboard", "打开仪表盘"), action: #selector(openDashboard), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: L("Open Cost Tracking", "打开费用追踪"), action: #selector(openCostTracking), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
@@ -321,6 +348,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = menu
         sender.performClick(nil)
         statusItem?.menu = nil
+    }
+
+    @objc func showMainWindow() {
+        revealMainWindow(section: AppState.shared.selectedSection)
     }
 
     @objc func openDashboard() {

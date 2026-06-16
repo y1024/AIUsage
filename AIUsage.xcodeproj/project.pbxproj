@@ -134,6 +134,7 @@
 		C1CA000A2FCA005000B26789 /* CallAnalyticsDerived.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00092FCA005000B26789 /* CallAnalyticsDerived.swift */; };
 		C1OE00162FB0004000B26789 /* OpenCodeNodeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00152FB0004000B26789 /* OpenCodeNodeCard.swift */; };
 		C1OE00182FB0004000B26789 /* OpenCodeNodeStatsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */; };
+		C1AV00012FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */; };
 		C1OE001A2FB0004000B26789 /* OpenCodeConnectivityTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */; };
 		C1OE001C2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */; };
 		C1OE001E2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */; };
@@ -281,6 +282,7 @@
 		C1CA00092FCA005000B26789 /* CallAnalyticsDerived.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsDerived.swift; sourceTree = "<group>"; };
 		C1OE00152FB0004000B26789 /* OpenCodeNodeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeCard.swift; sourceTree = "<group>"; };
 		C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStatsSection.swift; sourceTree = "<group>"; };
+		C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeAvailabilitySection.swift; sourceTree = "<group>"; };
 		C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConnectivityTester.swift; sourceTree = "<group>"; };
 		C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeManagementView+Toolbar.swift"; sourceTree = "<group>"; };
 		C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGlobalConfigSection.swift; sourceTree = "<group>"; };
@@ -451,6 +453,7 @@
 				C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */,
 				C1OE00152FB0004000B26789 /* OpenCodeNodeCard.swift */,
 				C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */,
+				C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */,
 				C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */,
 				C1OE001F2FB0005000B26789 /* OpenCodeConfigLayering.swift */,
 				C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */,
@@ -687,6 +690,7 @@
 				C1CA000A2FCA005000B26789 /* CallAnalyticsDerived.swift in Sources */,
 				C1OE00162FB0004000B26789 /* OpenCodeNodeCard.swift in Sources */,
 				C1OE00182FB0004000B26789 /* OpenCodeNodeStatsSection.swift in Sources */,
+				C1AV00012FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift in Sources */,
 				C1MB00062FB0000400B26789 /* MenuBarAccountRow.swift in Sources */,
 				C1MB00082FB0000400B26789 /* MenuBarRows.swift in Sources */,
 				C1MB000A2FB0000400B26789 /* MenuBarSupport.swift in Sources */,

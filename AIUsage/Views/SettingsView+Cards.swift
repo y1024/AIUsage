@@ -90,11 +90,53 @@ extension SettingsView {
             Divider()
 
             settingsToggleRow(
+                title: L("Launch Hidden", "启动后隐藏主窗口"),
+                subtitle: L(
+                    "Start silently in the menu bar without showing the main window. Reopen it from the menu bar icon.",
+                    "启动后不弹出主窗口，仅驻留菜单栏；可从菜单栏图标随时唤起。"
+                ),
+                isOn: Binding(
+                    get: { launchHidden },
+                    set: {
+                        launchHidden = $0
+                        UserDefaults.standard.set($0, forKey: DefaultsKey.launchHidden)
+                    }
+                )
+            )
+
+            Divider()
+
+            settingsToggleRow(
                 title: L("Hide Dock Icon", "隐藏 Dock 图标"),
                 subtitle: L("Keep AIUsage in the menu bar only.", "让 AIUsage 只出现在菜单栏。"),
                 isOn: $hideDockIcon
             )
             .help(L("The app will only appear in the menu bar", "应用将只显示在菜单栏"))
+
+            Divider()
+
+            // issue #31：后台运行与 Dock 显示解耦。隐藏 Dock 时必须常驻（仅菜单栏入口），
+            // 故强制显示为开并禁用；Dock 可见时用户可自由选择关窗是否退出。
+            settingsToggleRow(
+                title: L("Keep Running in Background", "保持后台运行"),
+                subtitle: hideDockIcon
+                    ? L(
+                        "Always on while the Dock icon is hidden — the app stays in the menu bar.",
+                        "隐藏 Dock 图标时始终开启——应用常驻菜单栏。"
+                    )
+                    : L(
+                        "Keep the app running after closing the main window. Turn off to quit on close.",
+                        "关闭主窗口后继续在后台运行。关闭此项则关窗即退出。"
+                    ),
+                isOn: Binding(
+                    get: { hideDockIcon ? true : keepRunningInBackground },
+                    set: {
+                        keepRunningInBackground = $0
+                        UserDefaults.standard.set($0, forKey: DefaultsKey.keepRunningInBackground)
+                    }
+                )
+            )
+            .disabled(hideDockIcon)
 
             Divider()
 

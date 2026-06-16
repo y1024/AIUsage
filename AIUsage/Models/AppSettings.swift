@@ -102,6 +102,10 @@ enum DefaultsKey {
     static let displayCurrency = "displayCurrency"
     static let hiddenSidebarSections = "hiddenSidebarSections"
     static let hideDockIcon = "hideDockIcon"
+    /// 关闭主窗口后是否保持后台运行（issue #31，与隐藏 Dock 解耦）。缺省=true（保持历史行为）。
+    static let keepRunningInBackground = "keepRunningInBackground"
+    /// 启动后是否隐藏主窗口、仅驻留菜单栏（issue #30 静默自启动）。缺省=false。
+    static let launchHidden = "launchHidden"
     static let lowQuotaThreshold = "lowQuotaThreshold"
     static let menuBarDisplayMode = "menuBarDisplayMode"
     static let menuBarMetricType = "menuBarMetricType"
