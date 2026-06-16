@@ -76,6 +76,8 @@ extension ProxyManagementView {
                             statisticsSection(for: config)
                                 .padding(.top, 8)
                                 .padding(.bottom, 4)
+                            modelAvailabilitySection(for: config)
+                                .padding(.bottom, 4)
                             recentRequestsSection(for: config)
                                 .padding(.bottom, 4)
                         }

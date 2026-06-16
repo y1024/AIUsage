@@ -168,6 +168,17 @@ final class OpenCodeConfigManager {
             if !limit.isEmpty { entry["limit"] = limit }
             // 生成参数（temperature/topP/…）统一写入每个模型 options，OpenCode 透传给上游 SDK。
             if !generationOptions.isEmpty { entry["options"] = generationOptions }
+            // 每模型 modalities（issue #24）：任一侧非空才写，否则由 OpenCode 取模型默认。
+            if model.hasModalities {
+                var modalities: [String: Any] = [:]
+                if !model.inputModalities.isEmpty {
+                    modalities["input"] = model.inputModalities.map(\.rawValue)
+                }
+                if !model.outputModalities.isEmpty {
+                    modalities["output"] = model.outputModalities.map(\.rawValue)
+                }
+                entry["modalities"] = modalities
+            }
             if node.pricingCurrency != .none, model.hasPricing {
                 let currency = node.pricingCurrency
                 var costBlock: [String: Any] = [

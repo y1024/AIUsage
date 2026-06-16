@@ -99,6 +99,131 @@ extension ProxyManagementView {
         )
     }
 
+    // MARK: - Model Availability Section (issue #27)
+    // 按上游模型聚合该节点请求日志的「可用率 + 延迟」信号，帮助在多模型间快速识别哪些更可靠。
+    // 数据全部来自现有 ProxyRequestLog（success / responseTimeMs / firstTokenMs），无额外埋点。
+
+    @ViewBuilder
+    func modelAvailabilitySection(for config: ProxyConfiguration) -> some View {
+        let models = viewModel
+            .modelAggregates(nodeFilter: config.id, modelFilter: nil)
+            .filter { $0.requests > 0 }
+            .sorted {
+                if $0.availability != $1.availability { return $0.availability > $1.availability }
+                if $0.requests != $1.requests { return $0.requests > $1.requests }
+                return $0.model.localizedCaseInsensitiveCompare($1.model) == .orderedAscending
+            }
+
+        if !models.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 6) {
+                    Text(L("Model Availability", "模型可用性"))
+                        .font(.headline.weight(.bold))
+                    Spacer()
+                    availabilityLegend
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
+                        modelAvailabilityRow(model)
+                        if index < models.count - 1 {
+                            Divider().padding(.horizontal, 12)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+            )
+        }
+    }
+
+    private var availabilityLegend: some View {
+        HStack(spacing: 10) {
+            legendDot(color: .green, text: "≥90%")
+            legendDot(color: .yellow, text: "50–89%")
+            legendDot(color: .red, text: "<50%")
+        }
+        .font(.system(size: 9, weight: .medium))
+        .foregroundStyle(.secondary)
+    }
+
+    private func legendDot(color: Color, text: String) -> some View {
+        HStack(spacing: 3) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(text)
+        }
+    }
+
+    private func modelAvailabilityRow(_ model: ProxyViewModel.ModelAggregate) -> some View {
+        let color = availabilityColor(model.availability)
+        return HStack(spacing: 12) {
+            Image(systemName: availabilityIcon(model.availability))
+                .font(.system(size: 14))
+                .foregroundStyle(color)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.model)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.08))
+                        Capsule()
+                            .fill(color)
+                            .frame(width: max(2, proxy.size.width * CGFloat(model.availability / 100)))
+                    }
+                }
+                .frame(height: 4)
+            }
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(String(format: "%.0f%%", model.availability))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(color)
+                Text(availabilitySubtitle(model))
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 132, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    /// 延迟 + 样本量副标题：优先展示 TTFT（首字时间，更能反映响应快慢），无流式样本则退回平均总耗时。
+    private func availabilitySubtitle(_ model: ProxyViewModel.ModelAggregate) -> String {
+        let reqs = L("\(model.requests) reqs", "\(model.requests) 次")
+        if let ttft = model.avgFirstTokenMs {
+            return "TTFT \(Int(ttft))ms · \(reqs)"
+        }
+        if model.avgResponseMs > 0 {
+            return String(format: "%@ %dms · %@", L("Resp", "响应"), Int(model.avgResponseMs), reqs)
+        }
+        return reqs
+    }
+
+    private func availabilityColor(_ availability: Double) -> Color {
+        if availability >= 90 { return .green }
+        if availability >= 50 { return .yellow }
+        return .red
+    }
+
+    private func availabilityIcon(_ availability: Double) -> String {
+        if availability >= 90 { return "checkmark.circle.fill" }
+        if availability >= 50 { return "exclamationmark.triangle.fill" }
+        return "xmark.octagon.fill"
+    }
+
     private func statsCard(title: String, value: String, icon: String, color: Color) -> some View {
         VStack(spacing: 8) {
             Image(systemName: icon)

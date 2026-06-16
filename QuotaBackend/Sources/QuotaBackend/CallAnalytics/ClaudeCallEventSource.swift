@@ -39,27 +39,30 @@ struct ClaudeCallEventSource {
         ]
     }
 
-    func collect(cutoff: Date?) -> (entries: [CallAnalyticsEntry], status: CallSourceStatus, agentInvocations: [AgentInvocationCount]) {
+    func collect(cutoff: Date?) -> (entries: [CallAnalyticsEntry], status: CallSourceStatus, agentInvocationsByDay: [String: [AgentInvocationCount]]) {
         let clock = CallAnalyticsClock(timeZone: timeZone)
         let roots = resolveProjectRoots().filter { FileManager.default.fileExists(atPath: $0) }
         guard !roots.isEmpty else {
-            return ([], CallSourceStatus(source: .claude, available: false, eventCount: 0, filesScanned: 0, errorCode: nil), [])
+            return ([], CallSourceStatus(source: .claude, available: false, eventCount: 0, filesScanned: 0, errorCode: nil), [:])
         }
 
         let files = collectJSONLFiles(roots: roots, cutoff: cutoff)
         var accumulator = CallEventAccumulator()
         // 各 agent 的「被调用次数」：一份会话文件 = 一次。主会话（根文件）记 "main"，
         // 子代理记其具体 agentType（读不到 → "subagent"）。与该 agent 是否调过工具无关。
-        var invocations: [String: Int] = [:]
+        // 为支持按天冻结归档（issue #32），按「会话最早事件所在日」归属该次调用——该日恒定、
+        // 跨日重扫不漂移，配合归档「过去日冻结」语义可避免同一会话被多日重复计数。
+        var invocationsByDay: [String: [String: Int]] = [:]
         for file in files {
             // 路径含 subagents/ 的整文件视为 subagent；其具体类型取边车 agent-<id>.meta.json 的 agentType
             // （如 Explore / Plan），拿不到则归为通用 "subagent"。常规文件再按行内 isSidechain 兜底。
             let isSubagentFile = file.contains("/subagents/")
             let subagentType = isSubagentFile ? readSubagentType(forFile: file) : nil
-            invocations[isSubagentFile ? (subagentType ?? "subagent") : "main", default: 0] += 1
+            let agentName = isSubagentFile ? (subagentType ?? "subagent") : "main"
             let fallbackDayKey = clock.dayKey(fileModificationDate(file) ?? Date())
             // 同文件内按 tool_use_id 配对 tool_result（成功率）。配对发生在文件内、顺序保证 result 在 use 之后。
             var pending: [String: PendingCall] = [:]
+            var earliestDayKey: String?
             CallAnalyticsLineReader.forEachLine(
                 path: file,
                 needles: [Self.toolUseNeedle, Self.toolResultNeedle],
@@ -67,13 +70,15 @@ struct ClaudeCallEventSource {
             ) { line in
                 parseLine(line, clock: clock, fallbackDayKey: fallbackDayKey,
                           isSubagentFile: isSubagentFile, subagentType: subagentType,
-                          pending: &pending, into: &accumulator)
+                          pending: &pending, earliestDayKey: &earliestDayKey, into: &accumulator)
             }
             // 文件结束仍未配到 tool_result 的 tool_use：只计数，成功率未知（不计入分母）。
             for call in pending.values {
                 accumulator.add(source: .claude, kind: call.kind, name: call.name,
                                 server: call.server, dayKey: call.dayKey, agent: call.agent, success: nil)
             }
+            let invocationDay = earliestDayKey ?? fallbackDayKey
+            invocationsByDay[invocationDay, default: [:]][agentName, default: 0] += 1
         }
 
         let status = CallSourceStatus(
@@ -83,10 +88,10 @@ struct ClaudeCallEventSource {
             filesScanned: files.count,
             errorCode: nil
         )
-        let agentInvocations = invocations.map {
-            AgentInvocationCount(source: .claude, agent: $0.key, count: $0.value)
+        let agentInvocationsByDay = invocationsByDay.mapValues { perAgent in
+            perAgent.map { AgentInvocationCount(source: .claude, agent: $0.key, count: $0.value) }
         }
-        return (accumulator.entries(), status, agentInvocations)
+        return (accumulator.entries(), status, agentInvocationsByDay)
     }
 
     // MARK: - Parsing
@@ -98,6 +103,7 @@ struct ClaudeCallEventSource {
         isSubagentFile: Bool,
         subagentType: String?,
         pending: inout [String: PendingCall],
+        earliestDayKey: inout String?,
         into accumulator: inout CallEventAccumulator
     ) {
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
@@ -114,6 +120,10 @@ struct ClaudeCallEventSource {
                 dayKey = clock.dayKey(date)
             } else {
                 dayKey = fallbackDayKey
+            }
+            // 记录该会话出现过的最早事件日（dayKey 为 yyyy-MM-dd，可字典序比较），用于按天归属「被调用次数」。
+            if earliestDayKey == nil || dayKey < earliestDayKey! {
+                earliestDayKey = dayKey
             }
             // agent：子代理文件用其具体类型（拿不到→"subagent"）；常规文件按行 isSidechain 兜底；否则 "main"。
             let agent: String

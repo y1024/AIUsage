@@ -32,31 +32,91 @@ enum OpenCodePricingCurrency: String, Codable, CaseIterable {
     }
 }
 
-/// 节点内单个模型：模型 ID + 独立定价（录入币种由节点的 pricingCurrency 决定）。
+/// 模型模态（modalities）取值，对齐 models.dev / OpenCode 的 `modalities.{input,output}` 数组。
+/// 写进受管块每个模型的 `modalities` 字段，供 OpenCode/AI SDK 判断该模型支持哪些输入/输出形态。
+enum OpenCodeModality: String, Codable, CaseIterable, Identifiable {
+    case text
+    case image
+    case audio
+    case video
+    case pdf
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .text: return AppSettings.shared.t("Text", "文本")
+        case .image: return AppSettings.shared.t("Image", "图像")
+        case .audio: return AppSettings.shared.t("Audio", "音频")
+        case .video: return AppSettings.shared.t("Video", "视频")
+        case .pdf: return "PDF"
+        }
+    }
+
+    /// 输出侧实际可用的模态（绝大多数上游只输出文本/图像/音频）。
+    static let outputCases: [OpenCodeModality] = [.text, .image, .audio]
+}
+
+/// 节点内单个模型：模型 ID + 独立定价 + 独立 modalities（每模型可单独配置，issue #24）。
+/// 录入币种由节点的 pricingCurrency 决定。
 struct OpenCodeModelEntry: Codable, Equatable, Identifiable {
     var id: String
     var priceInputPerMillion: Double
     var priceOutputPerMillion: Double
     var priceCacheReadPerMillion: Double
     var priceCacheWritePerMillion: Double
+    /// 每模型输入/输出模态（空 = 不写 modalities，由 OpenCode 取模型默认）。
+    var inputModalities: [OpenCodeModality]
+    var outputModalities: [OpenCodeModality]
 
     init(
         id: String,
         priceInputPerMillion: Double = 0,
         priceOutputPerMillion: Double = 0,
         priceCacheReadPerMillion: Double = 0,
-        priceCacheWritePerMillion: Double = 0
+        priceCacheWritePerMillion: Double = 0,
+        inputModalities: [OpenCodeModality] = [],
+        outputModalities: [OpenCodeModality] = []
     ) {
         self.id = id
         self.priceInputPerMillion = priceInputPerMillion
         self.priceOutputPerMillion = priceOutputPerMillion
         self.priceCacheReadPerMillion = priceCacheReadPerMillion
         self.priceCacheWritePerMillion = priceCacheWritePerMillion
+        self.inputModalities = inputModalities
+        self.outputModalities = outputModalities
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case priceInputPerMillion
+        case priceOutputPerMillion
+        case priceCacheReadPerMillion
+        case priceCacheWritePerMillion
+        case inputModalities
+        case outputModalities
+    }
+
+    // 自定义解码：modalities 为后加字段，旧档案缺省 → 空数组，保证既有节点平滑升级。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        priceInputPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceInputPerMillion) ?? 0
+        priceOutputPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceOutputPerMillion) ?? 0
+        priceCacheReadPerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheReadPerMillion) ?? 0
+        priceCacheWritePerMillion = try c.decodeIfPresent(Double.self, forKey: .priceCacheWritePerMillion) ?? 0
+        inputModalities = try c.decodeIfPresent([OpenCodeModality].self, forKey: .inputModalities) ?? []
+        outputModalities = try c.decodeIfPresent([OpenCodeModality].self, forKey: .outputModalities) ?? []
     }
 
     var hasPricing: Bool {
         priceInputPerMillion > 0 || priceOutputPerMillion > 0
             || priceCacheReadPerMillion > 0 || priceCacheWritePerMillion > 0
+    }
+
+    /// 是否配置了 modalities（任一侧非空）。
+    var hasModalities: Bool {
+        !inputModalities.isEmpty || !outputModalities.isEmpty
     }
 }
 

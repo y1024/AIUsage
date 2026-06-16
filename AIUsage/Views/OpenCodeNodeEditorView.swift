@@ -35,6 +35,8 @@ struct OpenCodeNodeEditorView: View {
     /// 行式模型编辑。模型 ID 可编辑，不能充当 ForEach 身份（打字即重建行、丢焦点），
     /// 故用稳定 UUID 行号包装。
     @State private var modelRows: [ModelRow]
+    /// 已展开 modalities 配置面板的模型行 id 集合（issue #24，每模型独立配置模态）。
+    @State private var expandedModalityRows: Set<UUID> = []
     @StateObject private var modelFetch = ModelFetchState()
     @State private var connectivity: ConnectivityResult = .idle
     @State private var selectedTab: OpenCodeEditorTab = .settings
@@ -531,44 +533,138 @@ struct OpenCodeNodeEditorView: View {
     private func modelRowView(_ row: Binding<OpenCodeNodeEditorView.ModelRow>) -> some View {
         let modelId = row.wrappedValue.entry.id.trimmingCharacters(in: .whitespaces)
         let isDefault = !modelId.isEmpty && node.defaultModel == modelId
-        return HStack(spacing: 6) {
-            Button {
-                guard !modelId.isEmpty else { return }
-                node.defaultModel = modelId
-            } label: {
-                Image(systemName: isDefault ? "largecircle.fill.circle" : "circle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(isDefault ? Self.brand : Color.secondary.opacity(0.5))
-            }
-            .buttonStyle(.plain)
-            .frame(width: 30)
-            .help(L("Use as default model", "设为默认模型"))
+        let rowId = row.wrappedValue.id
+        let isExpanded = expandedModalityRows.contains(rowId)
+        let hasModalities = row.wrappedValue.entry.hasModalities
+        return VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Button {
+                    guard !modelId.isEmpty else { return }
+                    node.defaultModel = modelId
+                } label: {
+                    Image(systemName: isDefault ? "largecircle.fill.circle" : "circle")
+                        .font(.system(size: 13))
+                        .foregroundStyle(isDefault ? Self.brand : Color.secondary.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                .frame(width: 30)
+                .help(L("Use as default model", "设为默认模型"))
 
-            TextField("deepseek-chat", text: row.entry.id)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12, design: .monospaced))
-                .frame(maxWidth: .infinity)
-                .autocorrectionDisabled()
+                TextField("deepseek-chat", text: row.entry.id)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .autocorrectionDisabled()
 
-            if showsPriceColumns {
-                priceField(row.entry.priceInputPerMillion)
-                priceField(row.entry.priceOutputPerMillion)
-                priceField(row.entry.priceCacheWritePerMillion)
-                priceField(row.entry.priceCacheReadPerMillion)
+                if showsPriceColumns {
+                    priceField(row.entry.priceInputPerMillion)
+                    priceField(row.entry.priceOutputPerMillion)
+                    priceField(row.entry.priceCacheWritePerMillion)
+                    priceField(row.entry.priceCacheReadPerMillion)
+                }
+
+                Button {
+                    if isExpanded { expandedModalityRows.remove(rowId) }
+                    else { expandedModalityRows.insert(rowId) }
+                } label: {
+                    Image(systemName: hasModalities ? "square.stack.3d.up.fill" : "square.stack.3d.up")
+                        .font(.system(size: 12))
+                        .foregroundStyle(hasModalities ? Self.brand : Color.secondary.opacity(isExpanded ? 0.9 : 0.5))
+                }
+                .buttonStyle(.plain)
+                .frame(width: 20)
+                .help(L("Configure modalities for this model", "为该模型配置模态（输入/输出）"))
+
+                Button {
+                    modelRows.removeAll { $0.id == row.wrappedValue.id }
+                    expandedModalityRows.remove(rowId)
+                    ensureDefaultModelValid()
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.red.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .frame(width: 20)
+                .help(L("Remove model", "移除模型"))
             }
 
-            Button {
-                modelRows.removeAll { $0.id == row.wrappedValue.id }
-                ensureDefaultModelValid()
-            } label: {
-                Image(systemName: "minus.circle.fill")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.red.opacity(0.7))
+            if isExpanded {
+                modalityEditor(row)
             }
-            .buttonStyle(.plain)
-            .frame(width: 20)
-            .help(L("Remove model", "移除模型"))
         }
+    }
+
+    /// 单个模型的 modalities 配置面板：输入/输出两组可多选的模态芯片（issue #24）。
+    private func modalityEditor(_ row: Binding<OpenCodeNodeEditorView.ModelRow>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            modalityRow(
+                title: L("Input", "输入"),
+                options: OpenCodeModality.allCases,
+                selection: row.entry.inputModalities
+            )
+            modalityRow(
+                title: L("Output", "输出"),
+                options: OpenCodeModality.outputCases,
+                selection: row.entry.outputModalities
+            )
+            Text(L(
+                "Leave empty to use the model's defaults. Written into the model's modalities block in opencode.json.",
+                "留空则使用模型默认值。会写入 opencode.json 中该模型的 modalities 块。"
+            ))
+            .font(.system(size: 10))
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .padding(.leading, 30)
+    }
+
+    private func modalityRow(
+        title: String,
+        options: [OpenCodeModality],
+        selection: Binding<[OpenCodeModality]>
+    ) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .leading)
+            HStack(spacing: 6) {
+                ForEach(options) { modality in
+                    modalityChip(modality, selection: selection)
+                }
+            }
+        }
+    }
+
+    private func modalityChip(
+        _ modality: OpenCodeModality,
+        selection: Binding<[OpenCodeModality]>
+    ) -> some View {
+        let isOn = selection.wrappedValue.contains(modality)
+        return Button {
+            if isOn {
+                selection.wrappedValue.removeAll { $0 == modality }
+            } else if !selection.wrappedValue.contains(modality) {
+                selection.wrappedValue.append(modality)
+            }
+        } label: {
+            Text(modality.label)
+                .font(.system(size: 10, weight: isOn ? .semibold : .medium))
+                .foregroundStyle(isOn ? Color.white : Color.primary.opacity(0.7))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule().fill(isOn ? Self.brand : Color.primary.opacity(0.08))
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func priceField(_ value: Binding<Double>) -> some View {

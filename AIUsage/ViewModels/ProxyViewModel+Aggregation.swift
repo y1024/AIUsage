@@ -125,6 +125,13 @@ extension ProxyViewModel {
         var outputTokens: Int
         var cacheReadTokens: Int
         var cacheCreationTokens: Int
+        // 可用性 / 延迟信号（issue #27）：直接从请求日志逐条聚合，无需额外埋点。
+        var successfulRequests: Int = 0
+        /// 成功请求的总响应耗时（ms），用于算平均；失败请求不计入（错误耗时会污染延迟信号）。
+        var responseTimeMsTotalSuccess: Double = 0
+        /// 首字时间 TTFT 的总和（ms）与样本数，仅流式成功请求提供。
+        var firstTokenMsTotal: Double = 0
+        var firstTokenSamples: Int = 0
 
         var cacheTokens: Int { cacheReadTokens + cacheCreationTokens }
 
@@ -133,6 +140,24 @@ extension ProxyViewModel {
             let denom = inputTokens + cacheReadTokens + cacheCreationTokens
             guard denom > 0 else { return 0 }
             return Double(cacheReadTokens) / Double(denom) * 100
+        }
+
+        /// 可用率（成功 / 总请求，百分比）。无请求为 0。
+        var availability: Double {
+            guard requests > 0 else { return 0 }
+            return Double(successfulRequests) / Double(requests) * 100
+        }
+
+        /// 成功请求的平均总响应耗时（ms）。受输出长度影响，作为兜底延迟信号。
+        var avgResponseMs: Double {
+            guard successfulRequests > 0 else { return 0 }
+            return responseTimeMsTotalSuccess / Double(successfulRequests)
+        }
+
+        /// 平均首字时间 TTFT（ms）。仅流式样本，更能反映「响应快不快」；无样本为 nil。
+        var avgFirstTokenMs: Double? {
+            guard firstTokenSamples > 0 else { return nil }
+            return firstTokenMsTotal / Double(firstTokenSamples)
         }
     }
 
@@ -160,6 +185,14 @@ extension ProxyViewModel {
             agg.outputTokens += log.tokensOutput
             agg.cacheReadTokens += log.tokensCacheRead
             agg.cacheCreationTokens += log.tokensCacheCreation
+            if log.success {
+                agg.successfulRequests += 1
+                agg.responseTimeMsTotalSuccess += log.responseTimeMs
+            }
+            if let ttft = log.firstTokenMs {
+                agg.firstTokenMsTotal += ttft
+                agg.firstTokenSamples += 1
+            }
             map[key] = agg
         }
 
