@@ -95,11 +95,17 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" \
             $(security list-keychains -d user | sed 's/[\"[:space:]]//g')
 
+          # A self-signed cert is untrusted, so `find-identity -v` (valid only)
+          # returns nothing; fall back to the unfiltered list. The `|| true`
+          # guards are required: under `set -o pipefail`, grep with no match
+          # exits non-zero and would abort the whole step.
+          echo "Code signing identities in imported keychain:"
+          security find-identity -p codesigning "$KEYCHAIN_PATH" || true
           IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
-            | grep -oE '[0-9A-F]{40}' | head -1)"
+            | grep -oE '[0-9A-F]{40}' | head -1 || true)"
           if [[ -z "$IDENTITY" ]]; then
             IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN_PATH" \
-              | grep -oE '[0-9A-F]{40}' | head -1)"
+              | grep -oE '[0-9A-F]{40}' | head -1 || true)"
           fi
           if [[ -z "$IDENTITY" ]]; then
             echo "No code signing identity found in imported certificate" >&2
