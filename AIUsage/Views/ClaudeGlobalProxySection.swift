@@ -48,20 +48,11 @@ struct ClaudeGlobalProxySection: View {
                 brand: Self.claudeBrand,
                 title: currentNodeName,
                 systemImage: "bolt.fill",
-                isDisabled: manager.isBusy
-            ) {
-                ForEach(nodes) { node in
-                    Button {
-                        nodeBinding.wrappedValue = node.id
-                    } label: {
-                        if node.id == nodeBinding.wrappedValue {
-                            Label(node.name, systemImage: "checkmark")
-                        } else {
-                            Text(node.name)
-                        }
-                    }
-                }
-            }
+                isDisabled: manager.isBusy,
+                items: nodes.map { GlobalProxyPickerItem(id: $0.id, name: $0.name) },
+                selectedId: nodeBinding.wrappedValue,
+                onSelect: { nodeBinding.wrappedValue = $0 }
+            )
         }
     }
 

@@ -52,20 +52,11 @@ struct OpenCodeGlobalProxySection: View {
                 brand: Self.brand,
                 title: currentNodeName,
                 systemImage: "bolt.fill",
-                isDisabled: manager.isBusy
-            ) {
-                ForEach(nodes) { node in
-                    Button {
-                        nodeBinding.wrappedValue = node.id
-                    } label: {
-                        if node.id == nodeBinding.wrappedValue {
-                            Label(node.name, systemImage: "checkmark")
-                        } else {
-                            Text(node.name)
-                        }
-                    }
-                }
-            }
+                isDisabled: manager.isBusy,
+                items: nodes.map { GlobalProxyPickerItem(id: $0.id, name: $0.name) },
+                selectedId: nodeBinding.wrappedValue,
+                onSelect: { nodeBinding.wrappedValue = $0 }
+            )
         }
     }
 
@@ -100,20 +91,17 @@ struct OpenCodeGlobalProxySection: View {
                         brand: Self.brand,
                         title: interface.displayName,
                         systemImage: "arrow.left.arrow.right",
-                        isDisabled: isEnabled || manager.isBusy
-                    ) {
-                        ForEach(OpenCodeProtocol.allCases, id: \.self) { proto in
-                            Button {
+                        isDisabled: isEnabled || manager.isBusy,
+                        items: OpenCodeProtocol.allCases.map {
+                            GlobalProxyPickerItem(id: $0.rawValue, name: $0.displayName)
+                        },
+                        selectedId: interface.rawValue,
+                        onSelect: { raw in
+                            if let proto = OpenCodeProtocol(rawValue: raw) {
                                 interfaceBinding.wrappedValue = proto
-                            } label: {
-                                if proto == interface {
-                                    Label(proto.displayName, systemImage: "checkmark")
-                                } else {
-                                    Text(proto.displayName)
-                                }
                             }
                         }
-                    }
+                    )
                 }
                 Spacer()
             }

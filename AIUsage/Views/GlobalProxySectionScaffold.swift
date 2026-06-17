@@ -128,20 +128,31 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
     }
 }
 
-// MARK: - Chip Menu (replaces system `.menu` Picker)
-// 自定义胶囊下拉：圆角 + 品牌色淡底 + 右侧 chevron，按内容自适应宽度（彻底避开 SwiftUI `.menu`
-// Picker 在 macOS 上贪婪撑满整行的问题），观感与节点卡片统一。
+// MARK: - Chip Picker (custom popover; unified with menu bar panel)
+// 胶囊触发器 + 自定义 popover 面板：取代旧的系统 `.menu` 下拉。面板行样式与顶部菜单栏
+// 节点切换面板（MenuBarPanelRowView）完全一致：激活行品牌色高亮 + 勾选 + 左侧色条 + hover。
+// 数据驱动（items + selectedId + onSelect），节点选择与接口选择共用同一套观感。
 
-struct GlobalProxyChipMenu<MenuContent: View>: View {
+/// 选择面板里的一项（节点 / 接口）。
+struct GlobalProxyPickerItem: Identifiable {
+    let id: String
+    let name: String
+}
+
+struct GlobalProxyChipMenu: View {
     let brand: Color
     let title: String
     var systemImage: String? = nil
     var isDisabled: Bool = false
-    @ViewBuilder let menuContent: () -> MenuContent
+    let items: [GlobalProxyPickerItem]
+    let selectedId: String
+    let onSelect: (String) -> Void
+
+    @State private var isOpen = false
 
     var body: some View {
-        Menu {
-            menuContent()
+        Button {
+            isOpen.toggle()
         } label: {
             HStack(spacing: 5) {
                 if let systemImage {
@@ -153,20 +164,91 @@ struct GlobalProxyChipMenu<MenuContent: View>: View {
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .heavy))
+                    .rotationEffect(.degrees(isOpen ? 180 : 0))
                     .opacity(0.9)
             }
         }
-        // `.borderlessButton` 不渲染自定义背景，改用 `.button` 菜单样式 + 自定义 ButtonStyle，
-        // 由 ButtonStyle 亲手画胶囊，保证边框/底色一定可见。
-        .menuStyle(.button)
         .buttonStyle(GlobalProxyChipButtonStyle(brand: brand, isDisabled: isDisabled))
-        .menuIndicator(.hidden)
         .fixedSize()
         .disabled(isDisabled)
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            panel
+        }
+    }
+
+    private var panel: some View {
+        ScrollView {
+            VStack(spacing: 2) {
+                if items.isEmpty {
+                    Text(L("No nodes available", "暂无可用节点"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                } else {
+                    ForEach(items) { item in
+                        GlobalProxyPickerRow(
+                            brand: brand,
+                            name: item.name,
+                            isActive: item.id == selectedId
+                        ) {
+                            onSelect(item.id)
+                            isOpen = false
+                        }
+                    }
+                }
+            }
+            .padding(6)
+        }
+        .frame(width: 240)
+        .frame(maxHeight: 320)
     }
 }
 
-/// 胶囊外观由 ButtonStyle 绘制（`.button` 菜单样式会沿用当前 buttonStyle）。
+/// 面板内一行：与菜单栏 MenuBarPanelRowView 同款（激活高亮 + 勾选 + 左侧色条 + hover）。
+private struct GlobalProxyPickerRow: View {
+    let brand: Color
+    let name: String
+    let isActive: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(isActive ? brand : Color.secondary.opacity(0.45))
+                Text(name)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isActive ? brand.opacity(0.16)
+                          : (hovered ? Color.primary.opacity(0.06) : Color.clear))
+            )
+            .overlay(alignment: .leading) {
+                if isActive {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(brand)
+                        .frame(width: 3, height: 16)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+    }
+}
+
+/// 胶囊触发器外观由 ButtonStyle 绘制，保证边框/底色一定可见。
 private struct GlobalProxyChipButtonStyle: ButtonStyle {
     let brand: Color
     let isDisabled: Bool
