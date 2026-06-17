@@ -61,7 +61,13 @@ extension QuotaHTTPServer {
             upstreamModel = requestModel
             var bodyModified = false
 
-            if config.enableModelAliasMapping, requestModel != "unknown" {
+            // 全局统一代理（OpenCode anthropic 接口）：CLI 固定发虚拟模型名，按激活节点真实模型无条件改写，
+            // 优先于三层别名映射。
+            if let forced = config.forcedModel, forced != requestModel {
+                upstreamModel = forced
+                json["model"] = forced
+                bodyModified = true
+            } else if config.enableModelAliasMapping, requestModel != "unknown" {
                 let mapped = config.mapToUpstreamModel(requestModel)
                 if mapped != requestModel {
                     upstreamModel = mapped
@@ -450,6 +456,8 @@ extension QuotaHTTPServer {
         if let errorType { log["error_type"] = errorType }
         if let errorMessage { log["error"] = errorMessage }
         if let statusCode { log["status_code"] = statusCode }
+        // 全局统一代理：一个进程随激活节点轮转服务多个节点，按 node_id 把日志归因到当前节点。
+        if let nodeId = activeNodeId, !nodeId.isEmpty { log["node_id"] = nodeId }
 
         if let data = try? JSONSerialization.data(withJSONObject: log),
            let jsonStr = String(data: data, encoding: .utf8) {

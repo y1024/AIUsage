@@ -430,3 +430,101 @@ models 的 `cost` 块（USD/百万）→ 每模型定价、`limit` → 上下文
 | 巨型 message 表 | 30 天窗口下推 SQL + 冻结归档；首次全量仅一次 |
 | 桌面版数据目录不同 | Discovery 多路径探测（§2.1） |
 | 内嵌 QuotaServer 过旧（曾导致代理 404「Not found」：build phase 声明 outputPaths 但无 inputPaths，Xcode 增量构建跳过 swift build+拷贝） | 「Build QuotaServer Helper」phase 改为 alwaysOutOfDate=1，每次构建都跑（swift build 自身增量，代价小） |
+
+## 12. 全局统一代理与节点归因（已实现）
+
+> 由 Codex/Claude「全局统一代理」扩展到 OpenCode。与 §8 路线 B（每节点独立进程、
+> 日志仅观测、计费走 opencode.db）是**两套不同轨道**：全局代理是常驻单进程、随激活节点
+> 热切换、**计费走代理日志**（db 侧排除全局 provider）。两者可并存，互不影响。
+
+### 12.1 形态
+
+- 一个常驻 `QuotaServer` 进程长期占用固定端口（默认 14401），对 CLI 暴露稳定入口：
+  接口协议 + 端口 + client key + 固定虚拟模型名。`opencode.json` 一次性指向它（受管 `aiusage`
+  provider 块 + 顶层 `model`）。
+- 启用时先选接口协议（OpenAI 兼容 / Anthropic / OpenAI Responses），**只能在「同接口」节点间
+  热切换**以保证 wire 格式兼容；切换激活节点走进程内热替换（admin POST），CLI 无感、端口不变。
+- 启用期间接管 `opencode.json` 并禁用每节点单独激活（由本卡片统一切换激活节点）。
+- 三轨默认值：端口 14399/14400/14401（Codex/Claude/OpenCode）；虚拟模型 `gpt` /
+  `opus,sonnet,haiku` / `LLM`。虚拟模型名仅作 CLI 固定入口名，**可任意取**——会被代理改写为
+  激活节点的真实上游模型（Claude 按 opus/sonnet/haiku → 节点 大/中/小 三层映射）。三轨全局区块
+  均有 Tip 说明此改写语义。
+
+### 12.2 模型改写
+
+- CLI 端固定发虚拟模型名，后端按激活节点真实模型**无条件改写**请求体 `model`
+  （`OpenCodeProxyConfiguration.forcedModel` / `ClaudeProxyConfiguration.forcedModel`）。
+- 每节点代理模式（路线 B）`forcedModel = nil` → 不改写，忠实透传。
+
+### 12.3 接口 → 后端轨道映射
+
+`GlobalProxyRuntime.opencode` 是单一实例（`track == .opencode`），但按接口构造不同启动 env /
+admin 路由（`OpenCodeGlobalProxyAdapter`），复用既有三条入站路由与 `PROXY_LOG` 发射：
+
+| 接口 | 后端轨 | 入站路由 | admin 路由 |
+|---|---|---|---|
+| OpenAI 兼容 | `PROXY_TARGET=opencode` | `/v1/chat/completions` | `/__aiusage/admin/opencode-upstream` |
+| Anthropic | `PROXY_MODE=passthrough` | `/v1/messages` | `/__aiusage/admin/claude-upstream` |
+| OpenAI Responses | `PROXY_TARGET=codex` | `/v1/responses` | `/__aiusage/admin/codex-upstream` |
+
+### 12.4 归因链路（计费走代理日志）
+
+1. **打点**：后端在全部三个接口处理器都按 `activeNodeId` 在 `PROXY_LOG` 里打 `node_id`
+   （`activeNodeId` 来自启动 env `GLOBAL_PROXY_NODE_ID`，每次 admin 热切换原子更新）。
+2. **路由**：`GlobalProxyRuntime` 的 stdout 读取把 `.opencode` 轨日志交给
+   `OpenCodeProxyRuntime.ingestGlobalProxyLog`（Codex/Claude 轨仍走 `ProxyViewModel.parseProxyLog`）。
+3. **计费 + 落账**：`ingestGlobalProxyLog` 按 `node_id` 找节点、按节点定价就地算 `estimatedCostUSD`
+   （`isGlobalProxy = true` 标记），然后三处写入：
+   - `requestLogs`（节点卡片成功率 / 最近请求）；
+   - `globalNodeStats[nodeId]` 永久累计 → `opencode-global-usage.json`（节点卡片用量/费用）；
+   - `ProxyUsageArchiveStore.accumulate(.opencode, …)` 按天 × 真实上游模型增量归档 → 热力图。
+     归档模型键写成 `aiusage-<slug>/<上游模型>`（与 db 直连/路线 B 完全一致），让同节点同模型跨两条路径合并为一行。
+     （原始日志环形封顶会被裁剪，故按发生即增量累加、不可整日重算，跨重启不重复折叠。）
+4. **后端热力图合并**：`OpenCodeCostProvider.fetchUsage` 把 db 冻结归档与代理归档按天合并
+   （`OpenCodeCostProvider+ProxyArchive.swift`）。因模型键同口径（`aiusage-<slug>/<model>`），
+   同节点同模型自动合并、**不加任何来源后缀**；展示层 `StatsDataAdapter.displayModelLabel` 统一剥掉 `aiusage-` 前缀。
+   db 侧 `OpenCodeCostProvider+Parsing` 与 `OpenCodeNodeStatsFetcher` 均排除裸 `aiusage`，两源互斥不双计。
+
+### 12.5 节点卡片展示（与 Codex/Claude 同体验）
+
+- **列表卡片 pills（请求数/费用）/ 概览汇总 / 统计网格**：db 节点归因 + 全局永久累计两源相加。
+- **最近请求**列表按来源区分，避免双列：db 成功行（直连/路线 B）+ 路线 B 代理失败行 +
+  **全局代理日志成功与失败都显示**（db 不记全局流量，代理日志是其唯一来源，靠 `isGlobalProxy` 判别）。
+- 删除节点时 `OpenCodeProxyRuntime.purgeNode` 清理该节点的 `globalNodeStats` 与 `requestLogs` 残留。
+
+### 12.6 与路线 B 的计费差异（务必区分）
+
+| 维度 | 路线 B（每节点透传代理） | 全局统一代理 |
+|---|---|---|
+| 进程 | 每节点一个，端口各异 | 单进程，固定端口，热切换 |
+| 接管 opencode.json | 否（配合「复制启动命令」） | 是（注入裸 `aiusage` 块） |
+| db providerID | `aiusage-<slug>`（计入 db） | `aiusage`（db 双双排除） |
+| 计费来源 | opencode.db 冻结 cost | 代理日志按激活节点定价冻结 |
+| 代理日志角色 | 仅观测（失败明细 + 成功率） | 节点用量/费用/成功失败的唯一来源 |
+
+### 12.7 用量统计 & 热力图：两源合并与去重（核心，务必读）
+
+OpenCode 用量只有两个真相源，二者是**互斥的事件集合**，相加即全量、不双计：
+
+| 源 | 内容 | 模型键 | 谁负责 |
+|---|---|---|---|
+| **A. opencode.db** | OpenCode 本地会话消息（直连 / 路线 B 透传） | `aiusage-<slug>/<model>`（受管节点）或第三方 `provider/model` | `OpenCodeCostProvider+Parsing` |
+| **B. 代理日志归档** | 全局统一代理转发流量（按激活节点定价冻结成本） | `aiusage-<slug>/<model>`（App 侧 `ingestGlobalProxyLog` 写出） | `OpenCodeProxyRuntime` → `proxy-usage-opencode-v1.json` |
+
+**为什么需要 B**：全局代理在 opencode.json 注入的是**裸 `aiusage`** provider，OpenCode 只会把这条流量记成 `aiusage/<虚拟模型>`——它**不知道实际转发到了哪个节点/哪个真实模型**，无法做节点归因。代理日志在 `QuotaServer` 处用启动 env `GLOBAL_PROXY_NODE_ID`（admin 热切换原子更新）给每条 `PROXY_LOG` 打上真实 `node_id` + 真实上游模型，这才补上了 db 缺失的节点维度。
+
+**如何去重（去掉「全局聚合」、换成「各节点真实用量」）**：
+
+1. db 解析在 `OpenCodeCostProvider+Parsing` 与 `OpenCodeNodeStatsFetcher` 两处都**丢弃裸 `aiusage`** 那条全局聚合（`providerID == "aiusage"` → skip）。即用户说的「那条只知道全局、不知道节点的用量」被整条移除。
+2. 同一笔全局流量改由源 B 以 `aiusage-<slug>/<真实模型>` 重新计入——节点维度由 `node_id` 还原，成本按该节点单价冻结。
+3. 因为 A 与 B 的模型键**完全同口径**（都是 `aiusage-<slug>/<model>`），`mergeProxyDays` 按「日 × 模型键」相加时，**同节点同模型自动并入同一行**：
+   - 某节点既走过直连/路线 B（落 A）又走过全局代理（落 B）→ 两段用量合并为该模型一行，不拆分、不重复。
+   - 不同节点（不同 slug）的同名模型 → 仍按节点分行，保留归因。
+4. 展示层 `StatsDataAdapter.displayModelLabel` 统一剥掉 `aiusage-` 前缀，热力图/分布显示为干净的 `<slug>/<model>`。
+
+**热力图与节点卡片的喂数关系**：
+
+- **热力图 / 用量统计页**：吃后端 `OpenCodeCostProvider.fetchUsage`（A 冻结归档 + B 代理归档按日合并）。
+- **节点卡片 pills / 统计网格 / 最近请求**：吃 `OpenCodeNodeStatsFetcher`（A 的节点桶，排除裸 `aiusage`）**＋** `OpenCodeProxyRuntime.globalNodeStats`（B 的逐节点永久累计）相加。
+
+**结论**：能准确按节点 × 模型显示用量；裸全局聚合已被移除并按 `node_id` 拆回各节点真实用量；A/B 互斥相加不双计。**唯一前提**是全局代理必须把 `node_id` 正确打进 `PROXY_LOG`（已在三个接口处理器统一打点）；若某条日志缺 `node_id`（理论上不应发生），该条会退化为裸上游模型名、归不到具体节点，但不会被重复计入。

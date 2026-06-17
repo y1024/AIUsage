@@ -59,15 +59,22 @@ struct OpenCodeOverviewStrip: View {
     }
 
     /// 只统计当前列表里节点的归因数据（已删除节点的历史归因不计入，避免对不上）。
+    /// db（直连/路线 B）+ 全局统一代理永久累计两源相加（来源互斥，不双计）。
     private func aggregateTotals() -> (requests: Int, tokens: Int, cost: Double) {
         var requests = 0
         var tokens = 0
         var cost: Double = 0
         for node in store.nodes {
-            guard let stats = statsStore.stats(for: node) else { continue }
-            requests += stats.requestCount
-            tokens += stats.totalTokens
-            cost += stats.costUsd
+            if let stats = statsStore.stats(for: node) {
+                requests += stats.requestCount
+                tokens += stats.totalTokens
+                cost += stats.costUsd
+            }
+            if let global = proxyRuntime.globalStats(forNodeId: node.id) {
+                requests += global.requestCount
+                tokens += global.totalTokens
+                cost += global.costUsd
+            }
         }
         return (requests, tokens, cost)
     }
@@ -122,8 +129,19 @@ struct OpenCodeNodeStatisticsSection: View {
     @ObservedObject var proxyRuntime: OpenCodeProxyRuntime
 
     var body: some View {
-        let stats = statsStore.stats(for: node)
+        let dbStats = statsStore.stats(for: node)
+        let global = proxyRuntime.globalStats(forNodeId: node.id)
         let proxyLogs = proxyRuntime.logs(forNodeId: node.id)
+
+        // 直连/路线 B 用量来自 opencode.db；全局统一代理用量来自代理日志的永久累计（按节点定价）。
+        // 两者来源互斥（db 已排除全局 provider），相加即该节点的真实总用量。
+        let hasUsage = dbStats != nil || global != nil
+        let totalRequests = (dbStats?.requestCount ?? 0) + (global?.requestCount ?? 0)
+        let inputTokens = (dbStats?.inputTokens ?? 0) + (global?.inputTokens ?? 0)
+        let outputTokens = (dbStats?.outputTokens ?? 0) + (global?.outputTokens ?? 0)
+        let cacheReadTokens = (dbStats?.cacheReadTokens ?? 0) + (global?.cacheReadTokens ?? 0)
+        let cacheCreateTokens = (dbStats?.cacheCreateTokens ?? 0) + (global?.cacheCreateTokens ?? 0)
+        let totalCost = (dbStats?.costUsd ?? 0) + (global?.costUsd ?? 0)
 
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -147,25 +165,23 @@ struct OpenCodeNodeStatisticsSection: View {
             HStack(spacing: 12) {
                 statsCard(
                     title: L("Total Requests", "总请求"),
-                    value: stats.map { "\($0.requestCount)" } ?? "—",
+                    value: hasUsage ? "\(totalRequests)" : "—",
                     icon: "arrow.up.arrow.down",
                     color: .blue
                 )
                 statsCard(
                     title: L("Successful", "成功"),
-                    value: node.proxyEnabled && !proxyLogs.isEmpty
-                        ? "\(proxyLogs.filter(\.success).count)" : "—",
+                    value: proxyLogs.isEmpty ? "—" : "\(proxyLogs.filter(\.success).count)",
                     icon: "checkmark.circle",
                     color: .green,
-                    help: L("From local proxy logs (proxy mode only).", "来自本地代理日志（仅代理模式）。")
+                    help: L("From local proxy logs (proxy / global proxy mode).", "来自本地代理日志（代理 / 全局代理模式）。")
                 )
                 statsCard(
                     title: L("Failed", "失败"),
-                    value: node.proxyEnabled && !proxyLogs.isEmpty
-                        ? "\(proxyLogs.filter { !$0.success }.count)" : "—",
+                    value: proxyLogs.isEmpty ? "—" : "\(proxyLogs.filter { !$0.success }.count)",
                     icon: "xmark.circle",
                     color: .red,
-                    help: L("From local proxy logs (proxy mode only).", "来自本地代理日志（仅代理模式）。")
+                    help: L("From local proxy logs (proxy / global proxy mode).", "来自本地代理日志（代理 / 全局代理模式）。")
                 )
                 statsCard(
                     title: L("Avg Duration", "平均生成耗时"),
@@ -182,25 +198,25 @@ struct OpenCodeNodeStatisticsSection: View {
             HStack(spacing: 12) {
                 statsCard(
                     title: L("Input Tokens", "输入 Tokens"),
-                    value: stats.map { formatCompactNumber(Double($0.inputTokens)) } ?? "—",
+                    value: hasUsage ? formatCompactNumber(Double(inputTokens)) : "—",
                     icon: "arrow.down.circle",
                     color: .purple
                 )
                 statsCard(
                     title: L("Output Tokens", "输出 Tokens"),
-                    value: stats.map { formatCompactNumber(Double($0.outputTokens)) } ?? "—",
+                    value: hasUsage ? formatCompactNumber(Double(outputTokens)) : "—",
                     icon: "arrow.up.circle",
                     color: .pink
                 )
                 statsCard(
                     title: L("Cache Read", "缓存读取"),
-                    value: stats.map { formatCompactNumber(Double($0.cacheReadTokens)) } ?? "—",
+                    value: hasUsage ? formatCompactNumber(Double(cacheReadTokens)) : "—",
                     icon: "arrow.down.doc",
                     color: .orange
                 )
                 statsCard(
                     title: L("Cache Write", "缓存写入"),
-                    value: stats.map { formatCompactNumber(Double($0.cacheCreateTokens)) } ?? "—",
+                    value: hasUsage ? formatCompactNumber(Double(cacheCreateTokens)) : "—",
                     icon: "square.and.arrow.down",
                     color: .indigo
                 )
@@ -209,21 +225,23 @@ struct OpenCodeNodeStatisticsSection: View {
             HStack(spacing: 12) {
                 statsCard(
                     title: L("Hit Rate", "命中率"),
-                    value: cacheHitRate(stats),
+                    value: cacheHitRate(input: inputTokens, cacheRead: cacheReadTokens, cacheCreate: cacheCreateTokens),
                     icon: "scope",
                     color: .teal
                 )
                 statsCard(
                     title: L("Cost", "费用"),
-                    value: stats.map { formatProxyCurrency($0.costUsd) } ?? "—",
+                    value: hasUsage ? formatProxyCurrency(totalCost) : "—",
                     icon: "dollarsign.circle",
                     color: .red,
-                    help: node.hasPricing
-                        ? L("Pre-computed by OpenCode (opencode.db), same as Usage Stats.", "OpenCode 预计算（opencode.db），与用量统计页同口径。")
-                        : L(
-                            "This node is unpriced — set per-token prices in the node editor and OpenCode will record real spend for new messages.",
-                            "该节点未计价——在节点编辑器中填写单价后，OpenCode 会为新消息记录真实消费。"
-                        )
+                    help: global != nil
+                        ? L("Includes global proxy spend, estimated from this node's pricing (via proxy logs).", "含全局代理消费，按本节点定价估算（来自代理日志）。")
+                        : (node.hasPricing
+                            ? L("Pre-computed by OpenCode (opencode.db), same as Usage Stats.", "OpenCode 预计算（opencode.db），与用量统计页同口径。")
+                            : L(
+                                "This node is unpriced — set per-token prices in the node editor and OpenCode will record real spend for new messages.",
+                                "该节点未计价——在节点编辑器中填写单价后，OpenCode 会为新消息记录真实消费。"
+                            ))
                 )
             }
         }
@@ -249,11 +267,10 @@ struct OpenCodeNodeStatisticsSection: View {
         return "\(Int(avg))ms"
     }
 
-    private func cacheHitRate(_ stats: OpenCodeNodeStatsFetcher.NodeStats?) -> String {
-        guard let stats else { return "—" }
-        let eligible = stats.inputTokens + stats.cacheReadTokens + stats.cacheCreateTokens
+    private func cacheHitRate(input: Int, cacheRead: Int, cacheCreate: Int) -> String {
+        let eligible = input + cacheRead + cacheCreate
         guard eligible > 0 else { return "—" }
-        return String(format: "%.1f%%", Double(stats.cacheReadTokens) / Double(eligible) * 100)
+        return String(format: "%.1f%%", Double(cacheRead) / Double(eligible) * 100)
     }
 
     private func statsCard(title: String, value: String, icon: String, color: Color, help: String? = nil) -> some View {
@@ -291,15 +308,20 @@ struct OpenCodeNodeRecentRequestsSection: View {
 
     private static let rowLimit = 10
 
-    /// 统一明细行：db 成功消息（含费用/耗时）+ 代理日志失败行（含错误明细），按时间合并。
+    /// 统一明细行，按时间合并三类来源（互斥不重复）：
+    /// - `.message`        db 成功消息（直连 / 路线B，含费用/耗时）。
+    /// - `.proxyFailure`   路线B 代理失败行（成功明细以 db 为准，故只取失败）。
+    /// - `.proxyGlobal`    全局统一代理日志（成功+失败都取，db 不记全局流量，代理日志是唯一来源）。
     private enum Entry: Identifiable {
         case message(OpenCodeNodeStatsFetcher.RecentMessage)
         case proxyFailure(ProxyRequestLog)
+        case proxyGlobal(ProxyRequestLog)
 
         var id: String {
             switch self {
             case .message(let m): return "db-\(m.id)"
             case .proxyFailure(let log): return "proxy-\(log.id)"
+            case .proxyGlobal(let log): return "global-\(log.id)"
             }
         }
 
@@ -307,15 +329,20 @@ struct OpenCodeNodeRecentRequestsSection: View {
             switch self {
             case .message(let m): return m.date
             case .proxyFailure(let log): return log.timestamp
+            case .proxyGlobal(let log): return log.timestamp
             }
         }
     }
 
     private var entries: [Entry] {
         var merged: [Entry] = statsStore.recentMessages(for: node).map { .message($0) }
-        merged += proxyRuntime.logs(forNodeId: node.id)
-            .filter { !$0.success }
-            .map { .proxyFailure($0) }
+        for log in proxyRuntime.logs(forNodeId: node.id) {
+            if log.isGlobalProxy {
+                merged.append(.proxyGlobal(log))
+            } else if !log.success {
+                merged.append(.proxyFailure(log))
+            }
+        }
         return Array(merged.sorted { $0.date > $1.date }.prefix(Self.rowLimit))
     }
 
@@ -363,7 +390,55 @@ struct OpenCodeNodeRecentRequestsSection: View {
         switch entry {
         case .message(let message): messageRow(message)
         case .proxyFailure(let log): failureRow(log)
+        case .proxyGlobal(let log):
+            // 全局代理：成功行按 db 消息样式（模型/tokens/费用/耗时），失败行复用错误样式。
+            if log.success { globalSuccessRow(log) } else { failureRow(log) }
         }
+    }
+
+    /// 全局统一代理的成功请求行：db 不记全局流量，明细取自代理日志（费用按节点定价估算）。
+    private func globalSuccessRow(_ log: ProxyRequestLog) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.system(size: 14))
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(log.upstreamModel.nilIfBlank ?? log.claudeModel)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    if log.tokensCacheRead > 0 { cacheIndicator(L("Read", "读"), color: .green) }
+                    if log.tokensCacheCreation > 0 { cacheIndicator(L("Write", "写"), color: .purple) }
+                }
+                HStack(spacing: 6) {
+                    tokenLabel("In", value: log.tokensInput, color: .blue)
+                    tokenLabel("Out", value: log.tokensOutput, color: .cyan)
+                    if log.tokensCacheRead > 0 { tokenLabel("CR", value: log.tokensCacheRead, color: .green) }
+                    if log.tokensCacheCreation > 0 { tokenLabel("CW", value: log.tokensCacheCreation, color: .purple) }
+                }
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Text(String(format: "%.0fms", log.responseTimeMs))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                if log.estimatedCostUSD > 0 {
+                    Text(formatProxyCurrency(log.estimatedCostUSD))
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Text(Self.relativeFormatter.localizedString(for: log.timestamp, relativeTo: Date()))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(width: 60, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     private func messageRow(_ message: OpenCodeNodeStatsFetcher.RecentMessage) -> some View {

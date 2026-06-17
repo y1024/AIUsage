@@ -98,7 +98,8 @@ extension QuotaHTTPServer {
                 inputTokens: response.usage.inputTokens,
                 outputTokens: response.usage.outputTokens,
                 cacheCreationTokens: response.usage.cacheCreationInputTokens ?? 0,
-                cacheReadTokens: response.usage.cacheReadInputTokens ?? 0
+                cacheReadTokens: response.usage.cacheReadInputTokens ?? 0,
+                nodeId: activeNodeId
             )
             return jsonResponse(encodable: response, headers: headers)
         } catch {
@@ -112,7 +113,8 @@ extension QuotaHTTPServer {
                 responseTimeMs: elapsed,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
-                statusCode: errorResult.statusCode
+                statusCode: errorResult.statusCode,
+                nodeId: activeNodeId
             )
             httpLog.error("  ✗ Proxy error: \(error.localizedDescription)")
             var responseHeaders = headers
@@ -714,7 +716,8 @@ extension QuotaHTTPServer {
                 inputTokens: reportedInputTokens ?? 0,
                 outputTokens: finalOutputTokens,
                 cacheCreationTokens: reportedCacheCreation ?? 0,
-                cacheReadTokens: reportedCacheRead ?? 0
+                cacheReadTokens: reportedCacheRead ?? 0,
+                nodeId: activeNodeId
             )
 
         } catch {
@@ -736,7 +739,8 @@ extension QuotaHTTPServer {
                 firstTokenMs: firstTokenMs,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
-                statusCode: errorResult.statusCode
+                statusCode: errorResult.statusCode,
+                nodeId: activeNodeId
             )
         }
 
@@ -755,7 +759,8 @@ extension QuotaHTTPServer {
         cacheReadTokens: Int = 0,
         errorMessage: String? = nil,
         errorType: String? = nil,
-        statusCode: Int? = nil
+        statusCode: Int? = nil,
+        nodeId: String? = nil
     ) {
         var parts = [
             "\"type\":\"proxy_request_log\"",
@@ -780,6 +785,11 @@ extension QuotaHTTPServer {
         }
         if let code = statusCode {
             parts.append("\"status_code\":\(code)")
+        }
+        // 全局统一代理：一个进程随激活节点轮转服务多个节点，按 node_id 把日志归因到当前节点
+        // （宿主 App 解析时优先用 node_id 而非进程 configId）。
+        if let nodeId, !nodeId.isEmpty {
+            parts.append("\"node_id\":\(escapeJSON(nodeId))")
         }
         // stdout is parsed by the macOS host app for structured log ingestion
         print("PROXY_LOG:{\(parts.joined(separator: ","))}")

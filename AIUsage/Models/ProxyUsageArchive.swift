@@ -20,6 +20,9 @@ private let proxyUsageArchiveLog = Logger(subsystem: "com.aiusage.desktop", cate
 enum ProxyUsageFamily: String, CaseIterable, Sendable {
     case claude
     case codex
+    /// OpenCode 全局统一代理轨：用量/成本来自代理日志（按激活节点定价冻结），
+    /// 与 opencode.db 互斥（db 侧已排除全局 provider，避免双计）。
+    case opencode
 }
 
 struct ProxyUsageModelAgg: Codable, Sendable {
@@ -134,6 +137,20 @@ final class ProxyUsageArchiveStore {
             changed = true
         }
         guard changed else { return }
+        archive.updatedAt = Self.iso8601.string(from: Date())
+        archives[family] = archive
+        save(family, archive: archive)
+    }
+
+    /// 增量累加单条日志到「某日 × 上游模型」桶并持久化（用于无法整日重算的来源，如 OpenCode
+    /// 全局代理——其原始日志环形封顶，故按发生即累加，跨重启不重复折叠，与 replaceDays 互斥使用）。
+    func accumulate(_ family: ProxyUsageFamily, dayKey: String, model: String, log: ProxyRequestLog) {
+        var archive = loadIfNeeded(family)
+        var day = archive.days[dayKey] ?? ProxyUsageDay()
+        var agg = day.models[model] ?? ProxyUsageModelAgg()
+        agg.add(log)
+        day.models[model] = agg
+        archive.days[dayKey] = day
         archive.updatedAt = Self.iso8601.string(from: Date())
         archives[family] = archive
         save(family, archive: archive)

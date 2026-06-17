@@ -8,6 +8,8 @@ struct MenuBarProviderSection: View {
     let group: ProviderAccountGroup
     /// Codex 代理是否有节点正在生效：由 MenuBarView 统一观察后下传至账号行。
     let codexProxyActive: Bool
+    /// Codex 全局统一代理是否启用：由 MenuBarView 统一观察 GlobalProxyManager 后下传。
+    let codexGlobalProxyManaged: Bool
     @Binding var activationMessage: String?
     @Binding var activationSuccess: Bool
     @EnvironmentObject var appState: AppState
@@ -30,6 +32,7 @@ struct MenuBarProviderSection: View {
                     providerId: group.providerId,
                     accentColor: accentColor,
                     codexProxyActive: codexProxyActive,
+                    codexGlobalProxyManaged: codexGlobalProxyManaged,
                     activationMessage: $activationMessage,
                     activationSuccess: $activationSuccess
                 )

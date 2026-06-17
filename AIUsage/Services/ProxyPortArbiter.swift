@@ -31,11 +31,12 @@ enum ProxyPortArbiter {
         let label: String
     }
 
-    /// 当前正在监听的本 App 代理，跨三轨聚合。仅统计进程确实在运行的节点
+    /// 当前正在监听的本 App 代理，跨三轨 + 全局代理聚合。仅统计进程确实在运行的节点
     /// （崩溃/未起的节点不占端口，不应误报冲突）。
     static func runningPortOwners() -> [Owner] {
         ProxyViewModel.shared.runningProxyPortOwners()
             + OpenCodeProxyRuntime.shared.runningPortOwners()
+            + GlobalProxyRuntime.all.flatMap { $0.runningPortOwners() }
     }
 
     /// 若 `wantedPorts` 中任一端口已被「其它正在运行的代理」占用，返回首个冲突命中；否则 nil。

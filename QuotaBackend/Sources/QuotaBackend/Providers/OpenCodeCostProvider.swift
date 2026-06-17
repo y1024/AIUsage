@@ -62,12 +62,16 @@ public struct OpenCodeCostProvider: ProviderFetcher {
         relieveMallocPressure()
 
         // 2) 冻结归档：昨日前首写冻结、今天覆盖重算；删除本地库后历史不丢。
-        let days = await Self.archive.freeze(
+        let dbDays = await Self.archive.freeze(
             homeDirectory: homeDirectory,
             computed: computed,
             todayKey: todayKey,
             completedFullHistory: shouldImportFullHistory
         )
+        // 3) 合并全局统一代理用量（来自代理日志永久归档，模型键同口径 `aiusage-<slug>/<model>`，
+        //    同节点同模型与 db 直连自动并入同一行；db 侧已排除裸全局 provider，两源互斥不双计）。
+        //    即使本地 db 为空，只要有代理用量也照常呈现。
+        let days = mergeProxyDays(into: dbDays)
         guard !days.isEmpty else {
             throw ProviderError("no_usage_data", "No OpenCode usage recorded (opencode.db not found or empty; requires OpenCode >= 1.2)")
         }

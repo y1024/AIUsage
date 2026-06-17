@@ -76,7 +76,9 @@ struct LocalTokenUsageHeatmap: View {
         for provider in providers {
             guard let timelines = provider.costSummary?.modelTimelines else { continue }
             for series in timelines where track.matches(series.model) {
-                let modelName = track == .combined ? series.model : UsageTrack.stripSuffix(series.model)
+                // 先按轨剥后缀（Codex），再剥 OpenCode 受管前缀 `aiusage-`，让热力图 tooltip 模型名干净统一。
+                let base = track == .combined ? series.model : UsageTrack.stripSuffix(series.model)
+                let modelName = StatsDataAdapter.displayModelLabel(base)
                 for point in series.daily {
                     guard let pointDate = point.resolvedDate, point.tokens > 0 else { continue }
                     if calendar.startOfDay(for: pointDate) == targetDay {

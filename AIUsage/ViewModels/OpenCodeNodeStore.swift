@@ -16,6 +16,7 @@ private let openCodeStoreLog = Logger(subsystem: "com.aiusage.desktop", category
 
 enum OpenCodeNodeStoreError: LocalizedError {
     case proxyRequiresAPIKey
+    case managedByGlobalProxy
 
     var errorDescription: String? {
         switch self {
@@ -23,6 +24,11 @@ enum OpenCodeNodeStoreError: LocalizedError {
             return AppSettings.shared.t(
                 "Proxy mode with the OpenAI Responses protocol requires an API key.",
                 "OpenAI Responses 协议的代理模式需要填写 API Key。"
+            )
+        case .managedByGlobalProxy:
+            return AppSettings.shared.t(
+                "The OpenCode global proxy is enabled and manages opencode.json. Switch the active node from the global proxy panel, or disable it first.",
+                "OpenCode 全局代理已启用并接管 opencode.json。请在全局代理面板切换激活节点，或先停用全局代理。"
             )
         }
     }
@@ -124,6 +130,8 @@ final class OpenCodeNodeStore: ObservableObject {
         if proxyOnlyNodeIds.contains(node.id) {
             stopProxyOnly(node)
         }
+        // 清理该节点的全局统一代理归因残留（永久累计 + 请求日志），避免 JSON 长期堆积。
+        OpenCodeProxyRuntime.shared.purgeNode(node.id)
         nodes.removeAll { $0.id == node.id }
         save()
     }
@@ -188,6 +196,10 @@ final class OpenCodeNodeStore: ObservableObject {
     // MARK: - Activation
 
     func activate(_ node: OpenCodeNode) async throws {
+        // 与全局统一代理互斥：全局启用时由它独占 opencode.json，每节点激活会覆盖全局受管块。
+        if GlobalProxyManager.opencode.config.isEnabled {
+            throw OpenCodeNodeStoreError.managedByGlobalProxy
+        }
         let common = commonSettings(for: node)
         if node.proxyEnabled {
             // Codex 轨道（responses 透传）启动时强制要求 Key，缺失会让 QuotaServer

@@ -557,6 +557,11 @@ struct ProxyRequestLog: Codable, Identifiable {
     let errorMessage: String?
     let errorType: String?
     let statusCode: Int?
+    /// 是否来自「全局统一代理」（一个常驻进程随激活节点轮转）。OpenCode 轨用它区分两类日志：
+    /// 全局代理日志是该节点用量/成功率/最近请求的唯一来源（opencode.db 不记全局流量）；
+    /// 而每节点「仅代理 / 路线 B」日志仅作观测（成功明细以 opencode.db 为准），故展示口径不同。
+    /// 旧档案缺该键时解码为 false（向后兼容）。
+    let isGlobalProxy: Bool
 
     /// Combined cache total (read + creation). Retained for display and aggregation convenience.
     var tokensCache: Int { tokensCacheRead + tokensCacheCreation }
@@ -580,7 +585,8 @@ struct ProxyRequestLog: Codable, Identifiable {
         pricingResolved: Bool = false,
         errorMessage: String? = nil,
         errorType: String? = nil,
-        statusCode: Int? = nil
+        statusCode: Int? = nil,
+        isGlobalProxy: Bool = false
     ) {
         self.id = id
         self.configId = configId
@@ -601,6 +607,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         self.errorMessage = errorMessage
         self.errorType = errorType
         self.statusCode = statusCode
+        self.isGlobalProxy = isGlobalProxy
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -624,6 +631,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         case errorMessage
         case errorType
         case statusCode
+        case isGlobalProxy
     }
 
     init(from decoder: Decoder) throws {
@@ -657,6 +665,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
         errorType = try c.decodeIfPresent(String.self, forKey: .errorType)
         statusCode = try c.decodeIfPresent(Int.self, forKey: .statusCode)
+        isGlobalProxy = try c.decodeIfPresent(Bool.self, forKey: .isGlobalProxy) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -681,5 +690,6 @@ struct ProxyRequestLog: Codable, Identifiable {
         try c.encodeIfPresent(errorMessage, forKey: .errorMessage)
         try c.encodeIfPresent(errorType, forKey: .errorType)
         try c.encodeIfPresent(statusCode, forKey: .statusCode)
+        if isGlobalProxy { try c.encode(isGlobalProxy, forKey: .isGlobalProxy) }
     }
 }

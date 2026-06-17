@@ -31,10 +31,14 @@ extension QuotaHTTPServer {
         }
 
         let requestModel = Self.peekChatModel(from: request.body)
+        // 全局统一代理：CLI 端固定发虚拟模型名，按激活节点真实模型改写请求体 model（每节点代理模式 forcedModel=nil → 不改写）。
+        let forcedModel = openCodeConfig?.forcedModel
+        let outboundBody = Self.rewriteChatModel(in: request.body, to: forcedModel) ?? request.body
+        let upstreamModel = forcedModel ?? requestModel
         let startTime = Date()
         do {
             let result = try await proxy.passthroughChatCompletions(
-                rawBody: request.body,
+                rawBody: outboundBody,
                 inboundHeaders: request.headers
             )
             let elapsed = Date().timeIntervalSince(startTime) * 1000
@@ -42,24 +46,26 @@ extension QuotaHTTPServer {
             if (200..<300).contains(result.statusCode) {
                 emitRequestLog(
                     claudeModel: requestModel,
-                    upstreamModel: requestModel,
+                    upstreamModel: upstreamModel,
                     success: true,
                     responseTimeMs: elapsed,
                     inputTokens: result.usage?.inputTokens ?? 0,
                     outputTokens: result.usage?.outputTokens ?? 0,
                     cacheCreationTokens: 0,
-                    cacheReadTokens: result.usage?.cachedTokens ?? 0
+                    cacheReadTokens: result.usage?.cachedTokens ?? 0,
+                    nodeId: activeNodeId
                 )
             } else {
                 let bodyText = String(data: result.data, encoding: .utf8) ?? ""
                 emitRequestLog(
                     claudeModel: requestModel,
-                    upstreamModel: requestModel,
+                    upstreamModel: upstreamModel,
                     success: false,
                     responseTimeMs: elapsed,
                     errorMessage: String(bodyText.prefix(500)),
                     errorType: "upstream_error",
-                    statusCode: result.statusCode
+                    statusCode: result.statusCode,
+                    nodeId: activeNodeId
                 )
             }
 
@@ -75,12 +81,13 @@ extension QuotaHTTPServer {
             let errorResult = await proxy.buildErrorResult(error: error)
             emitRequestLog(
                 claudeModel: requestModel,
-                upstreamModel: requestModel,
+                upstreamModel: upstreamModel,
                 success: false,
                 responseTimeMs: elapsed,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
-                statusCode: errorResult.statusCode
+                statusCode: errorResult.statusCode,
+                nodeId: activeNodeId
             )
             httpLog.error("  ✗ OpenCode passthrough error: \(error.localizedDescription)")
             var responseHeaders = headers
@@ -165,6 +172,9 @@ extension QuotaHTTPServer {
         }
 
         let requestModel = Self.peekChatModel(from: request.body)
+        let forcedModel = openCodeConfig?.forcedModel
+        let outboundBody = Self.rewriteChatModel(in: request.body, to: forcedModel) ?? request.body
+        let upstreamModel = forcedModel ?? requestModel
         let streamStartTime = Date()
         var firstTokenAt: Date?
         let streamer = StreamingResponse(connection: connection)
@@ -178,7 +188,7 @@ extension QuotaHTTPServer {
         let usageRef = OpenCodePassthroughUsageRef()
         do {
             try await proxy.passthroughStreamingChatCompletions(
-                rawBody: request.body,
+                rawBody: outboundBody,
                 inboundHeaders: request.headers
             ) { data in
                 // 首个上游帧到达即为首字时间（TTFT）。
@@ -196,14 +206,15 @@ extension QuotaHTTPServer {
             let usage = await usageRef.get()
             emitRequestLog(
                 claudeModel: requestModel,
-                upstreamModel: requestModel,
+                upstreamModel: upstreamModel,
                 success: true,
                 responseTimeMs: elapsed,
                 firstTokenMs: firstTokenMs,
                 inputTokens: usage?.inputTokens ?? 0,
                 outputTokens: usage?.outputTokens ?? 0,
                 cacheCreationTokens: 0,
-                cacheReadTokens: usage?.cachedTokens ?? 0
+                cacheReadTokens: usage?.cachedTokens ?? 0,
+                nodeId: activeNodeId
             )
         } catch {
             httpLog.error("  ✗ OpenCode streaming passthrough error: \(error.localizedDescription)")
@@ -219,13 +230,14 @@ extension QuotaHTTPServer {
             let firstTokenMs = firstTokenAt.map { $0.timeIntervalSince(streamStartTime) * 1000 }
             emitRequestLog(
                 claudeModel: requestModel,
-                upstreamModel: requestModel,
+                upstreamModel: upstreamModel,
                 success: false,
                 responseTimeMs: elapsed,
                 firstTokenMs: firstTokenMs,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
-                statusCode: errorResult.statusCode
+                statusCode: errorResult.statusCode,
+                nodeId: activeNodeId
             )
         }
 
@@ -244,6 +256,17 @@ extension QuotaHTTPServer {
             return "unknown"
         }
         return model
+    }
+
+    /// 把请求体顶层 `model` 改写为 `target`（全局统一代理：CLI 固定发虚拟模型名，按激活节点真实模型改写）。
+    /// `target` 为空/解析失败时返回 nil（调用方回退用原始 body，不改写）。
+    static func rewriteChatModel(in body: Data, to target: String?) -> Data? {
+        guard let target = target?.trimmingCharacters(in: .whitespacesAndNewlines), !target.isEmpty,
+              var json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
+            return nil
+        }
+        json["model"] = target
+        return try? JSONSerialization.data(withJSONObject: json)
     }
 }
 

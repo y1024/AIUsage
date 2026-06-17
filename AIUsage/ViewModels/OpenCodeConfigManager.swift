@@ -146,6 +146,53 @@ final class OpenCodeConfigManager {
         openCodeConfigLog.info("opencode.json managed provider injected (provider=\(node.managedProviderId, privacy: .public), models=\(node.models.count))")
     }
 
+    // MARK: - Global Unified Proxy Activation
+
+    /// 全局统一代理受管 provider 键：固定为裸前缀 `aiusage`（per-node 受管键恒为 `aiusage-<slug>`，
+    /// 永不与之冲突）。统计页据此把全局模式流量与 per-node 流量区分开。
+    static let globalProviderId = providerIdPrefix
+
+    /// 接管 opencode.json 为「全局统一代理」固定入口：单一受管 provider 指向常驻代理端口，
+    /// 仅暴露一个固定虚拟模型；切换激活节点只在代理内热替换上游、改写 model，opencode.json 不变。
+    /// - interface: 选定接口协议（决定 npm 包：openai-compatible / anthropic / openai）。
+    /// - baseURL: 含 /v1 的本地代理地址（SDK 在其后拼 /chat/completions、/messages、/responses）。
+    /// - clientKey: 固定 client key（写入受管块 apiKey；代理据此鉴权）。
+    /// - virtualModel: 固定虚拟模型名（CLI 永远发它，由代理改写为激活节点真实模型）。
+    func activateGlobal(interface: OpenCodeProtocol, baseURL: String, clientKey: String, virtualModel: String) throws {
+        guard !usesJSONC else { throw OpenCodeConfigError.jsoncUnsupported }
+        let model = virtualModel.nilIfBlank ?? "model"
+
+        // 备份即真相源（与 per-node activate 同语义，幂等）。
+        let pristine: [String: Any]
+        if hasBackup {
+            pristine = try readObject(atPath: backupPath) ?? [:]
+        } else if fileManager.fileExists(atPath: configPath) {
+            let current = try readConfigObjectIfExists() ?? [:]
+            let clean = stripManagedEntries(from: current)
+            try writeObject(clean, toPath: backupPath)
+            pristine = clean
+        } else {
+            pristine = [:]
+        }
+
+        var root = stripManagedEntries(from: pristine)
+        if root["$schema"] == nil {
+            root["$schema"] = "https://opencode.ai/config.json"
+        }
+        var provider = root["provider"] as? [String: Any] ?? [:]
+        provider[Self.globalProviderId] = [
+            "npm": interface.npmPackage,
+            "name": "AIUsage Global Proxy",
+            "options": ["baseURL": baseURL, "apiKey": clientKey],
+            "models": [model: ["name": model]],
+        ]
+        root["provider"] = provider
+        root["model"] = "\(Self.globalProviderId)/\(model)"
+
+        try writeObject(root, toPath: configPath, restrictPermissions: true)
+        openCodeConfigLog.info("opencode.json global proxy provider injected (interface=\(interface.rawValue, privacy: .public), model=\(model, privacy: .public))")
+    }
+
     /// 用户原文 + 通用配置片段的深合并（通用片段优先，剥离其中可能误带的受管键）。
     private func mergedBase(pristine: [String: Any], commonSettings: [String: Any]?) -> [String: Any] {
         guard let common = commonSettings, !common.isEmpty else { return pristine }
