@@ -10,21 +10,31 @@ struct MenuBarView: View {
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @ObservedObject var proxyVM = ProxyViewModel.shared
     @ObservedObject var openCodeStore = OpenCodeNodeStore.shared
-    @ObservedObject var globalProxy = GlobalProxyManager.shared
+    // 三条全局代理轨道各自独立观察：菜单栏切换器、Codex 账号行托管态都需要按轨实时反映。
+    @ObservedObject var globalCodex = GlobalProxyManager.codex
+    @ObservedObject var globalClaude = GlobalProxyManager.claude
+    @ObservedObject var globalOpenCode = GlobalProxyManager.opencode
     @ObservedObject private var settings = AppSettings.shared
     @State private var activationMessage: String?
     @State private var activationSuccess = true
+    // 当前展开的轨道面板（自定义内嵌覆盖层，取代原生 Menu 下拉）。nil = 全部收起。
+    @State var openPanelTrack: GlobalProxyTrack?
 
     var body: some View {
-        VStack(spacing: 0) {
-            menuBarHeader
-            Divider()
-            controlDeck
-            Divider()
-            menuBarContent
-            costTrackingSection
-            Divider()
-            menuBarFooter
+        ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                menuBarHeader
+                Divider()
+                controlDeck
+                Divider()
+                menuBarContent
+                costTrackingSection
+                Divider()
+                menuBarFooter
+            }
+            if let track = openPanelTrack {
+                trackPanelOverlay(track: track)
+            }
         }
         .frame(width: 420)
         .background(VisualEffectBlur())
@@ -182,7 +192,7 @@ struct MenuBarView: View {
                             MenuBarProviderSection(
                                 group: group,
                                 codexProxyActive: proxyVM.activatedId(isCodex: true) != nil,
-                                codexGlobalProxyManaged: globalProxy.isEnabled,
+                                codexGlobalProxyManaged: globalCodex.isEnabled,
                                 activationMessage: $activationMessage,
                                 activationSuccess: $activationSuccess
                             )

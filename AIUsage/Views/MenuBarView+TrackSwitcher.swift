@@ -2,247 +2,319 @@ import SwiftUI
 import QuotaBackend
 
 // MARK: - MenuBarView Proxy Track Switcher
-// 顶部控制台的 Claude / Codex 轨道切换器（订阅账号 + API 节点，单一互斥激活）。
-// 拆出以控制单文件规模；依赖主视图的 proxyVM / appState。
+// 顶部控制台的三条轨道切换器（Codex / OpenCode / Claude Code）。每条都是一颗品牌色胶囊 chip，
+// 点击在面板内弹出「自定义内嵌覆盖层」（非原生 Menu，因为菜单栏宿主是 transient NSPopover，
+// 嵌套系统 popover 不可靠）。面板统一支持两种模式：
+//   - 全局代理 OFF：每节点激活（点节点 = 写 CLI 配置激活，与代理页一致）。
+//   - 全局代理 ON ：节点列表变热切换（点节点 = GlobalProxyManager.switchActiveNode，进程内换上游、
+//                   CLI 不重启），并由面板头部 Toggle 启用 / 停用全局代理。
+// 三条轨道各自观察自己的 GlobalProxyManager（codex/claude/opencode），不再只认 Codex 一条。
+// 依赖主视图的 proxyVM / openCodeStore / globalCodex / globalClaude / globalOpenCode / appState / openPanelTrack。
 
 extension MenuBarView {
 
+    // MARK: - Chip 触发器（控制台一行三颗）
+
+    /// Claude / Codex 轨道的胶囊 chip：点击展开 / 收起本轨面板。
     func proxyTrackSwitcher(family: ProxyNodeFamily) -> some View {
+        let track: GlobalProxyTrack = family.isCodex ? .codex : .claude
+        let manager = family.isCodex ? globalCodex : globalClaude
+        let globalEnabled = manager.isEnabled
+        let globalActiveNode = globalEnabled ? manager.node(for: manager.activeNodeId) : nil
+
         let activeId = proxyVM.activatedId(isCodex: family.isCodex)
         let activeNode = proxyVM.configurations.first { $0.id == activeId }
-        let familyNodes = proxyVM.configurations.filter { family.contains($0.nodeType) }
         let title = family.isCodex ? "Codex" : "Claude Code"
         let brandAsset = family.isCodex ? "codex" : "claude"
-        let accent: Color = family.isCodex
-            ? Color(red: 0.40, green: 0.52, blue: 0.92)
-            : Color(red: 0.85, green: 0.45, blue: 0.25)
+        let accent = accentColor(family: family)
 
-        // Codex 统一切换器：订阅账号（auth.json）与 API 节点（config.toml）单一互斥激活。
-        // 订阅顺序沿用代理页的自定义拖拽排序，保持两处一致。
-        let subEntries: [ProviderAccountEntry] = family.isCodex
-            ? CodexSubscriptionOrderStore.shared.ordered(
-                appState.providerAccountGroups.first { $0.providerId == "codex" }?.accounts ?? [])
-            : []
-        // 全局统一代理（仅 Codex 轨）：启用时常驻代理接管 config.toml，整条轨道由它生效。
-        // 此时账号 / 节点的单独激活被互斥拦截，故菜单项禁用、订阅不高亮；生效名取全局激活节点。
-        let globalEnabled = family.isCodex && globalProxy.isEnabled
-        let globalActiveNode = globalEnabled ? globalProxy.node(for: globalProxy.activeNodeId) : nil
-
-        // 单一激活：代理节点占用 config.toml 时即为生效身份，订阅不再视为 active（防启动期竞态双高亮）。
+        // Codex 订阅账号也算「已生效」，用于 chip 文案。
+        let subEntries = codexSubscriptionEntries(family: family)
         let activeSub = (activeNode == nil && !globalEnabled)
             ? subEntries.first { ProviderActivationManager.shared.isActiveAccount($0) }
             : nil
         let isOn = activeNode != nil || activeSub != nil || globalEnabled
         let activeLabel: String = {
-            if globalEnabled {
-                let name = globalActiveNode?.name ?? L("Global proxy", "全局代理")
-                return L("\(name) (Global)", "\(name)（全局）")
-            }
+            if globalEnabled { return globalActiveNode?.name ?? L("Global proxy", "全局代理") }
             return activeNode?.name ?? activeSub?.accountPrimaryLabel ?? L("Off", "未启用")
         }()
 
-        return Menu {
-            if family.isCodex {
-                if globalEnabled {
-                    Section(L("Global Proxy", "全局代理")) {
-                        Text(globalActiveNode.map { L("Active: \($0.name)", "生效中：\($0.name)") }
-                             ?? L("Enabled", "已启用"))
-                        Text(L("Switch nodes in the proxy page", "请在代理页切换激活节点"))
-                    }
-                }
-                if subEntries.isEmpty && familyNodes.isEmpty {
-                    Text(L("No Codex accounts or nodes", "暂无 Codex 账号或节点"))
-                }
-                if !subEntries.isEmpty {
-                    Section(L("Subscription", "订阅账号")) {
-                        ForEach(subEntries, id: \.id) { codexSubscriptionMenuItem($0) }
-                    }
-                    .disabled(globalEnabled)
-                }
-                if !familyNodes.isEmpty {
-                    Section(L("API Nodes", "API 节点")) {
-                        ForEach(familyNodes) { proxyNodeMenuItem($0) }
-                    }
-                    .disabled(globalEnabled)
-                }
-            } else if familyNodes.isEmpty {
-                Text(L("No proxy nodes", "暂无代理节点"))
-            } else {
-                let anthropicNodes = familyNodes.filter { $0.nodeType == .anthropicDirect }
-                let openaiNodes = familyNodes.filter { $0.nodeType == .openaiProxy }
-                if !anthropicNodes.isEmpty {
-                    Section("Anthropic") {
-                        ForEach(anthropicNodes) { proxyNodeMenuItem($0) }
-                    }
-                }
-                if !openaiNodes.isEmpty {
-                    Section("OpenAI") {
-                        ForEach(openaiNodes) { proxyNodeMenuItem($0) }
-                    }
-                }
-            }
-
-            if isOn {
-                Divider()
-                // 停止仅作用于 API 代理节点；订阅账号无「关闭」语义（切到别的账号即可）。
-                Button {
-                    if let activeId {
-                        Task { await proxyVM.deactivateConfiguration(activeId) }
-                    }
-                } label: {
-                    Label(L("Deactivate node", "停用当前节点"), systemImage: "stop.circle")
-                }
-                .disabled(activeId == nil)
-            }
-        } label: {
-            trackSwitcherLabel(
-                title: title,
-                brandAsset: brandAsset,
-                accent: accent,
-                isOn: isOn,
-                activeLabel: activeLabel
-            )
+        return chipButton(track: track) {
+            trackSwitcherLabel(title: title, brandAsset: brandAsset, accent: accent,
+                               isOn: isOn, activeLabel: activeLabel,
+                               isGlobal: globalEnabled, isSelected: openPanelTrack == track)
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
     }
 
-    // MARK: - OpenCode Track Switcher
-    // OpenCode 节点切换器：节点列表（勾选当前生效）+ 停用当前节点（还原 opencode.json）。
-    // 与 Claude/Codex 切换器同一套外观；激活/停用委托 OpenCodeNodeStore（代理模式
-    // 节点会顺带拉起/回收本地透传进程）。
-
+    /// OpenCode 轨道的胶囊 chip。
     func openCodeTrackSwitcher() -> some View {
+        let manager = globalOpenCode
+        let globalEnabled = manager.isEnabled
+        let globalActiveNode = globalEnabled ? manager.node(for: manager.activeNodeId) : nil
+
         let activeNode = openCodeStore.activeNode
-        let isOn = activeNode != nil
+        let isOn = activeNode != nil || globalEnabled
         let accent = OpenCodeManagementView.brand
+        let activeLabel = globalEnabled
+            ? (globalActiveNode?.name ?? L("Global proxy", "全局代理"))
+            : (activeNode?.displayName ?? L("Off", "未启用"))
 
-        return Menu {
-            if openCodeStore.nodes.isEmpty {
-                Text(L("No OpenCode nodes", "暂无 OpenCode 节点"))
-            } else {
-                ForEach(openCodeStore.nodes) { openCodeNodeMenuItem($0) }
-            }
+        return chipButton(track: .opencode) {
+            trackSwitcherLabel(title: "OpenCode", brandAsset: "opencode", accent: accent,
+                               isOn: isOn, activeLabel: activeLabel,
+                               isGlobal: globalEnabled, isSelected: openPanelTrack == .opencode)
+        }
+    }
 
-            if isOn {
-                Divider()
-                Button {
-                    try? openCodeStore.deactivate()
-                } label: {
-                    Label(L("Deactivate node", "停用当前节点"), systemImage: "stop.circle")
-                }
+    /// chip 通用外壳：点击 toggle 本轨面板。
+    private func chipButton<Label: View>(track: GlobalProxyTrack,
+                                         @ViewBuilder label: () -> Label) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                openPanelTrack = (openPanelTrack == track) ? nil : track
             }
         } label: {
-            trackSwitcherLabel(
-                title: "OpenCode",
-                brandAsset: "opencode",
-                accent: accent,
-                isOn: isOn,
-                activeLabel: activeNode?.displayName ?? L("Off", "未启用")
-            )
+            label()
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+    }
+
+    func closePanel() {
+        withAnimation(.easeOut(duration: 0.15)) { openPanelTrack = nil }
+    }
+
+    // MARK: - 内嵌覆盖层（自定义面板）
+
+    /// 在控制台下方弹出的轨道面板覆盖层：上半部分（头部+chip 行）保持可点以便直接换轨，
+    /// 其余区域半透明遮罩，点击即收起。
+    @ViewBuilder
+    func trackPanelOverlay(track: GlobalProxyTrack) -> some View {
+        ZStack(alignment: .top) {
+            Rectangle()
+                .fill(Color.black.opacity(0.12))
+                .padding(.top, 86)
+                .contentShape(Rectangle())
+                .onTapGesture { closePanel() }
+
+            panelFor(track: track)
+                .frame(width: 304)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.28), radius: 16, y: 8)
+                .padding(.top, 90)
+                .frame(maxWidth: .infinity)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
     }
 
     @ViewBuilder
-    private func openCodeNodeMenuItem(_ node: OpenCodeNode) -> some View {
-        let isActive = openCodeStore.activeNodeId == node.id
-        Button {
-            if isActive {
-                try? openCodeStore.deactivate()
-            } else {
-                Task { try? await openCodeStore.activate(node) }
-            }
-        } label: {
-            Label {
-                Text(node.displayName)
-            } icon: {
-                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-            }
+    private func panelFor(track: GlobalProxyTrack) -> some View {
+        switch track {
+        case .codex:    codexClaudePanel(family: .codex)
+        case .claude:   codexClaudePanel(family: .claude)
+        case .opencode: openCodePanel()
         }
-        .disabled(openCodeStore.usesJSONC || !node.isComplete)
     }
 
-    // MARK: - Shared Label Chrome
+    // MARK: - Claude / Codex 面板
 
-    /// 三个轨道切换器共用的标签外观（品牌图标 + 标题 + 当前生效名）。
+    private func codexClaudePanel(family: ProxyNodeFamily) -> some View {
+        let manager = family.isCodex ? globalCodex : globalClaude
+        let globalEnabled = manager.isEnabled
+        let globalNodes = manager.availableNodes()
+        let activeId = proxyVM.activatedId(isCodex: family.isCodex)
+        let familyNodes = proxyVM.configurations.filter { family.contains($0.nodeType) }
+        let title = family.isCodex ? "Codex" : "Claude Code"
+        let brandAsset = family.isCodex ? "codex" : "claude"
+        let accent = accentColor(family: family)
+
+        var sections: [MenuBarTrackPanelSection] = []
+        var onDeactivate: (() -> Void)?
+
+        if globalEnabled {
+            sections = [hotSwapSection(manager: manager, nodes: globalNodes)]
+        } else if family.isCodex {
+            let subEntries = codexSubscriptionEntries(family: family)
+            if !subEntries.isEmpty {
+                sections.append(MenuBarTrackPanelSection(
+                    id: "sub", title: L("Subscription", "订阅账号"),
+                    rows: subEntries.map { entry in
+                        let isActive = activeId == nil
+                            && ProviderActivationManager.shared.isActiveAccount(entry)
+                        return MenuBarTrackPanelRow(id: entry.id, name: entry.accountPrimaryLabel,
+                                                    isActive: isActive) {
+                            try? ProviderActivationManager.shared.activateAccount(entry: entry)
+                            closePanel()
+                        }
+                    }))
+            }
+            if !familyNodes.isEmpty {
+                sections.append(MenuBarTrackPanelSection(
+                    id: "nodes", title: L("API Nodes", "API 节点"),
+                    rows: familyNodes.map { perNodeRow($0) }))
+            }
+            onDeactivate = deactivateProxyClosure(activeId: activeId)
+        } else {
+            let anthropic = familyNodes.filter { $0.nodeType == .anthropicDirect }
+            let openai = familyNodes.filter { $0.nodeType == .openaiProxy }
+            if !anthropic.isEmpty {
+                sections.append(MenuBarTrackPanelSection(id: "anthropic", title: "Anthropic",
+                                                         rows: anthropic.map { perNodeRow($0) }))
+            }
+            if !openai.isEmpty {
+                sections.append(MenuBarTrackPanelSection(id: "openai", title: "OpenAI",
+                                                         rows: openai.map { perNodeRow($0) }))
+            }
+            onDeactivate = deactivateProxyClosure(activeId: activeId)
+        }
+        if sections.isEmpty {
+            sections = [MenuBarTrackPanelSection(id: "empty", rows: [])]
+        }
+
+        let preferred = manager.activeNodeId ?? activeId ?? globalNodes.first?.id
+        return MenuBarTrackPanel(
+            title: title, brandAsset: brandAsset, accent: accent, manager: manager,
+            canEnableGlobal: !globalNodes.isEmpty,
+            sections: sections,
+            onDeactivateActiveNode: onDeactivate,
+            onEnableGlobal: { guard let id = preferred else { return }
+                Task { await manager.enable(activeNodeId: id) } },
+            onDisableGlobal: { Task { await manager.disable() } }
+        )
+    }
+
+    // MARK: - OpenCode 面板
+
+    private func openCodePanel() -> some View {
+        let manager = globalOpenCode
+        let globalEnabled = manager.isEnabled
+        let globalNodes = manager.availableNodes()
+        let accent = OpenCodeManagementView.brand
+        let activeId = openCodeStore.activeNodeId
+
+        var sections: [MenuBarTrackPanelSection] = []
+        var onDeactivate: (() -> Void)?
+
+        if globalEnabled {
+            sections = [hotSwapSection(manager: manager, nodes: globalNodes)]
+        } else {
+            let rows = openCodeStore.nodes.map { node -> MenuBarTrackPanelRow in
+                let isActive = openCodeStore.activeNodeId == node.id
+                return MenuBarTrackPanelRow(
+                    id: node.id, name: node.displayName, isActive: isActive,
+                    isDisabled: openCodeStore.usesJSONC || !node.isComplete
+                ) {
+                    if isActive { try? openCodeStore.deactivate() }
+                    else { Task { try? await openCodeStore.activate(node) } }
+                    closePanel()
+                }
+            }
+            sections = [MenuBarTrackPanelSection(id: "nodes", rows: rows)]
+            if activeId != nil {
+                onDeactivate = { try? openCodeStore.deactivate(); closePanel() }
+            }
+        }
+
+        let preferred = manager.activeNodeId ?? activeId ?? globalNodes.first?.id
+        return MenuBarTrackPanel(
+            title: "OpenCode", brandAsset: "opencode", accent: accent, manager: manager,
+            canEnableGlobal: !globalNodes.isEmpty,
+            sections: sections,
+            onDeactivateActiveNode: onDeactivate,
+            onEnableGlobal: { guard let id = preferred else { return }
+                Task { await manager.enable(activeNodeId: id) } },
+            onDisableGlobal: { Task { await manager.disable() } }
+        )
+    }
+
+    // MARK: - Section / Row 构造
+
+    /// 全局代理 ON 时的「激活节点 · 热切换」分区。
+    private func hotSwapSection(manager: GlobalProxyManager,
+                                nodes: [GlobalProxyNodeRef]) -> MenuBarTrackPanelSection {
+        MenuBarTrackPanelSection(
+            id: "hotswap",
+            title: L("Active node · hot-swap", "激活节点 · 热切换"),
+            rows: nodes.map { node in
+                MenuBarTrackPanelRow(id: node.id, name: node.name,
+                                     isActive: manager.activeNodeId == node.id) {
+                    Task { await manager.switchActiveNode(to: node.id) }
+                    closePanel()
+                }
+            })
+    }
+
+    /// 每节点激活模式下的代理节点行（点击 = 写 CLI 配置激活 / 停用）。
+    private func perNodeRow(_ config: ProxyConfiguration) -> MenuBarTrackPanelRow {
+        MenuBarTrackPanelRow(id: config.id, name: config.name,
+                             isActive: proxyVM.isNodeActivated(config.id)) {
+            Task { await proxyVM.toggleActivation(config.id) }
+            closePanel()
+        }
+    }
+
+    private func deactivateProxyClosure(activeId: String?) -> (() -> Void)? {
+        guard let activeId else { return nil }
+        return { Task { await proxyVM.deactivateConfiguration(activeId) }; closePanel() }
+    }
+
+    private func codexSubscriptionEntries(family: ProxyNodeFamily) -> [ProviderAccountEntry] {
+        guard family.isCodex else { return [] }
+        return CodexSubscriptionOrderStore.shared.ordered(
+            appState.providerAccountGroups.first { $0.providerId == "codex" }?.accounts ?? [])
+    }
+
+    private func accentColor(family: ProxyNodeFamily) -> Color {
+        family.isCodex
+            ? Color(red: 0.40, green: 0.52, blue: 0.92)
+            : Color(red: 0.85, green: 0.45, blue: 0.25)
+    }
+
+    // MARK: - Chip 外观（单行品牌色药丸）
+
+    /// 三个轨道 chip 共用的单行胶囊：品牌图标 + 文本（未启用=轨道名 / 已生效=生效名）。
+    /// 全局态用一个极小的品牌色闪电图标标识；面板展开时描边加粗高亮。胶囊随内容收紧、在槽内居中。
     private func trackSwitcherLabel(
         title: String,
         brandAsset: String,
         accent: Color,
         isOn: Bool,
-        activeLabel: String
+        activeLabel: String,
+        isGlobal: Bool = false,
+        isSelected: Bool = false
     ) -> some View {
-        HStack(spacing: 8) {
-            ProviderIconView(brandAsset, size: 16)
-                .opacity(isOn ? 1.0 : 0.55)
+        let primaryText = isOn ? activeLabel : title
+        return HStack(spacing: 5) {
+            ProviderIconView(brandAsset, size: 13)
+                .opacity(isOn ? 1.0 : 0.5)
 
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(title)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(isOn ? accent : .secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-
-                    if isOn {
-                        Circle()
-                            .fill(Color(red: 0.20, green: 0.84, blue: 0.42))
-                            .frame(width: 5, height: 5)
-                    }
-                }
-                Text(activeLabel)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(isOn ? .primary : .secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .minimumScaleFactor(0.75)
+            if isGlobal {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(accent)
             }
 
-            Spacer(minLength: 0)
+            Text(primaryText)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(isOn ? accent : .secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .minimumScaleFactor(0.75)
         }
         .padding(.horizontal, 9)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isOn ? accent.opacity(0.10) : Color.primary.opacity(0.04))
+            Capsule(style: .continuous)
+                .fill(accent.opacity(isSelected ? 0.18 : (isOn ? 0.12 : 0.05)))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(isOn ? accent.opacity(0.30) : Color.clear, lineWidth: 1)
+            Capsule(style: .continuous)
+                .strokeBorder(accent.opacity(isSelected ? 0.75 : (isOn ? 0.42 : 0.16)),
+                              lineWidth: isSelected ? 1.5 : 1)
         )
-        .contentShape(Rectangle())
-    }
-
-    /// Codex 订阅账号菜单项：点击激活（写 auth.json，自动停用代理节点），已激活打勾。
-    @ViewBuilder
-    private func codexSubscriptionMenuItem(_ entry: ProviderAccountEntry) -> some View {
-        // 代理接管 config.toml（每节点代理 或 全局统一代理）时，订阅一律视为未激活（防双高亮）。
-        let proxyActive = proxyVM.activatedId(isCodex: true) != nil || globalProxy.isEnabled
-        let isActive = !proxyActive && ProviderActivationManager.shared.isActiveAccount(entry)
-        Button {
-            try? ProviderActivationManager.shared.activateAccount(entry: entry)
-        } label: {
-            if isActive {
-                Label(entry.accountPrimaryLabel, systemImage: "checkmark")
-            } else {
-                Text(entry.accountPrimaryLabel)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func proxyNodeMenuItem(_ config: ProxyConfiguration) -> some View {
-        let isActive = proxyVM.isNodeActivated(config.id)
-        Button {
-            Task { await proxyVM.toggleActivation(config.id) }
-        } label: {
-            Label {
-                Text(config.name)
-            } icon: {
-                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-            }
-        }
+        .contentShape(Capsule(style: .continuous))
     }
 }
