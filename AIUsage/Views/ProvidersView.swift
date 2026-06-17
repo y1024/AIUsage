@@ -16,6 +16,8 @@ struct ProvidersView: View {
     @State private var selectedProviderFilter: String = "all"
     @State private var selectedCategory: ProviderListCategory = .accounts
     @State private var accountEditorTarget: ProviderEditorTarget?
+    /// 顶部工具栏「新增 API 提供商」的触发信号（按钮在工具栏，编辑器在 APIProviderListView）。
+    @State private var requestNewAPIProvider = false
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -26,7 +28,7 @@ struct ProvidersView: View {
                 accountsBody
             } else {
                 Divider()
-                APIProviderListView(searchText: searchText)
+                APIProviderListView(searchText: searchText, requestNew: $requestNewAPIProvider)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -117,34 +119,20 @@ struct ProvidersView: View {
 
     // MARK: - Toolbar
 
+    // 确定性两行布局：两个分类（账号 / API 提供商）共用完全一致的工具栏结构——
+    // 第一行搜索框 + 右侧操作区（按分类切换内容但占同一槽位），第二行渠道分段控件。
+    // 避免 ViewThatFits 因两个分类操作区宽度不同而在单/双行间跳变，导致分段控件错位。
     private var toolbar: some View {
-        ViewThatFits(in: .horizontal) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 searchControl
-                    .frame(minWidth: 260, idealWidth: 360, maxWidth: 440)
+                    .frame(maxWidth: .infinity)
 
-                categoryControl
-                    .frame(width: 260)
-
-                Spacer(minLength: 8)
-                if selectedCategory == .accounts {
-                    toolbarActions
-                }
+                toolbarActions
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
-                    searchControl
-                        .frame(maxWidth: .infinity)
-
-                    if selectedCategory == .accounts {
-                        toolbarActions
-                    }
-                }
-
-                categoryControl
-                    .frame(width: 260)
-            }
+            categoryControl
+                .frame(width: 260)
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
@@ -189,7 +177,32 @@ struct ProvidersView: View {
         .overlay(controlBorder)
     }
 
+    /// 右侧操作区：按分类切换内容，但始终占据工具栏第一行同一槽位（位置不跳变）。
+    @ViewBuilder
     private var toolbarActions: some View {
+        switch selectedCategory {
+        case .accounts:
+            accountToolbarActions
+        case .apiProviders:
+            apiProviderToolbarActions
+        }
+    }
+
+    private var apiProviderToolbarActions: some View {
+        Button {
+            requestNewAPIProvider = true
+        } label: {
+            ProviderActionLabel(
+                title: L("New API Provider", "新增 API 提供商"),
+                systemImage: "plus",
+                style: .primary,
+                minWidth: 120
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var accountToolbarActions: some View {
         HStack(spacing: 8) {
             Button {
                 appState.presentManageProviderPicker()

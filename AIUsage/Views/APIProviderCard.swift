@@ -34,122 +34,246 @@ struct InheritanceBanner: View {
 }
 
 // MARK: - API Provider Card
-// 「API 提供商」列表中的单卡：展示名称 / 格式 / baseURL / 模型数 / 已分发到哪些代理，
-// 提供编辑、立即同步、删除操作。分发状态由 distributedTargets 注入（来自 APIProviderDistributor）。
+// 「API 提供商」列表中的单条目行卡：与 Codex/Claude/OpenCode 节点卡片同一套视觉语言——
+// 顶部格式徽章、左侧拖拽把手 + 信息 pills（模型数/默认模型）、名称/baseURL/分发状态行、
+// 右侧动作区（编辑 / 立即同步 / 删除），分发后左边缘高亮条。
+// 拖拽排序由列表（APIProviderListView）通过 onDragChanged/onDragEnded 跟手让位实现。
 
 struct APIProviderCard: View {
     let provider: APIProvider
     let distributedTargets: Set<ProxyTarget>
-    let onEdit: () -> Void
-    let onSync: () -> Void
-    let onDelete: () -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
+    var onDragChanged: (CGFloat) -> Void = { _ in }
+    var onDragEnded: () -> Void = {}
+    var onEdit: () -> Void = {}
+    var onSync: () -> Void = {}
+    var onDelete: () -> Void = {}
+
+    private var isDistributed: Bool { !distributedTargets.isEmpty }
+
+    // 格式主题色（与 OpenCode 节点卡片同语言）。
+    private static let chatBrand = Color(red: 0.29, green: 0.73, blue: 0.56)
+    private static let anthropicBrand = Color(red: 0.85, green: 0.47, blue: 0.34)
+    private static let responsesBrand = Color(red: 0.40, green: 0.52, blue: 0.92)
+
+    private var formatColor: Color {
+        switch provider.format {
+        case .openAIChatCompletions: return Self.chatBrand
+        case .anthropic: return Self.anthropicBrand
+        case .openAIResponses: return Self.responsesBrand
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            headerRow
-            metaRow
-            if !distributedTargets.isEmpty {
-                distributionRow
+        VStack(alignment: .leading, spacing: 8) {
+            formatBadge
+
+            HStack(spacing: 10) {
+                dragHandle
+
+                infoPills
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(provider.displayName)
+                        .font(.system(size: 15, weight: .bold))
+                        .lineLimit(1)
+                    Text(provider.baseURL.nilIfBlank ?? L("Base URL not set", "未设置 Base URL"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    distributionLine
+                }
+
+                Spacer()
+
+                actionButtons
             }
-            Divider().opacity(0.4)
-            actionRow
         }
-        .padding(16)
+        .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.5 : 0.7))
+            RoundedRectangle(cornerRadius: 14)
+                .fill(cardBackgroundColor)
         )
+        .overlay(alignment: .leading) {
+            if isDistributed {
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: 3)
+                    .padding(.vertical, 10)
+                    .padding(.leading, 3)
+                    .shadow(color: Color.accentColor.opacity(0.4), radius: 4, x: 0, y: 0)
+            }
+        }
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(cardBorderColor, lineWidth: isDistributed ? 1.5 : 1)
         )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onEdit)
+        .contextMenu { contextMenu }
     }
 
-    private var headerRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "shippingbox.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(Color.accentColor)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(provider.displayName)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text(provider.baseURL.nilIfBlank ?? L("No Base URL", "未填写 Base URL"))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+    // MARK: - Drag Handle
+
+    private var dragHandle: some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.quaternary)
+            .frame(width: 16, height: 28)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering { NSCursor.openHand.push() } else { NSCursor.pop() }
             }
-            Spacer()
-            formatBadge
-        }
+            .gesture(
+                DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                    .onChanged { onDragChanged($0.translation.height) }
+                    .onEnded { _ in onDragEnded() }
+            )
     }
+
+    // MARK: - Info Pills
+
+    private var infoPills: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            infoPill(
+                icon: "cube.box",
+                text: "\(provider.models.count)",
+                color: .blue
+            )
+            .help(L("\(provider.models.count) models", "\(provider.models.count) 个模型"))
+            if let dm = provider.effectiveDefaultModel.nilIfBlank {
+                infoPill(icon: "star.fill", text: dm, color: .orange)
+                    .help(L("Default model", "默认模型"))
+            }
+        }
+        .frame(width: 96, alignment: .trailing)
+    }
+
+    private func infoPill(icon: String, text: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+            Text(text)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(color.opacity(0.12)))
+    }
+
+    // MARK: - Format Badge
 
     private var formatBadge: some View {
-        Text(provider.format.badgeName)
-            .font(.system(size: 10, weight: .semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-            .foregroundStyle(Color.accentColor)
-    }
-
-    private var metaRow: some View {
-        HStack(spacing: 14) {
-            metaItem(icon: "cube.box", text: L("\(provider.models.count) models", "\(provider.models.count) 个模型"))
-            if let dm = provider.effectiveDefaultModel.nilIfBlank {
-                metaItem(icon: "star", text: dm)
-            }
+        HStack(spacing: 3) {
+            Image(systemName: "bolt.horizontal.fill")
+                .font(.system(size: 7, weight: .bold))
+            Text(provider.format.badgeName)
         }
+        .font(.system(size: 9, weight: .bold))
+        .foregroundStyle(formatColor)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(formatColor.opacity(0.12)))
+        .help(L(
+            "API format: \(provider.format.displayName)",
+            "接口格式：\(provider.format.displayName)"
+        ))
     }
 
-    private func metaItem(icon: String, text: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 10))
-            Text(text).font(.caption).lineLimit(1)
-        }
-        .foregroundStyle(.secondary)
-    }
+    // MARK: - Distribution Line
 
-    private var distributionRow: some View {
-        HStack(spacing: 6) {
-            Text(L("Distributed:", "已分发："))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            ForEach(ProxyTarget.allCases.filter { distributedTargets.contains($0) }) { target in
-                Text(target.displayName)
-                    .font(.system(size: 10, weight: .medium))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(Color.green.opacity(0.16)))
+    @ViewBuilder
+    private var distributionLine: some View {
+        if isDistributed {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(.green)
+                ForEach(ProxyTarget.allCases.filter { distributedTargets.contains($0) }) { target in
+                    Text(target.displayName)
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.green.opacity(0.16)))
+                        .foregroundStyle(.green)
+                }
             }
-            Spacer()
+        } else {
+            Text(L("Not distributed", "未分发"))
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
         }
     }
 
-    private var actionRow: some View {
-        HStack(spacing: 10) {
-            Button(action: onEdit) {
-                Label(L("Edit", "编辑"), systemImage: "pencil")
-            }
-            .controlSize(.small)
+    // MARK: - Actions
 
+    private var actionButtons: some View {
+        HStack(spacing: 6) {
             Button(action: onSync) {
-                Label(L("Sync Now", "立即同步"), systemImage: "arrow.triangle.2.circlepath")
+                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(isDistributed ? .blue : .gray.opacity(0.4))
             }
-            .controlSize(.small)
-            .disabled(distributedTargets.isEmpty)
+            .buttonStyle(.plain)
+            .disabled(!isDistributed)
             .help(L("Re-apply this provider to its linked nodes.", "把本提供商重新应用到所有链接节点。"))
 
-            Spacer()
-
-            Button(role: .destructive, action: onDelete) {
-                Label(L("Delete", "删除"), systemImage: "trash")
+            Button(action: onEdit) {
+                Image(systemName: "pencil.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.blue)
             }
-            .controlSize(.small)
+            .buttonStyle(.plain)
+            .help(L("Edit", "编辑"))
+
+            Button(action: onDelete) {
+                Image(systemName: "trash.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+            .help(L("Delete", "删除"))
         }
+    }
+
+    @ViewBuilder
+    private var contextMenu: some View {
+        Button(action: onEdit) {
+            Label(L("Edit", "编辑"), systemImage: "pencil")
+        }
+        Button(action: onSync) {
+            Label(L("Sync Now", "立即同步"), systemImage: "arrow.triangle.2.circlepath")
+        }
+        .disabled(!isDistributed)
+        Divider()
+        Button(role: .destructive, action: onDelete) {
+            Label(L("Delete", "删除"), systemImage: "trash")
+        }
+    }
+
+    // MARK: - Styling
+
+    private var cardBackgroundColor: Color {
+        if isDistributed { return Color.accentColor.opacity(0.05) }
+        return Color(nsColor: .controlBackgroundColor).opacity(0.5)
+    }
+
+    private var cardBorderColor: Color {
+        if isDistributed { return Color.accentColor.opacity(0.4) }
+        return Color.primary.opacity(0.06)
+    }
+}
+
+// MARK: - Row Height Key
+// 测量提供商卡片真实高度，供拖拽让位的阈值/步幅计算（与节点列表同一套手感）。
+
+struct APIProviderRowHeightKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }

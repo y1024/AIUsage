@@ -116,6 +116,7 @@
 		B1GP00312F97002000A15674 /* CodexGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */; };
 		B1GP00512F97002000A15674 /* ClaudeGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */; };
 		B1GP00712F97002000A15674 /* OpenCodeGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */; };
+		B1GP00812F97002000A15674 /* GlobalProxySectionScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00802F97002000A15674 /* GlobalProxySectionScaffold.swift */; };
 		C1CX00052FB0000300B26789 /* CodexProxyEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */; };
 		C1CX00072FB0000400B26789 /* StatsHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00062FB0000400B26789 /* StatsHubView.swift */; };
 		C1CX00092FB0000900B26789 /* CodexConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */; };
@@ -278,6 +279,7 @@
 		B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGlobalProxySection.swift; sourceTree = "<group>"; };
 		B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeGlobalProxySection.swift; sourceTree = "<group>"; };
 		B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGlobalProxySection.swift; sourceTree = "<group>"; };
+		B1GP00802F97002000A15674 /* GlobalProxySectionScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxySectionScaffold.swift; sourceTree = "<group>"; };
 		C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProxyEditorView.swift; sourceTree = "<group>"; };
 		C1CX00062FB0000400B26789 /* StatsHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsHubView.swift; sourceTree = "<group>"; };
 		C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigEditorView.swift; sourceTree = "<group>"; };
@@ -469,6 +471,7 @@
 				B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */,
 				B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */,
 				B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */,
+				B1GP00802F97002000A15674 /* GlobalProxySectionScaffold.swift */,
 				C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */,
 				C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */,
 				C1CX00062FB0000400B26789 /* StatsHubView.swift */,
@@ -779,6 +782,7 @@
 				B1GP00312F97002000A15674 /* CodexGlobalProxySection.swift in Sources */,
 				B1GP00512F97002000A15674 /* ClaudeGlobalProxySection.swift in Sources */,
 				B1GP00712F97002000A15674 /* OpenCodeGlobalProxySection.swift in Sources */,
+				B1GP00812F97002000A15674 /* GlobalProxySectionScaffold.swift in Sources */,
 				C1CX00052FB0000300B26789 /* CodexProxyEditorView.swift in Sources */,
 				C1CX00092FB0000900B26789 /* CodexConfigEditorView.swift in Sources */,
 				C1CG10012FB0001000B26789 /* CodexGlobalConfig.swift in Sources */,

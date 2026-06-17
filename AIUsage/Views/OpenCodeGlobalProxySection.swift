@@ -24,156 +24,80 @@ struct OpenCodeGlobalProxySection: View {
     private var isEnabled: Bool { manager.isEnabled }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
-            statusLine
-            interfaceRow
-            if nodes.isEmpty {
-                Text(emptyHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                configGrid
-            }
-            if let error = manager.operationError {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(isEnabled ? Self.brand.opacity(0.5) : Color.primary.opacity(0.06), lineWidth: 1)
+        GlobalProxySectionScaffold(
+            brand: Self.brand,
+            subtitle: L("Fixed endpoint; switch active node within one interface, zero restart.", "固定入口，同接口内切换激活节点零重启、CLI 无感。"),
+            isEnabled: isEnabled,
+            isBusy: manager.isBusy,
+            port: manager.config.port,
+            hasNodes: !nodes.isEmpty,
+            emptyHint: emptyHint,
+            errorText: manager.operationError,
+            toggle: enableBinding,
+            nodeControl: { nodeControl },
+            config: { configContent }
         )
         .onAppear(perform: syncFromConfig)
         // 节点列表/接口变化后，保证选择项仍有效。
         .onChange(of: store.nodes.count) { _, _ in selectedNodeId = resolvedSelection }
     }
 
-    // MARK: - Header (title + master toggle)
+    // MARK: - Active Node (header; hot-switch when enabled)
 
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
-                .font(.system(size: 14))
-                .foregroundStyle(Self.brand)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L("Global Proxy", "全局代理"))
-                    .font(.headline.weight(.bold))
-                Text(L("Fixed endpoint; switch active node within one interface, zero restart.", "固定入口，同接口内切换激活节点零重启、CLI 无感。"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if manager.isBusy {
-                ProgressView().controlSize(.small)
-            }
-            Toggle("", isOn: enableBinding)
-                .labelsHidden()
-                .toggleStyle(ProxyActivationToggleStyle(brandColor: Self.brand, isBusy: manager.isBusy))
-                .disabled(nodes.isEmpty || manager.isBusy)
-        }
-    }
-
-    private var statusLine: some View {
+    private var nodeControl: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(isEnabled ? Color.green : Color.secondary.opacity(0.5))
-                .frame(width: 7, height: 7)
-            Text(isEnabled
-                 ? L("Running on 127.0.0.1:\(manager.config.port)", "运行中 · 127.0.0.1:\(manager.config.port)")
-                 : L("Stopped", "已停用"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if isEnabled, let name = activeNodeName {
-                Text("·").foregroundStyle(.secondary)
-                Text(L("Active: \(name)", "激活：\(name)"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Self.brand)
-            }
-        }
-    }
-
-    // MARK: - Interface Picker (locked while enabled)
-    // 接口决定 npm 包 / 后端透传轨道 / 可切换的节点集合；启用后锁定（换接口需先停用）。
-
-    private var interfaceRow: some View {
-        HStack(spacing: 8) {
-            Text(L("Interface", "接口"))
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            Picker("", selection: interfaceBinding) {
-                ForEach(OpenCodeProtocol.allCases, id: \.self) { proto in
-                    Text(proto.displayName).tag(proto)
+            GlobalProxyInlineLabel(text: L("Active Node", "激活节点"))
+            Picker("", selection: nodeBinding) {
+                ForEach(nodes) { node in
+                    Text(node.name).tag(node.id)
                 }
             }
             .labelsHidden()
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .controlSize(.small)
-            .disabled(isEnabled || manager.isBusy)
-            Spacer()
+            .frame(minWidth: 120)
+            .disabled(manager.isBusy)
         }
     }
 
-    // MARK: - Config Body (active node + port inline; single virtual model)
+    // MARK: - Configuration (interface + port + single virtual model)
+    // 接口决定 npm 包 / 后端透传轨道 / 可切换的节点集合；启用后锁定（换接口需先停用），故归入折叠配置区。
 
-    private var configGrid: some View {
+    private var configContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 16) {
-                inlineField(L("Active Node", "激活节点")) {
-                    Picker("", selection: nodeBinding) {
-                        ForEach(nodes) { node in
-                            Text(node.name).tag(node.id)
+            HStack(spacing: 12) {
+                GlobalProxyField(label: L("Interface", "接口")) {
+                    Picker("", selection: interfaceBinding) {
+                        ForEach(OpenCodeProtocol.allCases, id: \.self) { proto in
+                            Text(proto.displayName).tag(proto)
                         }
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .controlSize(.small)
-                    .frame(minWidth: 140)
-                    .disabled(manager.isBusy)
+                    .frame(minWidth: 160)
+                    .disabled(isEnabled || manager.isBusy)
                 }
-                inlineField(L("Port", "端口")) {
+                GlobalProxyField(label: L("Port", "端口")) {
                     TextField("14401", text: $portText)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 80)
+                        .frame(width: 90)
                         .disabled(isEnabled)
                         .onChange(of: portText) { _, _ in commitSettings() }
                 }
                 Spacer()
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(L("Model", "模型"))
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
+            GlobalProxyField(label: L("Model", "模型")) {
                 TextField(GlobalProxyConfig.defaultOpenCodeModel, text: $modelText)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 320)
                     .disabled(isEnabled)
                     .onChange(of: modelText) { _, _ in commitSettings() }
-                Text(L(
-                    "Just the fixed entry name the CLI sends — name it anything. Each request is rewritten to the active node's real upstream model.",
-                    "仅作 CLI 固定入口名，可任意取名；每次请求会被改写为激活节点的真实上游模型。"
-                ))
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
-
-    /// 标签在前、控件在后的紧凑内联字段（用于激活节点 / 端口）。
-    private func inlineField<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            content()
+            GlobalProxyTip(text: L(
+                "Just the fixed entry name the CLI sends — name it anything. Each request is rewritten to the active node's real upstream model.",
+                "仅作 CLI 固定入口名，可任意取名；每次请求会被改写为激活节点的真实上游模型。"
+            ))
         }
     }
 
@@ -229,10 +153,6 @@ struct OpenCodeGlobalProxySection: View {
             return selectedNodeId
         }
         return manager.activeNodeId ?? nodes.first?.id ?? ""
-    }
-
-    private var activeNodeName: String? {
-        manager.node(for: manager.activeNodeId)?.name
     }
 
     private func syncFromConfig() {
