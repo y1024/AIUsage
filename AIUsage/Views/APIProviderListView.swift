@@ -120,7 +120,15 @@ struct APIProviderListView: View {
                 if draggingId != provider.id { draggingId = provider.id }
                 dragTranslation = translation
             },
-            onDragEnded: { if reorderEnabled { commitDrag() } },
+            onDragEnded: {
+                if reorderEnabled {
+                    commitDrag()
+                } else {
+                    // 拖拽中途进入搜索（禁用重排）：不提交，但仍复位拖拽态，避免残留高亮/偏移。
+                    draggingId = nil
+                    dragTranslation = 0
+                }
+            },
             onEdit: {
                 editorContext = EditorContext(
                     id: provider.id,

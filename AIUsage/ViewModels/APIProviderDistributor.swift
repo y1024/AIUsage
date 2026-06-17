@@ -1,6 +1,5 @@
 import Foundation
 import SwiftUI
-import os.log
 import QuotaBackend
 
 // MARK: - API Provider Distributor
@@ -9,8 +8,6 @@ import QuotaBackend
 //   - 主配置变更时，链接节点里未被 overriddenKeys 标记的共享字段跟随同步；代理专属字段本地独立。
 //   - 取消分发某代理 = 删除该代理下的链接节点；解除链接 = 链接节点转为普通独立节点。
 // Codex/Claude 节点经 ProxyViewModel（落 ~/.config/aiusage/profiles），OpenCode 经 OpenCodeNodeStore。
-
-private let distributorLog = Logger(subsystem: "com.aiusage.desktop", category: "APIProviderDistributor")
 
 @MainActor
 final class APIProviderDistributor {
