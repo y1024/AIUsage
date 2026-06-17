@@ -74,6 +74,10 @@ struct NodeProfile: Identifiable, Equatable {
         var lastUsedAt: Date?
         var sortOrder: Int
         var proxy: ProxySettings
+        /// 若该节点由「API 提供商」分发而来，记录其主配置 id；nil = 手动创建的独立节点。
+        var linkedProviderId: String?
+        /// 已被用户在本节点局部覆盖、不再跟随主配置同步的共享字段键集合（见 APIProviderSharedKey）。
+        var overriddenKeys: Set<String>?
 
         init(
             id: String = UUID().uuidString,
@@ -82,7 +86,9 @@ struct NodeProfile: Identifiable, Equatable {
             createdAt: Date = Date(),
             lastUsedAt: Date? = nil,
             sortOrder: Int = Int.max,
-            proxy: ProxySettings = .defaultOpenAI
+            proxy: ProxySettings = .defaultOpenAI,
+            linkedProviderId: String? = nil,
+            overriddenKeys: Set<String>? = nil
         ) {
             self.id = id
             self.name = name
@@ -91,6 +97,8 @@ struct NodeProfile: Identifiable, Equatable {
             self.lastUsedAt = lastUsedAt
             self.sortOrder = sortOrder
             self.proxy = proxy
+            self.linkedProviderId = linkedProviderId
+            self.overriddenKeys = overriddenKeys
         }
 
         init(from decoder: Decoder) throws {
@@ -102,6 +110,8 @@ struct NodeProfile: Identifiable, Equatable {
             lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
             sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder) ?? Int.max
             proxy = try container.decode(ProxySettings.self, forKey: .proxy)
+            linkedProviderId = try container.decodeIfPresent(String.self, forKey: .linkedProviderId)
+            overriddenKeys = try container.decodeIfPresent(Set<String>.self, forKey: .overriddenKeys)
         }
     }
 

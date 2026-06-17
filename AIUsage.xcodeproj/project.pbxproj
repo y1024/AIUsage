@@ -97,6 +97,12 @@
 		B1GP00112F97002000A15674 /* GlobalProxyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00102F97002000A15674 /* GlobalProxyRuntime.swift */; };
 		B1GP00212F97002000A15674 /* GlobalProxyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00202F97002000A15674 /* GlobalProxyManager.swift */; };
 		B1GP00412F97002000A15674 /* GlobalProxyTrackAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */; };
+		B1AP00012FA1000100A15674 /* APIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00002FA1000100A15674 /* APIProvider.swift */; };
+		B1AP00112FA1000100A15674 /* APIProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00102FA1000100A15674 /* APIProviderStore.swift */; };
+		B1AP00212FA1000100A15674 /* APIProviderDistributor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00202FA1000100A15674 /* APIProviderDistributor.swift */; };
+		B1AP00312FA1000100A15674 /* APIProviderListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00302FA1000100A15674 /* APIProviderListView.swift */; };
+		B1AP00412FA1000100A15674 /* APIProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00402FA1000100A15674 /* APIProviderCard.swift */; };
+		B1AP00512FA1000100A15674 /* APIProviderEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00502FA1000100A15674 /* APIProviderEditorView.swift */; };
 		B1REFB012F97002000A15674 /* ProviderRefreshResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */; };
 		B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */; };
 		B3943D26F03B43809C53419E /* ProxyStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */; };
@@ -255,6 +261,12 @@
 		B1GP00102F97002000A15674 /* GlobalProxyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyRuntime.swift; sourceTree = "<group>"; };
 		B1GP00202F97002000A15674 /* GlobalProxyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyManager.swift; sourceTree = "<group>"; };
 		B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyTrackAdapters.swift; sourceTree = "<group>"; };
+		B1AP00002FA1000100A15674 /* APIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProvider.swift; sourceTree = "<group>"; };
+		B1AP00102FA1000100A15674 /* APIProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderStore.swift; sourceTree = "<group>"; };
+		B1AP00202FA1000100A15674 /* APIProviderDistributor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderDistributor.swift; sourceTree = "<group>"; };
+		B1AP00302FA1000100A15674 /* APIProviderListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderListView.swift; sourceTree = "<group>"; };
+		B1AP00402FA1000100A15674 /* APIProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderCard.swift; sourceTree = "<group>"; };
+		B1AP00502FA1000100A15674 /* APIProviderEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderEditorView.swift; sourceTree = "<group>"; };
 		B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRefreshResult.swift; sourceTree = "<group>"; };
 		B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TLSCertificateManager.swift; sourceTree = "<group>"; };
 		C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONWebEditorAssets.swift; sourceTree = "<group>"; };
@@ -349,6 +361,8 @@
 				A2B3C4EF2F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift */,
 				B1GP00202F97002000A15674 /* GlobalProxyManager.swift */,
 				B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */,
+				B1AP00102FA1000100A15674 /* APIProviderStore.swift */,
+				B1AP00202FA1000100A15674 /* APIProviderDistributor.swift */,
 				5EFREF002F93000100A15674 /* ProviderRefreshCoordinator.swift */,
 				5EFREF212F93000100A15674 /* ProviderRefreshCoordinator+FetchPipeline.swift */,
 				5EFREF312F93000100A15674 /* ProviderRefreshCoordinator+Conversion.swift */,
@@ -385,6 +399,7 @@
 				C1CG10002FB0001000B26789 /* CodexGlobalConfig.swift */,
 				C1NP00002F9C000100A15674 /* NodeProfile.swift */,
 				C1OE00012FB0002000B26789 /* OpenCodeNode.swift */,
+				B1AP00002FA1000100A15674 /* APIProvider.swift */,
 				7EFAD0012F87AC7100A15674 /* AppSettings.swift */,
 				5EFAD73D2F87AC7100A15674 /* AppState.swift */,
 				A1APPST012F92000000A15674 /* AppState+ProviderGrouping.swift */,
@@ -497,6 +512,9 @@
 				A2B3C4EB2F96001000A15674 /* CostTrackingCard.swift */,
 				5EFAD7562F87AC7200A15674 /* ProviderPickerView.swift */,
 				5EFAD74A2F87AC7100A15674 /* ProvidersView.swift */,
+				B1AP00302FA1000100A15674 /* APIProviderListView.swift */,
+				B1AP00402FA1000100A15674 /* APIProviderCard.swift */,
+				B1AP00502FA1000100A15674 /* APIProviderEditorView.swift */,
 				5EFAD78A2F87B10300A15674 /* ProviderAccountGroupSection.swift */,
 				5EFAD7882F87B10200A15674 /* ProviderAccountEditorView.swift */,
 				A2B3C4D92F96001000A15674 /* ProviderAccountEditorView+Sections.swift */,
@@ -679,6 +697,12 @@
 				B1GP00112F97002000A15674 /* GlobalProxyRuntime.swift in Sources */,
 				B1GP00212F97002000A15674 /* GlobalProxyManager.swift in Sources */,
 				B1GP00412F97002000A15674 /* GlobalProxyTrackAdapters.swift in Sources */,
+				B1AP00012FA1000100A15674 /* APIProvider.swift in Sources */,
+				B1AP00112FA1000100A15674 /* APIProviderStore.swift in Sources */,
+				B1AP00212FA1000100A15674 /* APIProviderDistributor.swift in Sources */,
+				B1AP00312FA1000100A15674 /* APIProviderListView.swift in Sources */,
+				B1AP00412FA1000100A15674 /* APIProviderCard.swift in Sources */,
+				B1AP00512FA1000100A15674 /* APIProviderEditorView.swift in Sources */,
 				B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */,
 				5EFAD7752F87AFE700A15674 /* ProviderCard.swift in Sources */,
 				5EF0C0D22F95000100A15674 /* ProviderCard+MultiWindowQuota.swift in Sources */,

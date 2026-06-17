@@ -132,6 +132,15 @@ struct OpenCodeNodeEditorView: View {
                 case .settings:
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
+                            if let providerName = linkedProviderName {
+                                InheritanceBanner(providerName: providerName) {
+                                    let providerId = node.linkedProviderId
+                                    dismiss()
+                                    if let providerId {
+                                        Task { await APIProviderDistributor.shared.resetToInherit(providerId: providerId, target: .openCode) }
+                                    }
+                                }
+                            }
                             basicSection
                             modelsSection
                             limitsSection
@@ -866,8 +875,17 @@ struct OpenCodeNodeEditorView: View {
             saved.proxyPort = OpenCodeNode.defaultProxyPort
         }
         applyParsedParameters(to: &saved)
+        // 链接节点：与主配置比对，标记本次编辑产生的本地覆盖（未链接则清空）。
+        saved = APIProviderDistributor.shared.stampOverrides(saved)
         onSave(saved)
         dismiss()
+    }
+
+    /// 链接到的「API 提供商」名称（非链接节点为 nil）。
+    private var linkedProviderName: String? {
+        guard let id = node.linkedProviderId,
+              let master = APIProviderStore.shared.provider(id: id) else { return nil }
+        return master.displayName
     }
 }
 

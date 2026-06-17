@@ -1,6 +1,12 @@
 import SwiftUI
 import QuotaBackend
 
+/// 服务商页一级分类：账号（现有登录类 provider）/ API 提供商（统一上游配置）。
+enum ProviderListCategory: String, CaseIterable {
+    case accounts
+    case apiProviders
+}
+
 struct ProvidersView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var accountStore: AccountStore
@@ -8,36 +14,47 @@ struct ProvidersView: View {
     @State private var searchText = ""
     @State private var selectedChannel: String = "all"
     @State private var selectedProviderFilter: String = "all"
+    @State private var selectedCategory: ProviderListCategory = .accounts
     @State private var accountEditorTarget: ProviderEditorTarget?
     var body: some View {
         VStack(spacing: 0) {
             toolbar
-            filterBar
-            Divider()
 
-            if filteredGroups.isEmpty {
-                emptyState
+            if selectedCategory == .accounts {
+                filterBar
+                Divider()
+                accountsBody
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        ForEach(filteredGroups) { group in
-                            ProviderAccountGroupSection(
-                                group: group,
-                                onAddAccount: {
-                                    accountEditorTarget = ProviderEditorTarget(providerId: group.providerId)
-                                }
-                            )
-                            .environmentObject(appState)
-                        }
-                    }
-                    .padding()
-                }
+                Divider()
+                APIProviderListView(searchText: searchText)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(item: $accountEditorTarget) { target in
             ProviderAccountEditorView(providerId: target.providerId)
                 .environmentObject(appState)
+        }
+    }
+
+    @ViewBuilder
+    private var accountsBody: some View {
+        if filteredGroups.isEmpty {
+            emptyState
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    ForEach(filteredGroups) { group in
+                        ProviderAccountGroupSection(
+                            group: group,
+                            onAddAccount: {
+                                accountEditorTarget = ProviderEditorTarget(providerId: group.providerId)
+                            }
+                        )
+                        .environmentObject(appState)
+                    }
+                }
+                .padding()
+            }
         }
     }
 
@@ -106,11 +123,13 @@ struct ProvidersView: View {
                 searchControl
                     .frame(minWidth: 260, idealWidth: 360, maxWidth: 440)
 
-                channelControl
-                    .frame(width: 232)
+                categoryControl
+                    .frame(width: 260)
 
                 Spacer(minLength: 8)
-                toolbarActions
+                if selectedCategory == .accounts {
+                    toolbarActions
+                }
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -118,11 +137,13 @@ struct ProvidersView: View {
                     searchControl
                         .frame(maxWidth: .infinity)
 
-                    toolbarActions
+                    if selectedCategory == .accounts {
+                        toolbarActions
+                    }
                 }
 
-                channelControl
-                    .frame(width: 232)
+                categoryControl
+                    .frame(width: 260)
             }
         }
         .padding(.horizontal, 18)
@@ -133,12 +154,14 @@ struct ProvidersView: View {
 
     private var searchControl: some View {
         ProviderSearchControl(
-            placeholder: L("Search accounts...", "搜索账号...", key: "providers.search.placeholder"),
+            placeholder: selectedCategory == .accounts
+                ? L("Search accounts...", "搜索账号...", key: "providers.search.placeholder")
+                : L("Search API providers...", "搜索 API 提供商..."),
             text: $searchText
         )
     }
 
-    private var channelControl: some View {
+    private var categoryControl: some View {
         HStack(spacing: 8) {
             Label {
                 Text(L("Channel", "渠道", key: "providers.channel"))
@@ -150,14 +173,13 @@ struct ProvidersView: View {
             .foregroundStyle(.secondary)
             .labelStyle(.titleAndIcon)
 
-            Picker("", selection: $selectedChannel) {
-                Text(L("All", "全部", key: "common.all")).tag("all")
-                Text("CLI").tag("cli")
-                Text("IDE").tag("ide")
+            Picker("", selection: $selectedCategory) {
+                Text(L("Accounts", "账号")).tag(ProviderListCategory.accounts)
+                Text(L("API Providers", "API 提供商")).tag(ProviderListCategory.apiProviders)
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: 144)
+            .frame(width: 172)
         }
         .padding(.leading, 10)
         .padding(.trailing, 6)

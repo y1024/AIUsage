@@ -206,6 +206,10 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     /// 通用配置合并策略（跟随全局/始终合并/从不合并，与 Claude 节点同一枚举）；
     /// nil = 跟随全局。
     var commonConfigMode: CommonConfigMode?
+    /// 若该节点由「API 提供商」分发而来，记录其主配置 id；nil = 手动创建的独立节点。
+    var linkedProviderId: String?
+    /// 已被用户在本节点局部覆盖、不再跟随主配置同步的共享字段键集合（见 APIProviderSharedKey）。
+    var overriddenKeys: Set<String>?
     var createdAt: Date
     var lastUsedAt: Date?
     var sortOrder: Int
@@ -236,6 +240,8 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         proxyPort: Int = OpenCodeNode.defaultProxyPort,
         pricingCurrency: OpenCodePricingCurrency = .none,
         commonConfigMode: CommonConfigMode? = nil,
+        linkedProviderId: String? = nil,
+        overriddenKeys: Set<String>? = nil,
         createdAt: Date = Date(),
         lastUsedAt: Date? = nil,
         sortOrder: Int = Int.max
@@ -259,6 +265,8 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.proxyPort = proxyPort
         self.pricingCurrency = pricingCurrency
         self.commonConfigMode = commonConfigMode
+        self.linkedProviderId = linkedProviderId
+        self.overriddenKeys = overriddenKeys
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.sortOrder = sortOrder
@@ -276,7 +284,9 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         case priceOutputPerMillion
         case priceCacheReadPerMillion
         case priceCacheWritePerMillion
-        case commonConfigMode, createdAt, lastUsedAt, sortOrder
+        case commonConfigMode
+        case linkedProviderId, overriddenKeys
+        case createdAt, lastUsedAt, sortOrder
     }
 
     /// 兼容旧档案的解码：models: [String] + 节点级单价 → 模型条目（各模型继承同一单价），
@@ -300,6 +310,8 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         proxyEnabled = try c.decodeIfPresent(Bool.self, forKey: .proxyEnabled) ?? false
         proxyPort = try c.decodeIfPresent(Int.self, forKey: .proxyPort) ?? Self.defaultProxyPort
         commonConfigMode = try c.decodeIfPresent(CommonConfigMode.self, forKey: .commonConfigMode)
+        linkedProviderId = try c.decodeIfPresent(String.self, forKey: .linkedProviderId)
+        overriddenKeys = try c.decodeIfPresent(Set<String>.self, forKey: .overriddenKeys)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         lastUsedAt = try c.decodeIfPresent(Date.self, forKey: .lastUsedAt)
         sortOrder = try c.decode(Int.self, forKey: .sortOrder)
@@ -348,6 +360,8 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         try c.encode(proxyPort, forKey: .proxyPort)
         try c.encode(pricingCurrency, forKey: .pricingCurrency)
         try c.encodeIfPresent(commonConfigMode, forKey: .commonConfigMode)
+        try c.encodeIfPresent(linkedProviderId, forKey: .linkedProviderId)
+        try c.encodeIfPresent(overriddenKeys, forKey: .overriddenKeys)
         try c.encode(createdAt, forKey: .createdAt)
         try c.encodeIfPresent(lastUsedAt, forKey: .lastUsedAt)
         try c.encode(sortOrder, forKey: .sortOrder)

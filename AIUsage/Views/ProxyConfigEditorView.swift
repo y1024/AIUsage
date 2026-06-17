@@ -175,6 +175,15 @@ struct ProxyConfigEditorView: View {
     private var proxyTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                if let providerName = linkedProviderName {
+                    InheritanceBanner(providerName: providerName) {
+                        let providerId = profile.metadata.linkedProviderId
+                        dismiss()
+                        if let providerId {
+                            Task { await APIProviderDistributor.shared.resetToInherit(providerId: providerId, target: .claude) }
+                        }
+                    }
+                }
                 nodeTypeSection
                 basicSection
                 switch profile.metadata.nodeType {
@@ -664,6 +673,13 @@ struct ProxyConfigEditorView: View {
         }
     }
 
+    /// 链接到的「API 提供商」名称（非链接节点为 nil）。
+    private var linkedProviderName: String? {
+        guard let id = profile.metadata.linkedProviderId,
+              let master = APIProviderStore.shared.provider(id: id) else { return nil }
+        return master.displayName
+    }
+
     // MARK: - Save
 
     private func saveProfile() {
@@ -674,6 +690,8 @@ struct ProxyConfigEditorView: View {
             profile.syncEnvFromProxy()
         }
         profile.metadata.proxy.syncSlotPricingFromLibrary()
+        // 链接节点：与主配置比对，标记本次编辑产生的本地覆盖（未链接则清空）。
+        profile = APIProviderDistributor.shared.stampOverrides(profile)
 
         Task {
             if isNew {
