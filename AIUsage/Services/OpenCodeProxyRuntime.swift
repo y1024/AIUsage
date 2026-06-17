@@ -16,6 +16,35 @@ import QuotaBackend
 
 private let openCodeProxyLog = Logger(subsystem: "com.aiusage.desktop", category: "OpenCodeProxyRuntime")
 
+// MARK: - Global Proxy Per-Node Usage
+// OpenCode「全局统一代理」模式下，单个真实节点的永久累计用量（成本按当时节点定价冻结）。
+// 与 Codex/Claude 的 ProxyStatistics 同语义：原始日志可被环形/保留期裁剪，但本累计永久保留，
+// 是节点卡片在全局模式下的用量/费用真相源（opencode.db 侧已排除全局 provider，互斥不双计）。
+struct OpenCodeGlobalNodeUsage: Codable {
+    var requestCount = 0
+    var successCount = 0
+    var failureCount = 0
+    var inputTokens = 0
+    var outputTokens = 0
+    var cacheReadTokens = 0
+    var cacheCreateTokens = 0
+    var costUsd: Double = 0
+    var lastRequestAt: Date?
+
+    var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheCreateTokens }
+
+    mutating func add(_ log: ProxyRequestLog) {
+        requestCount += 1
+        if log.success { successCount += 1 } else { failureCount += 1 }
+        inputTokens += log.tokensInput
+        outputTokens += log.tokensOutput
+        cacheReadTokens += log.tokensCacheRead
+        cacheCreateTokens += log.tokensCacheCreation
+        costUsd += log.estimatedCostUSD
+        lastRequestAt = log.timestamp
+    }
+}
+
 @MainActor
 final class OpenCodeProxyRuntime: ObservableObject {
     static let shared = OpenCodeProxyRuntime()
@@ -31,6 +60,8 @@ final class OpenCodeProxyRuntime: ObservableObject {
     /// 最近请求日志（全部节点共享环形缓冲，按 configId=节点 id 区分），新→旧，
     /// 最多保留 500 条；落盘持久化（成本恒 0，仅观测不计费）。
     @Published private(set) var requestLogs: [ProxyRequestLog] = []
+    /// 全局统一代理模式下每个真实节点的永久累计用量（按 node id 归因，独立于 opencode.db）。
+    @Published private(set) var globalNodeStats: [String: OpenCodeGlobalNodeUsage] = [:]
     @Published private(set) var lastError: String?
 
     private static let maxLogEntries = 500
@@ -50,14 +81,21 @@ final class OpenCodeProxyRuntime: ObservableObject {
 
     private var instances: [String: Instance] = [:]
     private var pendingLogsSave: Task<Void, Never>?
+    private var pendingGlobalStatsSave: Task<Void, Never>?
 
     private static var logsFilePath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return (home as NSString).appendingPathComponent(".config/aiusage/opencode-proxy-logs.json")
     }
 
+    private static var globalStatsFilePath: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return (home as NSString).appendingPathComponent(".config/aiusage/opencode-global-usage.json")
+    }
+
     private init() {
         loadPersistedLogs()
+        loadGlobalStats()
     }
 
     // MARK: - Lifecycle
@@ -151,6 +189,30 @@ final class OpenCodeProxyRuntime: ObservableObject {
     /// 单个节点的日志切片（节点详情统计用）。
     func logs(forNodeId nodeId: String) -> [ProxyRequestLog] {
         requestLogs.filter { $0.configId == nodeId }
+    }
+
+    /// 单个节点在全局统一代理模式下的永久累计用量（无则 nil）。
+    func globalStats(forNodeId nodeId: String) -> OpenCodeGlobalNodeUsage? {
+        globalNodeStats[nodeId]
+    }
+
+    /// 删除节点时清理其在内存/磁盘上的代理残留：全局永久累计 + 该节点的请求日志切片，
+    /// 避免已删除节点的归因数据在 JSON 里长期堆积（热力图归档为按天聚合，不含节点维度，保留不受影响）。
+    func purgeNode(_ nodeId: String) {
+        var didChange = false
+        if globalNodeStats.removeValue(forKey: nodeId) != nil {
+            persistGlobalStatsSoon()
+            didChange = true
+        }
+        let before = requestLogs.count
+        requestLogs.removeAll { $0.configId == nodeId }
+        if requestLogs.count != before {
+            persistLogsSoon()
+            didChange = true
+        }
+        if didChange {
+            openCodeProxyLog.info("Purged proxy residue for deleted OpenCode node \(nodeId, privacy: .public)")
+        }
     }
 
     /// 代理进程的环境是否等价（决定 start 是否可以跳过重启）。
@@ -363,6 +425,107 @@ final class OpenCodeProxyRuntime: ObservableObject {
         persistLogsSoon()
     }
 
+    // MARK: - Global Unified Proxy Log Ingestion
+    // 全局统一代理（常驻进程随激活节点轮转）的 PROXY_LOG 入口：与每节点路线 B 不同，
+    // 这里 db 不参与计费（opencode.db 记在虚拟 provider `aiusage` 下、已被排除），
+    // 故按激活节点定价就地算成本，并归因到日志携带的真实 node_id + 真实上游模型，
+    // 与 Codex/Claude 全局代理同口径——日志、用量、价格、模型全部落到真实节点上。
+
+    /// 摄入一条全局统一代理日志：按 node_id 归因到真实节点，按节点定价算成本，
+    /// 写入请求日志（节点卡片成功率/最近请求）+ 永久每节点累计 + 永久按天×模型归档（热力图）。
+    func ingestGlobalProxyLog(_ jsonStr: String) {
+        guard let data = jsonStr.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String, type == "proxy_request_log",
+              let nodeId = (json["node_id"] as? String)?.nilIfBlank else {
+            return
+        }
+
+        let upstreamModel = json["upstream_model"] as? String ?? "unknown"
+        let tokensInput = json["input_tokens"] as? Int ?? 0
+        let tokensOutput = json["output_tokens"] as? Int ?? 0
+        let splitRead = json["cache_read_tokens"] as? Int
+        let splitCreate = json["cache_creation_tokens"] as? Int
+        let legacyCache = json["cache_tokens"] as? Int
+        let tokensCacheRead = splitRead ?? legacyCache ?? 0
+        let tokensCacheCreation = splitCreate ?? 0
+
+        let pricingInfo = openCodeNodePricing(nodeId: nodeId, model: upstreamModel)
+        let pricing = pricingInfo?.pricing
+        // 归档模型键与 opencode.db 直连/路线B 完全一致（`aiusage-<slug>/<model>`），让同节点同模型
+        // 跨「全局代理」与「直连」两条路径在热力图/用量统计合并为一行；节点未知时退化为裸模型名。
+        let archiveModel = pricingInfo.map { "\($0.managedProviderId)/\(upstreamModel)" } ?? upstreamModel
+        let cost = pricing?.costForTokens(
+            input: tokensInput,
+            output: tokensOutput,
+            cacheRead: tokensCacheRead,
+            cacheCreate: tokensCacheCreation
+        ) ?? 0
+
+        let log = ProxyRequestLog(
+            configId: nodeId,
+            method: "POST",
+            path: pricingInfo?.path ?? "/v1/chat/completions",
+            claudeModel: json["claude_model"] as? String ?? "unknown",
+            upstreamModel: upstreamModel,
+            success: json["success"] as? Bool ?? false,
+            responseTimeMs: Double(json["response_time_ms"] as? Int ?? 0),
+            firstTokenMs: (json["first_token_ms"] as? Int).map(Double.init),
+            tokensInput: tokensInput,
+            tokensOutput: tokensOutput,
+            tokensCacheRead: tokensCacheRead,
+            tokensCacheCreation: tokensCacheCreation,
+            estimatedCostUSD: cost,
+            pricingResolved: pricing != nil,
+            errorMessage: json["error"] as? String,
+            errorType: json["error_type"] as? String,
+            statusCode: json["status_code"] as? Int,
+            isGlobalProxy: true
+        )
+
+        requestLogs.insert(log, at: 0)
+        if requestLogs.count > Self.maxLogEntries {
+            requestLogs.removeLast(requestLogs.count - Self.maxLogEntries)
+        }
+        persistLogsSoon()
+
+        var agg = globalNodeStats[nodeId] ?? OpenCodeGlobalNodeUsage()
+        agg.add(log)
+        globalNodeStats[nodeId] = agg
+        persistGlobalStatsSoon()
+
+        // 永久按天×真实模型归档（喂热力图/用量统计）。原始日志会被环形封顶裁剪，
+        // 故按发生即增量累加（不可整日重算），跨重启不重复折叠。
+        ProxyUsageArchiveStore.shared.accumulate(
+            .opencode,
+            dayKey: ProxyPersistence.dayKey(for: log.timestamp),
+            model: archiveModel,
+            log: log
+        )
+    }
+
+    /// 按 node_id 找 OpenCodeNode，取匹配 upstreamModel 的模型条目单价构造 ModelPricing
+    /// （与 Claude/Codex 同口径），并给出展示用请求路径与该节点的受管 provider 键（用于归档模型键对齐 db）。
+    /// 节点不存在返回 nil；无定价返回 (nil, path, managedProviderId)。
+    private func openCodeNodePricing(nodeId: String, model: String) -> (pricing: ProxyConfiguration.ModelPricing?, path: String, managedProviderId: String)? {
+        guard let node = OpenCodeNodeStore.shared.nodes.first(where: { $0.id == nodeId }) else { return nil }
+        let path = "/v1" + node.protocolType.requestPath
+        guard node.pricingCurrency != .none,
+              let entry = node.modelEntries.first(where: { $0.id == model }) ?? node.modelEntries.first,
+              entry.hasPricing else {
+            return (nil, path, node.managedProviderId)
+        }
+        let currency: ProxyConfiguration.PricingCurrency = node.pricingCurrency == .cny ? .cny : .usd
+        let pricing = ProxyConfiguration.ModelPricing(
+            inputPerMillion: entry.priceInputPerMillion,
+            outputPerMillion: entry.priceOutputPerMillion,
+            cacheCreatePerMillion: entry.priceCacheWritePerMillion,
+            cacheReadPerMillion: entry.priceCacheReadPerMillion,
+            currency: currency
+        )
+        return (pricing, path, node.managedProviderId)
+    }
+
     // MARK: - Log Persistence
 
     private func loadPersistedLogs() {
@@ -395,6 +558,41 @@ final class OpenCodeProxyRuntime: ObservableObject {
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
         } catch {
             openCodeProxyLog.warning("Failed to persist OpenCode proxy logs: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    // MARK: - Global Per-Node Usage Persistence
+
+    private func loadGlobalStats() {
+        guard let data = FileManager.default.contents(atPath: Self.globalStatsFilePath) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let stats = try? decoder.decode([String: OpenCodeGlobalNodeUsage].self, from: data) {
+            globalNodeStats = stats
+        }
+    }
+
+    /// 防抖落盘（与日志同窗口）。永久累计，永不裁剪。
+    private func persistGlobalStatsSoon() {
+        pendingGlobalStatsSave?.cancel()
+        pendingGlobalStatsSave = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.logsSaveDebounceNanos)
+            guard !Task.isCancelled else { return }
+            self?.persistGlobalStatsNow()
+        }
+    }
+
+    private func persistGlobalStatsNow() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(globalNodeStats) else { return }
+        let path = Self.globalStatsFilePath
+        let dir = (path as NSString).deletingLastPathComponent
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch {
+            openCodeProxyLog.warning("Failed to persist OpenCode global usage: \(String(describing: error), privacy: .public)")
         }
     }
 

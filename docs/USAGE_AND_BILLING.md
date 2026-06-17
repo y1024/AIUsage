@@ -67,6 +67,50 @@ cacheReadTokens = min(cached_tokens, input_tokens)
 
 旧路径 `codex-subscription-usage-v1.json` 会读取并迁移到新非代理归档。旧模型后缀 ` (Sub)` 会迁移为 ` (Non-Proxy)`，旧 ` (API)` 行会丢弃，避免把代理历史误放进非代理轨。
 
+## OpenCode
+
+OpenCode 是双源合并，两源互斥、不双计：
+
+### 直连 / 路线 B（opencode.db）
+
+数据源：
+
+```text
+~/.local/share/opencode/opencode.db
+```
+
+OpenCode 自 v1.2 起把每条 assistant 消息连同 token 明细与按 [models.dev](https://models.dev) 定价预计算的 `cost` 写入本地 SQLite。直连节点与「路线 B 每节点透传代理」的请求都落在这里，按消息 `providerID` 归因到节点（受管键恒为 `aiusage-<slug>`）。成本直接采用 db 的冻结 `cost`，与统计页同口径。
+
+路线 B 的代理日志**仅作观测**（成功/失败计数与失败明细），不参与计费——计费以 db 为准，避免代理旁路与 db 账本双计。
+
+### 全局统一代理（代理日志归档）
+
+数据源：
+
+```text
+~/.config/aiusage/usage-archive/proxy-usage-opencode-v1.json   # 热力图 / 用量统计（按天 × 真实上游模型聚合）
+~/.config/aiusage/opencode-global-usage.json                   # 节点卡片用（按节点永久累计）
+```
+
+全局统一代理是常驻固定端口、随激活节点热切换的单进程，对 CLI 暴露固定虚拟模型名（见 OPENCODE_INTEGRATION_DESIGN.md §12）。它接管 `opencode.json` 时注入裸 `aiusage` 受管 provider，因此这部分流量在 db 里记在 `providerID = "aiusage"` 名下——该 provider 被 `OpenCodeCostProvider` 与 `OpenCodeNodeStatsFetcher` **双双排除**，改由代理日志计费，杜绝双计。
+
+口径与 Codex/Claude 代理轨一致：
+
+- 成本在请求发生时按**激活节点**定价冻结（`PROXY_LOG → ProxyRequestLog.estimatedCostUSD`），改价不回溯历史。
+- token 分字段 `input/output/cacheRead/cacheCreate`，`input` 为非缓存输入。
+- 归因到日志携带的真实 `node_id` + 真实上游模型；**归档模型键与 db 完全一致**（`aiusage-<slug>/<model>`），故同节点同模型经「全局代理」与「直连/路线 B」两条路径在热力图/用量统计**合并为一行**，不再拆分。
+- 节点卡片（请求数/费用/统计网格/最近请求）= db 直连归因 **+** 全局代理永久累计两源相加，故大部分时间走全局代理时，每个节点的用量与费用依然持续更新。
+
+### 模型名展示口径
+
+OpenCode 受管节点的模型键带内部归因前缀 `aiusage-<slug>/<model>`（`aiusage-` 是注入 `opencode.json` 的归因标记，数据键保留以做节点归因 + 跨路径合并）。**展示层统一剥掉 `aiusage-` 前缀**（`StatsDataAdapter.displayModelLabel`），热力图 tooltip / 模型分布 / 模型详情显示为 `<slug>/<model>`。非受管的第三方 provider（如用户自配的 `deepseek/...`）不带前缀，原样展示。
+
+### 已知限制（OpenCode 专属）
+
+- 全局代理归档自功能启用起累积，启用前无历史可回填（同 Claude/Codex 代理轨）。
+- 同节点同模型已按 `aiusage-<slug>/<model>` 合并；不同节点（不同 slug）的同名模型仍按节点分行，保留归因。
+- 未计价节点（节点编辑器未填单价）的全局代理请求成本记 0，提示用户补单价后新请求才有金额。
+
 ## UI 口径
 
 统计页和热力图使用 `UsageTrack`：

@@ -235,7 +235,7 @@ final class StatsDataAdapter {
                 result.append(ModelTimePoint(
                     id: "\(point.bucket)|\(series.model)",
                     date: date,
-                    model: series.model,
+                    model: Self.displayModelLabel(series.model),
                     cost: point.usd,
                     tokens: point.tokens
                 ))
@@ -258,9 +258,10 @@ final class StatsDataAdapter {
         }
 
         return (breakdowns ?? []).map { item in
-            ModelAggregate(
-                id: item.model,
-                model: item.model,
+            let label = Self.displayModelLabel(item.model)
+            return ModelAggregate(
+                id: label,
+                model: label,
                 cost: item.estimatedCostUsd,
                 tokens: item.totalTokens,
                 inputTokens: item.inputTokens,
@@ -288,7 +289,7 @@ final class StatsDataAdapter {
 
     func allModels(from summary: CostSummary?) -> [String] {
         guard let timelines = summary?.modelTimelines else { return [] }
-        return timelines.map(\.model).sorted()
+        return timelines.map { Self.displayModelLabel($0.model) }.sorted()
     }
 
     // MARK: - Private Aggregation Helpers
@@ -304,7 +305,7 @@ final class StatsDataAdapter {
         guard qualify else { return breakdowns }
         return breakdowns.map { item in
             ModelCostBreakdown(
-                model: sourceQualifiedModel(item.model, provider: provider),
+                model: sourceQualifiedModel(displayModelLabel(item.model), provider: provider),
                 totalTokens: item.totalTokens,
                 inputTokens: item.inputTokens,
                 outputTokens: item.outputTokens,
@@ -325,7 +326,7 @@ final class StatsDataAdapter {
         guard qualify else { return series }
         return series.map { item in
             ModelTimelineSeries(
-                model: sourceQualifiedModel(item.model, provider: provider),
+                model: sourceQualifiedModel(displayModelLabel(item.model), provider: provider),
                 hourly: item.hourly,
                 daily: item.daily
             )
@@ -334,6 +335,15 @@ final class StatsDataAdapter {
 
     private static func sourceQualifiedModel(_ model: String, provider: ProviderData) -> String {
         "\(provider.label)\(sourceQualifierSeparator)\(model)"
+    }
+
+    /// 展示用模型名清洗：OpenCode 受管节点用量的模型键带内部归因前缀 `aiusage-<slug>/<model>`
+    /// （数据键保留以做节点归因 + 跨路径合并），展示时剥掉 `aiusage-` 前缀更干净。
+    /// 非 OpenCode 受管模型名不以此开头，等价 no-op。
+    static func displayModelLabel(_ model: String) -> String {
+        let prefix = "aiusage-"
+        guard model.hasPrefix(prefix) else { return model }
+        return String(model.dropFirst(prefix.count))
     }
 
     private static func aggregatePeriod(

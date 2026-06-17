@@ -2,12 +2,13 @@ import Foundation
 import Combine
 import os.log
 
-// MARK: - Global Proxy Runtime (Codex track)
-// 管理「全局统一代理」的常驻 QuotaServer 进程（PROXY_TARGET=codex）。与每节点独立进程不同：
-// 本进程在固定端口长期存活，切换激活节点时通过受 token 保护的本地 admin 端点热替换上游，
-// 进程不重启、端口不变。日志经 stdout PROXY_LOG（已带 node_id）回流到 ProxyViewModel 按节点归因。
+// MARK: - Global Proxy Runtime
+// 管理某条轨「全局统一代理」的常驻 QuotaServer 进程。与每节点独立进程不同：本进程在固定端口长期存活，
+// 切换激活节点时通过受 token 保护的本地 admin 端点热替换上游，进程不重启、端口不变。
+// 日志经 stdout PROXY_LOG（已带 node_id）回流到 ProxyViewModel 按节点归因。
 //
-// 数据流: ProxyViewModel(GlobalProxy 扩展) 解析节点 → CodexUpstream → 本类启动/热切换。
+// 轨道无关：进程启动 env（PROXY_TARGET/上游/client key…）与热切换 payload 由各轨适配器构造，
+// 本类只负责进程生命周期、健康检查、admin POST 与端口仲裁。三条轨各有独立实例。
 
 private let globalProxyRuntimeLog = Logger(subsystem: "com.aiusage.desktop", category: "GlobalProxyRuntime")
 
@@ -42,20 +43,31 @@ enum GlobalProxyRuntimeError: LocalizedError {
 
 @MainActor
 final class GlobalProxyRuntime: ObservableObject {
-    static let shared = GlobalProxyRuntime()
+    // 每条轨一个常驻实例（互不影响，可同时启用）。
+    static let codex = GlobalProxyRuntime(track: .codex, adminPath: "/__aiusage/admin/codex-upstream")
+    static let claude = GlobalProxyRuntime(track: .claude, adminPath: "/__aiusage/admin/claude-upstream")
+    static let opencode = GlobalProxyRuntime(track: .opencode, adminPath: "/__aiusage/admin/opencode-upstream")
+    static var all: [GlobalProxyRuntime] { [codex, claude, opencode] }
 
-    /// 全局代理在跨轨端口仲裁中的所有者 id（固定标识，排除自身用）。
-    static let ownerId = "__aiusage_global_codex__"
-    static let trackLabel = "Codex 全局代理"
+    static func instance(for track: GlobalProxyTrack) -> GlobalProxyRuntime {
+        switch track {
+        case .codex: return codex
+        case .claude: return claude
+        case .opencode: return opencode
+        }
+    }
 
-    /// 当前激活节点的上游快照：宿主层把 codexProxy 节点投影成本结构再交给运行时。
-    struct CodexUpstream {
-        let nodeId: String
-        let nodeName: String
-        let baseURL: String
-        let apiKey: String
-        let model: String?
-        let maxOutputTokens: Int?
+    let track: GlobalProxyTrack
+    let adminPath: String
+
+    /// 跨轨端口仲裁中的所有者 id（固定标识，排除自身用）。
+    var ownerId: String { "__aiusage_global_\(track.rawValue)__" }
+    var trackLabel: String {
+        switch track {
+        case .codex: return AppSettings.shared.t("Codex global proxy", "Codex 全局代理")
+        case .claude: return AppSettings.shared.t("Claude Code global proxy", "Claude Code 全局代理")
+        case .opencode: return AppSettings.shared.t("OpenCode global proxy", "OpenCode 全局代理")
+        }
     }
 
     @Published private(set) var isRunning = false
@@ -64,26 +76,32 @@ final class GlobalProxyRuntime: ObservableObject {
 
     private var process: Process?
     private var adminKey: String?
-    private var listenPort = GlobalProxyConfig.defaultPort
+    private var listenPort = GlobalProxyConfig.defaultCodexPort
 
     private static let startupTimeout: TimeInterval = 6
     private static let probeIntervalNanos: UInt64 = 250_000_000
 
+    private init(track: GlobalProxyTrack, adminPath: String) {
+        self.track = track
+        self.adminPath = adminPath
+    }
+
     var isProcessRunning: Bool { process?.isRunning == true }
 
-    /// 跨轨仲裁聚合用：全局代理运行时占用的端口所有者（仅在确实运行时上报）。
+    /// 跨轨仲裁聚合用：本轨全局代理运行时占用的端口所有者（仅在确实运行时上报）。
     func runningPortOwners() -> [ProxyPortArbiter.Owner] {
         guard isProcessRunning else { return [] }
-        return [ProxyPortArbiter.Owner(id: Self.ownerId, ports: [listenPort], track: Self.trackLabel, label: activeNodeName ?? "")]
+        return [ProxyPortArbiter.Owner(id: ownerId, ports: [listenPort], track: trackLabel, label: activeNodeName ?? "")]
     }
 
     // MARK: - Lifecycle
 
-    /// 启动常驻全局代理进程。端口冲突走跨轨仲裁 fail-loud；启动后等待 /health 就绪。
-    func start(port: Int, clientKey: String, initial: CodexUpstream) async throws {
+    /// 启动常驻全局代理进程。`env` 由各轨适配器构造（上游 / client key / PROXY_TARGET 等）；
+    /// 本类注入 admin key 与初始 node_id。端口冲突走跨轨仲裁 fail-loud；启动后等待 /health 就绪。
+    func start(port: Int, env baseEnv: [String: String], nodeId: String, nodeName: String) async throws {
         if isProcessRunning { stop() }
 
-        if let conflict = ProxyPortArbiter.conflict(forPorts: [port], excluding: Self.ownerId) {
+        if let conflict = ProxyPortArbiter.conflict(forPorts: [port], excluding: ownerId) {
             throw GlobalProxyRuntimeError.portInUseByNode(conflict.port, conflict.track, conflict.label)
         }
 
@@ -93,18 +111,16 @@ final class GlobalProxyRuntime: ObservableObject {
 
         let admin = UUID().uuidString
         var environment = ProcessInfo.processInfo.environment
-        environment["PROXY_TARGET"] = "codex"
-        environment["OPENAI_API_MODE"] = "responses"
+        for (key, value) in baseEnv { environment[key] = value }
         environment["GLOBAL_PROXY_ADMIN_KEY"] = admin
-        environment["GLOBAL_PROXY_NODE_ID"] = initial.nodeId
-        environment["CODEX_CLIENT_KEY"] = clientKey
-        applyUpstreamEnv(&environment, upstream: initial)
+        environment["GLOBAL_PROXY_NODE_ID"] = nodeId
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executablePath)
         proc.arguments = ["--host", "127.0.0.1", "--port", "\(port)"]
         proc.environment = environment
 
+        let capturedTrack = track
         let outputPipe = Pipe()
         proc.standardOutput = outputPipe
         proc.standardError = outputPipe
@@ -117,8 +133,14 @@ final class GlobalProxyRuntime: ObservableObject {
                       let jsonStart = line.firstIndex(of: Character("{")) else { continue }
                 let jsonStr = String(line[jsonStart...])
                 Task { @MainActor in
-                    let fallbackId = GlobalProxyRuntime.shared.activeNodeId ?? ""
-                    ProxyViewModel.shared.parseProxyLog(jsonStr, configId: fallbackId)
+                    // OpenCode 轨：归因到 OpenCodeProxyRuntime（节点卡片/统计/热力图同源、按节点定价算成本）。
+                    // Codex/Claude 轨：仍走 ProxyViewModel（其节点在 configurations 里，统计/归档复用既有链路）。
+                    if capturedTrack == .opencode {
+                        OpenCodeProxyRuntime.shared.ingestGlobalProxyLog(jsonStr)
+                    } else {
+                        let runtime = GlobalProxyRuntime.instance(for: capturedTrack)
+                        ProxyViewModel.shared.parseProxyLog(jsonStr, configId: runtime.activeNodeId ?? "")
+                    }
                 }
             }
         }
@@ -129,10 +151,10 @@ final class GlobalProxyRuntime: ObservableObject {
             throw GlobalProxyRuntimeError.startFailed(error.localizedDescription)
         }
 
-        proc.terminationHandler = { p in
-            globalProxyRuntimeLog.notice("Global proxy process exited code=\(p.terminationStatus, privacy: .public)")
+        proc.terminationHandler = { [capturedTrack] p in
+            globalProxyRuntimeLog.notice("Global proxy (\(capturedTrack.rawValue, privacy: .public)) exited code=\(p.terminationStatus, privacy: .public)")
             Task { @MainActor in
-                let runtime = GlobalProxyRuntime.shared
+                let runtime = GlobalProxyRuntime.instance(for: capturedTrack)
                 if runtime.process === p {
                     runtime.process = nil
                     runtime.isRunning = false
@@ -143,8 +165,8 @@ final class GlobalProxyRuntime: ObservableObject {
         self.process = proc
         self.adminKey = admin
         self.listenPort = port
-        self.activeNodeId = initial.nodeId
-        self.activeNodeName = initial.nodeName
+        self.activeNodeId = nodeId
+        self.activeNodeName = nodeName
 
         do {
             try await waitForHealth(port: port, process: proc)
@@ -154,7 +176,7 @@ final class GlobalProxyRuntime: ObservableObject {
         }
 
         self.isRunning = true
-        globalProxyRuntimeLog.info("Global proxy started on 127.0.0.1:\(port, privacy: .public) pid=\(proc.processIdentifier, privacy: .public) node=\(initial.nodeId, privacy: .public)")
+        globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) started on 127.0.0.1:\(port, privacy: .public) pid=\(proc.processIdentifier, privacy: .public) node=\(nodeId, privacy: .public)")
     }
 
     func stop() {
@@ -164,17 +186,20 @@ final class GlobalProxyRuntime: ObservableObject {
         process = nil
         adminKey = nil
         isRunning = false
-        globalProxyRuntimeLog.info("Global proxy stopped")
+        globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) stopped")
     }
 
     // MARK: - Hot Switch
 
-    /// 热切换激活节点：POST admin 端点替换上游，进程不重启。成功后更新 activeNode 状态。
-    func switchUpstream(_ upstream: CodexUpstream) async throws {
+    /// 热切换激活节点：POST admin 端点替换上游，进程不重启。`payload`/`adminPath` 由各轨适配器构造
+    /// （OpenCode 按接口复用 codex/claude/opencode 三个 admin 路由，故 adminPath 由调用方下发；
+    /// 缺省回退到本实例固定路径，兼容 Codex/Claude 单一路由）。
+    func switchUpstream(payload: [String: Any], adminPath overridePath: String? = nil, nodeId: String, nodeName: String) async throws {
         guard isProcessRunning, let adminKey else {
             throw GlobalProxyRuntimeError.notRunning
         }
-        guard let url = URL(string: "http://127.0.0.1:\(listenPort)/__aiusage/admin/codex-upstream") else {
+        let effectivePath = overridePath ?? adminPath
+        guard let url = URL(string: "http://127.0.0.1:\(listenPort)\(effectivePath)") else {
             throw GlobalProxyRuntimeError.adminUnreachable("invalid url")
         }
 
@@ -182,13 +207,7 @@ final class GlobalProxyRuntime: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(adminKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "nodeId": upstream.nodeId,
-            "baseURL": upstream.baseURL,
-            "apiKey": upstream.apiKey,
-            "model": upstream.model ?? "",
-            "maxOutputTokens": upstream.maxOutputTokens ?? 0
-        ])
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
         let (_, response): (Data, URLResponse)
         do {
@@ -203,23 +222,12 @@ final class GlobalProxyRuntime: ObservableObject {
             throw GlobalProxyRuntimeError.adminRejected(http.statusCode)
         }
 
-        self.activeNodeId = upstream.nodeId
-        self.activeNodeName = upstream.nodeName
-        globalProxyRuntimeLog.info("Global proxy hot-switched to node \(upstream.nodeId, privacy: .public)")
+        self.activeNodeId = nodeId
+        self.activeNodeName = nodeName
+        globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) hot-switched to node \(nodeId, privacy: .public)")
     }
 
     // MARK: - Helpers
-
-    private func applyUpstreamEnv(_ environment: inout [String: String], upstream: CodexUpstream) {
-        environment["OPENAI_API_KEY"] = upstream.apiKey
-        environment["OPENAI_BASE_URL"] = upstream.baseURL
-        if let model = upstream.model, !model.isEmpty {
-            environment["CODEX_UPSTREAM_MODEL"] = model
-        }
-        if let maxTokens = upstream.maxOutputTokens, maxTokens > 0 {
-            environment["MAX_OUTPUT_TOKENS"] = "\(maxTokens)"
-        }
-    }
 
     private func waitForHealth(port: Int, process: Process) async throws {
         let deadline = Date().addingTimeInterval(Self.startupTimeout)

@@ -36,7 +36,7 @@ enum ProxyPortArbiter {
     static func runningPortOwners() -> [Owner] {
         ProxyViewModel.shared.runningProxyPortOwners()
             + OpenCodeProxyRuntime.shared.runningPortOwners()
-            + GlobalProxyRuntime.shared.runningPortOwners()
+            + GlobalProxyRuntime.all.flatMap { $0.runningPortOwners() }
     }
 
     /// 若 `wantedPorts` 中任一端口已被「其它正在运行的代理」占用，返回首个冲突命中；否则 nil。

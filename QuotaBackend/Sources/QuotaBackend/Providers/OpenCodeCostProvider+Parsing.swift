@@ -36,11 +36,21 @@ extension OpenCodeCostProvider {
         let time: TimeInfo?
     }
 
+    /// 全局统一代理在 opencode.json 注入的受管 provider 键（与 App 端 OpenCodeConfigManager.globalProviderId 对齐）。
+    /// 该 provider 下的 db 记录属全局模式流量——成本已走代理日志（PROXY_LOG → ProxyRequestLog/归档）计入，
+    /// 这里排除以免在 OpenCode 用量/费用/热力图里被重复计数。per-node 受管键恒为 `aiusage-<slug>`，不受影响。
+    static let globalProxyProviderID = "aiusage"
+
     /// 解析一行 message；非 assistant、零用量或无法解码的行返回 nil。
     /// decoder 由调用方每次 fetch 创建一只并复用（避免逐行新建，也避免跨任务共享）。
     func parseMessageRow(_ row: MessageRow, decoder: JSONDecoder) -> CodexRow? {
         guard let message = try? decoder.decode(MessageData.self, from: row.data),
               message.role == "assistant" else {
+            return nil
+        }
+
+        // 全局统一代理流量（providerID == "aiusage"）已由代理日志计入，跳过避免重复计数。
+        if message.providerID?.trimmingCharacters(in: .whitespacesAndNewlines) == Self.globalProxyProviderID {
             return nil
         }
 

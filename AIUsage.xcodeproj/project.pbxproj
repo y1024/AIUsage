@@ -96,6 +96,7 @@
 		B1GP00012F97002000A15674 /* GlobalProxyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00002F97002000A15674 /* GlobalProxyConfig.swift */; };
 		B1GP00112F97002000A15674 /* GlobalProxyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00102F97002000A15674 /* GlobalProxyRuntime.swift */; };
 		B1GP00212F97002000A15674 /* GlobalProxyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00202F97002000A15674 /* GlobalProxyManager.swift */; };
+		B1GP00412F97002000A15674 /* GlobalProxyTrackAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */; };
 		B1REFB012F97002000A15674 /* ProviderRefreshResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */; };
 		B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */; };
 		B3943D26F03B43809C53419E /* ProxyStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */; };
@@ -107,6 +108,8 @@
 		C1CX00012FB0000100B26789 /* CodexConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00002FB0000100B26789 /* CodexConfigManager.swift */; };
 		C1CX00032FB0000200B26789 /* CodexProxyManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */; };
 		B1GP00312F97002000A15674 /* CodexGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */; };
+		B1GP00512F97002000A15674 /* ClaudeGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */; };
+		B1GP00712F97002000A15674 /* OpenCodeGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */; };
 		C1CX00052FB0000300B26789 /* CodexProxyEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */; };
 		C1CX00072FB0000400B26789 /* StatsHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00062FB0000400B26789 /* StatsHubView.swift */; };
 		C1CX00092FB0000900B26789 /* CodexConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */; };
@@ -251,6 +254,7 @@
 		B1GP00002F97002000A15674 /* GlobalProxyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyConfig.swift; sourceTree = "<group>"; };
 		B1GP00102F97002000A15674 /* GlobalProxyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyRuntime.swift; sourceTree = "<group>"; };
 		B1GP00202F97002000A15674 /* GlobalProxyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyManager.swift; sourceTree = "<group>"; };
+		B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyTrackAdapters.swift; sourceTree = "<group>"; };
 		B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRefreshResult.swift; sourceTree = "<group>"; };
 		B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TLSCertificateManager.swift; sourceTree = "<group>"; };
 		C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONWebEditorAssets.swift; sourceTree = "<group>"; };
@@ -260,6 +264,8 @@
 		C1CX00002FB0000100B26789 /* CodexConfigManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigManager.swift; sourceTree = "<group>"; };
 		C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProxyManagementView.swift; sourceTree = "<group>"; };
 		B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGlobalProxySection.swift; sourceTree = "<group>"; };
+		B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeGlobalProxySection.swift; sourceTree = "<group>"; };
+		B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGlobalProxySection.swift; sourceTree = "<group>"; };
 		C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProxyEditorView.swift; sourceTree = "<group>"; };
 		C1CX00062FB0000400B26789 /* StatsHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsHubView.swift; sourceTree = "<group>"; };
 		C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigEditorView.swift; sourceTree = "<group>"; };
@@ -342,6 +348,7 @@
 				A2B3C4D72F96001000A15674 /* ProxyViewModel+Aggregation.swift */,
 				A2B3C4EF2F9C001000A15674 /* ProxyViewModel+ProxyOnlyMode.swift */,
 				B1GP00202F97002000A15674 /* GlobalProxyManager.swift */,
+				B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */,
 				5EFREF002F93000100A15674 /* ProviderRefreshCoordinator.swift */,
 				5EFREF212F93000100A15674 /* ProviderRefreshCoordinator+FetchPipeline.swift */,
 				5EFREF312F93000100A15674 /* ProviderRefreshCoordinator+Conversion.swift */,
@@ -445,6 +452,8 @@
 				F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */,
 				C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */,
 				B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */,
+				B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */,
+				B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */,
 				C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */,
 				C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */,
 				C1CX00062FB0000400B26789 /* StatsHubView.swift */,
@@ -669,6 +678,7 @@
 				B1GP00012F97002000A15674 /* GlobalProxyConfig.swift in Sources */,
 				B1GP00112F97002000A15674 /* GlobalProxyRuntime.swift in Sources */,
 				B1GP00212F97002000A15674 /* GlobalProxyManager.swift in Sources */,
+				B1GP00412F97002000A15674 /* GlobalProxyTrackAdapters.swift in Sources */,
 				B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */,
 				5EFAD7752F87AFE700A15674 /* ProviderCard.swift in Sources */,
 				5EF0C0D22F95000100A15674 /* ProviderCard+MultiWindowQuota.swift in Sources */,
@@ -743,6 +753,8 @@
 				C1CX00012FB0000100B26789 /* CodexConfigManager.swift in Sources */,
 				C1CX00032FB0000200B26789 /* CodexProxyManagementView.swift in Sources */,
 				B1GP00312F97002000A15674 /* CodexGlobalProxySection.swift in Sources */,
+				B1GP00512F97002000A15674 /* ClaudeGlobalProxySection.swift in Sources */,
+				B1GP00712F97002000A15674 /* OpenCodeGlobalProxySection.swift in Sources */,
 				C1CX00052FB0000300B26789 /* CodexProxyEditorView.swift in Sources */,
 				C1CX00092FB0000900B26789 /* CodexConfigEditorView.swift in Sources */,
 				C1CG10012FB0001000B26789 /* CodexGlobalConfig.swift in Sources */,

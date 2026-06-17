@@ -15,7 +15,7 @@ struct CodexGlobalProxySection: View {
 
     private static let codexBrand = Color(red: 0.40, green: 0.52, blue: 0.92)
 
-    private var nodes: [ProxyConfiguration] { manager.availableNodes() }
+    private var nodes: [GlobalProxyNodeRef] { manager.availableNodes() }
     private var isEnabled: Bool { manager.isEnabled }
 
     var body: some View {
@@ -29,6 +29,7 @@ struct CodexGlobalProxySection: View {
             } else {
                 nodePicker
                 settingsRow
+                modelTip
             }
             if let error = manager.operationError {
                 Text(error)
@@ -119,13 +120,13 @@ struct CodexGlobalProxySection: View {
     private var settingsRow: some View {
         HStack(spacing: 12) {
             field(label: L("Port", "端口"), width: 90) {
-                TextField("4399", text: $portText)
+                TextField("14399", text: $portText)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 90)
                     .disabled(isEnabled)
                     .onChange(of: portText) { _, _ in commitSettings() }
             }
-            field(label: L("Virtual Model", "虚拟模型"), width: 200) {
+            field(label: L("Model", "模型"), width: 200) {
                 TextField(GlobalProxyConfig.defaultVirtualModel, text: $virtualModel)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 200)
@@ -135,6 +136,19 @@ struct CodexGlobalProxySection: View {
             Spacer()
         }
         .opacity(isEnabled ? 0.6 : 1)
+    }
+
+    // MARK: - Model Tip
+    // 虚拟模型名只是 CLI 固定入口名，实际会被改写为激活节点的真实上游模型。
+
+    private var modelTip: some View {
+        Text(L(
+            "Model is just the fixed entry name Codex sends — name it anything. Each request is rewritten to the active node's real upstream model.",
+            "模型仅作 Codex 固定入口名，可任意取名；每次请求会被改写为激活节点的真实上游模型。"
+        ))
+        .font(.system(size: 10))
+        .foregroundStyle(.tertiary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func field<Content: View>(label: String, width: CGFloat, @ViewBuilder content: () -> Content) -> some View {

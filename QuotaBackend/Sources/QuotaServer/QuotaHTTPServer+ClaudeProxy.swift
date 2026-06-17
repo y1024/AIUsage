@@ -98,7 +98,8 @@ extension QuotaHTTPServer {
                 inputTokens: response.usage.inputTokens,
                 outputTokens: response.usage.outputTokens,
                 cacheCreationTokens: response.usage.cacheCreationInputTokens ?? 0,
-                cacheReadTokens: response.usage.cacheReadInputTokens ?? 0
+                cacheReadTokens: response.usage.cacheReadInputTokens ?? 0,
+                nodeId: activeNodeId
             )
             return jsonResponse(encodable: response, headers: headers)
         } catch {
@@ -112,7 +113,8 @@ extension QuotaHTTPServer {
                 responseTimeMs: elapsed,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
-                statusCode: errorResult.statusCode
+                statusCode: errorResult.statusCode,
+                nodeId: activeNodeId
             )
             httpLog.error("  ✗ Proxy error: \(error.localizedDescription)")
             var responseHeaders = headers
@@ -714,7 +716,8 @@ extension QuotaHTTPServer {
                 inputTokens: reportedInputTokens ?? 0,
                 outputTokens: finalOutputTokens,
                 cacheCreationTokens: reportedCacheCreation ?? 0,
-                cacheReadTokens: reportedCacheRead ?? 0
+                cacheReadTokens: reportedCacheRead ?? 0,
+                nodeId: activeNodeId
             )
 
         } catch {
@@ -736,7 +739,8 @@ extension QuotaHTTPServer {
                 firstTokenMs: firstTokenMs,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
-                statusCode: errorResult.statusCode
+                statusCode: errorResult.statusCode,
+                nodeId: activeNodeId
             )
         }
 

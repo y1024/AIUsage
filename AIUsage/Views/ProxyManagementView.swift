@@ -93,6 +93,8 @@ struct ProxyManagementView: View {
                         } else {
                             // 通用配置仅作用于 Claude 的 ~/.claude/settings.json。
                             GlobalConfigSection()
+                            // 全局统一代理：固定入口 + 热切换激活节点（启用时接管 settings.json）。
+                            ClaudeGlobalProxySection()
                         }
                         if !displayConfigs.isEmpty {
                             configurationsList

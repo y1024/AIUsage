@@ -101,6 +101,10 @@ public enum OpenCodeNodeStatsFetcher {
                   providerID.hasPrefix(providerIDPrefix) else {
                 continue
             }
+            // 全局统一代理流量记在裸 `aiusage`（无对应节点 slug，永远映射不到任何节点卡片）。
+            // 其用量/费用已由代理日志（OpenCodeProxyRuntime.globalStats）按节点定价归因，
+            // 这里跳过避免产生孤儿桶（per-node 受管键恒为 `aiusage-<slug>`，不受影响）。
+            if providerID == OpenCodeCostProvider.globalProxyProviderID { continue }
 
             let input = message.tokens?.input ?? 0
             let output = message.tokens?.output ?? 0

@@ -35,6 +35,9 @@ public struct ClaudeProxyConfiguration: Sendable {
     public let smallModel: String
     public let maxOutputTokens: Int?
     public let enableModelAliasMapping: Bool
+    /// 全局统一代理（OpenCode anthropic 接口）模式下，把入站请求体的 `model` 无条件改写为该真实上游模型名，
+    /// 优先于三层别名映射。nil = 不强制（普通 Claude Code 轨）。
+    public let forcedModel: String?
     public let requestTimeout: TimeInterval
     public let customHeaders: [String: String]
     public let interceptor: (any PassthroughInterceptor)?
@@ -52,6 +55,7 @@ public struct ClaudeProxyConfiguration: Sendable {
         smallModel: String = "gpt-3.5-turbo",
         maxOutputTokens: Int? = nil,
         enableModelAliasMapping: Bool = false,
+        forcedModel: String? = nil,
         requestTimeout: TimeInterval = 60,
         customHeaders: [String: String] = [:],
         interceptor: (any PassthroughInterceptor)? = nil
@@ -70,6 +74,8 @@ public struct ClaudeProxyConfiguration: Sendable {
         self.smallModel = smallModel
         self.maxOutputTokens = maxOutputTokens
         self.enableModelAliasMapping = enableModelAliasMapping
+        let trimmedForced = forcedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.forcedModel = (trimmedForced?.isEmpty == false) ? trimmedForced : nil
         self.requestTimeout = requestTimeout
         self.customHeaders = customHeaders
         self.interceptor = interceptor
@@ -171,6 +177,8 @@ public struct ClaudeProxyConfiguration: Sendable {
             let bigModel = ProcessInfo.processInfo.environment["BIG_MODEL"] ?? "claude-opus-4-6"
             let middleModel = ProcessInfo.processInfo.environment["MIDDLE_MODEL"] ?? "claude-sonnet-4-6"
             let smallModel = ProcessInfo.processInfo.environment["SMALL_MODEL"] ?? "claude-haiku-4-5"
+            // 全局统一代理（OpenCode anthropic 接口）随启动注入初始真实模型 → 无条件改写入站 model。
+            let forcedModel = ProcessInfo.processInfo.environment["ANTHROPIC_FORCED_MODEL"]
 
             return ClaudeProxyConfiguration(
                 enabled: true,
@@ -182,6 +190,7 @@ public struct ClaudeProxyConfiguration: Sendable {
                 middleModel: middleModel,
                 smallModel: smallModel,
                 enableModelAliasMapping: aliasMapping,
+                forcedModel: forcedModel,
                 interceptor: enableRewrite ? AnyRouterInterceptor() : nil
             )
         }

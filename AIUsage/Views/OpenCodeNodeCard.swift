@@ -3,8 +3,8 @@ import QuotaBackend
 
 // MARK: - OpenCode Node Card
 // 节点卡片：与 Claude/Codex 节点卡片同一套视觉语言——
-// 顶部协议徽章（Direct/Proxy 变体）、拖拽把手、左侧统计 pills（请求数/费用，来自
-// opencode.db 节点归因）、名称/URL/连通性状态行、右侧动作区（激活开关 + 代理模式
+// 顶部协议徽章（Direct/Proxy 变体）、拖拽把手、左侧统计 pills（请求数/费用 = opencode.db
+// 节点归因 + 全局统一代理永久累计两源相加）、名称/URL/连通性状态行、右侧动作区（激活开关 + 代理模式
 // antenna + 连通性测试 + 编辑 + 删除）。单击内联展开配置明细，右键含复制节点。
 // Equatable 化：输入不变的卡片跳过重渲染（选中态切换只重渲染两张卡）。
 
@@ -91,9 +91,9 @@ struct OpenCodeNodeCard: View, Equatable {
 
                 VStack(alignment: .trailing, spacing: 4) {
                     statPill(icon: "arrow.up.arrow.down", value: formatCompactNumber(Double(statsRequests)), color: .blue)
-                        .help(L("Total Requests (opencode.db)", "总请求数（opencode.db）"))
+                        .help(L("Total Requests (opencode.db + global proxy)", "总请求数（opencode.db + 全局代理）"))
                     statPill(icon: "dollarsign.circle", value: formatProxyCurrency(statsCostUsd), color: .green)
-                        .help(L("Total Cost (opencode.db)", "总费用（opencode.db）"))
+                        .help(L("Total Cost (opencode.db + global proxy)", "总费用（opencode.db + 全局代理）"))
                 }
                 .frame(width: 80)
 

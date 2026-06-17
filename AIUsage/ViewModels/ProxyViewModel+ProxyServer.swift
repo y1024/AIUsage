@@ -44,8 +44,11 @@ extension ProxyViewModel {
             // 启动时先回收上次会话残留的孤儿 QuotaServer（崩溃/强退后被 launchd 收养、仍占着端口），
             // 再恢复激活态，避免恢复/激活时因端口被自家孤儿占用而失败（旧版表现为 code 9）。
             await ProxyProcessInspector.shared.reapOrphanedHelpers()
-            // 先恢复全局代理（启用态下它独占 config.toml）；随后的每节点 Codex 恢复会因全局启用而跳过。
-            await GlobalProxyManager.shared.restoreOnLaunch()
+            // 先恢复两轨全局代理（启用态下各自独占 config.toml / settings.json）；
+            // 随后的每节点恢复会因对应轨全局启用而跳过。
+            await GlobalProxyManager.codex.restoreOnLaunch()
+            await GlobalProxyManager.claude.restoreOnLaunch()
+            await GlobalProxyManager.opencode.restoreOnLaunch()
             await restoreActivatedNodeAsync()
             await restoreActivatedCodexNodeAsync()
             await restoreProxyOnlyNodes()
@@ -96,6 +99,10 @@ extension ProxyViewModel {
     }
 
     private func restoreActivatedNodeAsync() async {
+        // 全局代理启用时由它独占 settings.json；跳过每节点 Claude 恢复，避免清理/还原误删全局受管块。
+        if GlobalProxyManager.claude.config.isEnabled {
+            return
+        }
         let shouldAutoRestore = AppSettings.shared.proxyAutoRestoreOnLaunch
 
         activatedConfigId = shouldAutoRestore
@@ -636,10 +643,12 @@ extension ProxyViewModel {
             tokensCacheCreation = 0
         }
 
-        // 全局统一代理：一个进程随激活节点轮转，日志里带 node_id；优先按 node_id 归因到当前节点，
-        // 这样定价/统计落到真实节点上（缺省回退到进程的 configId，兼容每节点独立进程的旧路径）。
+        // 全局统一代理（Codex/Claude 轨）：一个进程随激活节点轮转，日志里带 node_id；优先按 node_id
+        // 归因到当前节点，这样定价/统计落到真实节点上（缺省回退到进程的 configId，兼容每节点独立进程的旧路径）。
+        // OpenCode 轨的全局日志不经此函数——它在 OpenCodeProxyRuntime 里按 OpenCode 节点定价单独归因。
         let effectiveConfigId = (json["node_id"] as? String)?.nilIfBlank ?? configId
         let config = configurations.first { $0.id == effectiveConfigId }
+
         let requestPath = config?.nodeType.isCodex == true ? "/v1/responses" : "/v1/messages"
         let pricing = config?.pricingForModel(upstreamModel)
         let estimatedCost = pricing?.costForTokens(

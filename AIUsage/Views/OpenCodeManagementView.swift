@@ -50,6 +50,7 @@ struct OpenCodeManagementView: View {
                         actionBar
                         OpenCodeOverviewStrip(store: store, statsStore: statsStore, proxyRuntime: proxyRuntime)
                         OpenCodeGlobalConfigSection(store: store)
+                        OpenCodeGlobalProxySection()
                         nodeListSection
                     }
                     .padding(20)
@@ -203,16 +204,22 @@ struct OpenCodeManagementView: View {
         isSelected: Bool,
         stats: OpenCodeNodeStatsFetcher.NodeStats?
     ) -> OpenCodeNodeCard {
-        OpenCodeNodeCard(
+        // pills = opencode.db 节点归因（直连/路线B）+ 全局统一代理永久累计（按节点定价）。
+        // 两源互斥（db 已排除裸 aiusage 全局流量），相加即该节点真实总量，全局代理下也持续更新。
+        let global = proxyRuntime.globalStats(forNodeId: node.id)
+        let mergedRequests = (stats?.requestCount ?? 0) + (global?.requestCount ?? 0)
+        let mergedCost = (stats?.costUsd ?? 0) + (global?.costUsd ?? 0)
+        let mergedLastUsed = [stats?.lastUsedAt, global?.lastRequestAt].compactMap { $0 }.max()
+        return OpenCodeNodeCard(
             node: node,
             isActive: node.id == store.activeNodeId,
             isProxyOnlyRunning: store.proxyOnlyNodeIds.contains(node.id),
             isSelected: isSelected,
             isBusy: activationInProgress,
             activationDisabled: store.usesJSONC || !node.isComplete,
-            statsRequests: stats?.requestCount ?? 0,
-            statsCostUsd: stats?.costUsd ?? 0,
-            lastRequestAt: stats?.lastUsedAt,
+            statsRequests: mergedRequests,
+            statsCostUsd: mergedCost,
+            lastRequestAt: mergedLastUsed,
             connectivityState: connectivityStates[node.id],
             onDragChanged: { translation in
                 if draggingNodeId != node.id {

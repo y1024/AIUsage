@@ -41,12 +41,44 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     let host: String
     let port: Int
     let engine = ProviderEngine()
-    var proxyService: ClaudeProxyService?
-    var proxyConfig: ClaudeProxyConfiguration?
-    var openCodeProxyService: OpenCodeProxyService?
-    var openCodeConfig: OpenCodeProxyConfiguration?
     var httpsConfig: HTTPSConfig?
     private let lifecycleQueue = DispatchQueue(label: "com.aiusage.quotaserver.lifecycle")
+
+    // MARK: - OpenCode Proxy (hot-swappable upstream)
+    // 与 Codex/Claude 同构：全局统一代理模式下 OpenCode 上游（base_url/key/forcedModel）由 admin 热替换。
+    // service/config 跨连接并发读 + admin 线程写，统一用 openCodeStateLock 保护。
+    private let openCodeStateLock = NSLock()
+    private var _openCodeProxyService: OpenCodeProxyService?
+    private var _openCodeConfig: OpenCodeProxyConfiguration?
+
+    /// 当前 OpenCode 透传服务（启用时有值；全局模式下可被 admin 热替换）。
+    var openCodeProxyService: OpenCodeProxyService? {
+        get { openCodeStateLock.withLock { _openCodeProxyService } }
+        set { openCodeStateLock.withLock { _openCodeProxyService = newValue } }
+    }
+    /// 当前 OpenCode 上游配置（全局模式下含 forcedModel，用于入站请求体 model 改写）。
+    var openCodeConfig: OpenCodeProxyConfiguration? {
+        get { openCodeStateLock.withLock { _openCodeConfig } }
+        set { openCodeStateLock.withLock { _openCodeConfig = newValue } }
+    }
+
+    // MARK: - Claude Proxy (hot-swappable upstream)
+    // 与 Codex 同构：全局统一代理模式下 Claude 上游（base_url/key/三模型映射/模式）由 admin 热替换。
+    // service/config 跨连接并发读 + admin 线程写，统一用 claudeStateLock 保护。
+    private let claudeStateLock = NSLock()
+    private var _proxyService: ClaudeProxyService?
+    private var _proxyConfig: ClaudeProxyConfiguration?
+
+    /// 当前 Claude 代理服务（openaiConvert 模式有值；passthrough 模式为 nil，由 proxyConfig 驱动）。
+    var proxyService: ClaudeProxyService? {
+        get { claudeStateLock.withLock { _proxyService } }
+        set { claudeStateLock.withLock { _proxyService = newValue } }
+    }
+    /// 当前 Claude 上游配置（全局模式下可被 admin 热替换；passthrough 模式据此透传）。
+    var proxyConfig: ClaudeProxyConfiguration? {
+        get { claudeStateLock.withLock { _proxyConfig } }
+        set { claudeStateLock.withLock { _proxyConfig = newValue } }
+    }
 
     // MARK: - Global Proxy (hot-swappable Codex upstream)
     // 全局统一代理模式下，本进程常驻在固定端口，由宿主 App 通过受 token 保护的本地 admin 端点
@@ -68,6 +100,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         set { codexStateLock.withLock { _codexConfig = newValue } }
     }
     /// 当前生效节点 id：全局模式下随热切换变化，用于给 PROXY_LOG 打上正确的节点归因。
+    /// 每个 QuotaServer 进程只服务单一轨（codex/claude/opencode），故本字段跨轨复用、不会歧义。
     var activeNodeId: String? {
         get { codexStateLock.withLock { _activeNodeId } }
         set { codexStateLock.withLock { _activeNodeId = newValue } }
@@ -77,6 +110,10 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     let globalProxyAdminKey: String?
     /// 全局模式下对客户端固定不变的 client key（热切换只换上游，绝不换 client key，保证 CLI 配置无需重写）。
     let fixedCodexClientKey: String?
+    /// Claude 全局模式下对客户端固定不变的 client key（写入 settings.json 的 ANTHROPIC_AUTH_TOKEN）。
+    let fixedClaudeClientKey: String?
+    /// OpenCode 全局模式下对客户端固定不变的 client key（写入 opencode.json 受管块的 apiKey 占位）。
+    let fixedOpenCodeClientKey: String?
 
     /// 原子热替换 Codex 上游：用新上游构造 service，连同 config / activeNodeId 一次性换入（单次加锁），
     /// 保证并发请求要么看到旧三态、要么看到新三态，不会读到半新半旧的组合。client key 恒用固定值。
@@ -103,6 +140,67 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         }
         return true
     }
+
+    /// 原子热替换 Claude 上游：按模式（passthrough/convert）重建 config（+ convert 模式下重建 service），
+    /// 一次性换入。client key 恒用固定值，CLI 的 settings.json 无需重写。返回 false 表示新配置非法。
+    func applyClaudeUpstream(_ update: ClaudeUpstreamUpdate) -> Bool {
+        let mode: ProxyMode = update.mode == "passthrough" ? .anthropicPassthrough : .openaiConvert
+        guard !update.baseURL.isEmpty, !update.apiKey.isEmpty else { return false }
+
+        let newConfig = ClaudeProxyConfiguration(
+            enabled: true,
+            bindPort: port,
+            mode: mode,
+            upstreamBaseURL: update.baseURL,
+            openAIUpstreamAPI: OpenAIUpstreamAPI.fromEnvironment(update.apiMode),
+            upstreamAPIKey: update.apiKey,
+            expectedClientKey: fixedClaudeClientKey,
+            bigModel: update.bigModel.isEmpty ? "gpt-4o" : update.bigModel,
+            middleModel: update.middleModel.isEmpty ? "gpt-4o-mini" : update.middleModel,
+            smallModel: update.smallModel.isEmpty ? "gpt-3.5-turbo" : update.smallModel,
+            maxOutputTokens: update.maxOutputTokens,
+            enableModelAliasMapping: mode == .anthropicPassthrough && (update.enableModelAliasMapping ?? false),
+            forcedModel: mode == .anthropicPassthrough ? update.forcedModel : nil
+        )
+
+        // convert 模式需要 service 做协议转换；passthrough 模式由 proxyConfig 直接透传（service 置空）。
+        let newService: ClaudeProxyService?
+        if mode == .openaiConvert {
+            guard let svc = try? ClaudeProxyService(configuration: newConfig) else { return false }
+            newService = svc
+        } else {
+            newService = nil
+        }
+        claudeStateLock.withLock {
+            _proxyConfig = newConfig
+            _proxyService = newService
+        }
+        activeNodeId = update.nodeId
+        return true
+    }
+
+    /// 原子热替换 OpenCode（chat/completions 透传轨）上游：用新上游 + forcedModel 重建 service/config 一次性换入。
+    /// client key 恒用固定值，opencode.json 无需重写。返回 false 表示新配置非法（缺 URL）。
+    func applyOpenCodeUpstream(_ update: OpenCodeUpstreamUpdate) -> Bool {
+        guard !update.baseURL.isEmpty else { return false }
+        let newConfig = OpenCodeProxyConfiguration(
+            enabled: true,
+            bindPort: port,
+            upstreamBaseURL: update.baseURL,
+            upstreamAPIKey: update.apiKey,
+            expectedClientKey: fixedOpenCodeClientKey,
+            forcedModel: update.model
+        )
+        guard let newService = try? OpenCodeProxyService(configuration: newConfig) else {
+            return false
+        }
+        openCodeStateLock.withLock {
+            _openCodeConfig = newConfig
+            _openCodeProxyService = newService
+        }
+        activeNodeId = update.nodeId
+        return true
+    }
     private var ipv4Listener: NWListener?
     private var ipv6Listener: NWListener?
     private var httpsListener: NWListener?
@@ -120,24 +218,26 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     ) {
         self.host = host
         self.port = port
-        self.proxyConfig = proxyConfig
-        self.openCodeConfig = openCodeConfig
+        self._proxyConfig = proxyConfig
+        self._openCodeConfig = openCodeConfig
         self.httpsConfig = httpsConfig
 
         let env = ProcessInfo.processInfo.environment
         self.globalProxyAdminKey = env["GLOBAL_PROXY_ADMIN_KEY"].flatMap { $0.isEmpty ? nil : $0 }
         self.fixedCodexClientKey = codexConfig?.expectedClientKey
+        self.fixedClaudeClientKey = proxyConfig?.expectedClientKey
+        self.fixedOpenCodeClientKey = openCodeConfig?.expectedClientKey
         self._activeNodeId = env["GLOBAL_PROXY_NODE_ID"].flatMap { $0.isEmpty ? nil : $0 }
         self._codexConfig = codexConfig
 
         if let config = proxyConfig, config.enabled, config.mode == .openaiConvert {
-            self.proxyService = try? ClaudeProxyService(configuration: config)
+            self._proxyService = try? ClaudeProxyService(configuration: config)
         }
         if let codexConfig, codexConfig.enabled, codexConfig.mode == .openaiConvert {
             self._codexProxyService = try? CodexProxyService(configuration: codexConfig)
         }
         if let openCodeConfig, openCodeConfig.enabled {
-            self.openCodeProxyService = try? OpenCodeProxyService(configuration: openCodeConfig)
+            self._openCodeProxyService = try? OpenCodeProxyService(configuration: openCodeConfig)
         }
     }
 
@@ -405,10 +505,16 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         case ("POST", "/v1/messages"):
             return await handleMessagesEndpoint(request: request, headers: corsHeaders)
 
-        // MARK: - Global Proxy Admin (hot-swap Codex upstream)
+        // MARK: - Global Proxy Admin (hot-swap upstream)
 
         case ("POST", "/__aiusage/admin/codex-upstream"):
             return handleCodexUpstreamAdmin(request: request, headers: corsHeaders)
+
+        case ("POST", "/__aiusage/admin/claude-upstream"):
+            return handleClaudeUpstreamAdmin(request: request, headers: corsHeaders)
+
+        case ("POST", "/__aiusage/admin/opencode-upstream"):
+            return handleOpenCodeUpstreamAdmin(request: request, headers: corsHeaders)
 
         // MARK: - Codex Proxy Endpoint
 

@@ -145,7 +145,7 @@ final class ProviderActivationManager: ObservableObject {
         // 互斥（全局统一代理优先）：全局代理启用时常驻进程接管 ~/.codex/config.toml（指向固定端口），
         // 此时写 auth.json 不会生效（CLI 仍走全局代理）。直接拦截，杜绝「点了像激活、实则无效」的误导。
         // 读持久化文件而非 @MainActor 的 GlobalProxyManager：本方法非 actor 隔离，且每次切换都已同步落盘。
-        if GlobalProxyStore.load().isEnabled {
+        if GlobalProxyStore.load(track: .codex).isEnabled {
             let msg = settings.t(
                 "The Codex global proxy is enabled. Switch the active node from the global proxy panel, or turn it off to activate accounts individually.",
                 "Codex 全局代理已启用。请在全局代理面板切换激活节点，或先关闭全局代理再单独激活账号。"
