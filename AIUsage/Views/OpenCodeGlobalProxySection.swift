@@ -35,7 +35,8 @@ struct OpenCodeGlobalProxySection: View {
             errorText: manager.operationError,
             toggle: enableBinding,
             nodeControl: { nodeControl },
-            config: { configContent }
+            config: { configContent },
+            runningSummary: { runningSummary }
         )
         .onAppear(perform: syncFromConfig)
         // 节点列表/接口变化后，保证选择项仍有效。
@@ -47,17 +48,38 @@ struct OpenCodeGlobalProxySection: View {
     private var nodeControl: some View {
         HStack(spacing: 6) {
             GlobalProxyInlineLabel(text: L("Active Node", "激活节点"))
-            Picker("", selection: nodeBinding) {
+            GlobalProxyChipMenu(
+                brand: Self.brand,
+                title: currentNodeName,
+                systemImage: "bolt.fill",
+                isDisabled: manager.isBusy
+            ) {
                 ForEach(nodes) { node in
-                    Text(node.name).tag(node.id)
+                    Button {
+                        nodeBinding.wrappedValue = node.id
+                    } label: {
+                        if node.id == nodeBinding.wrappedValue {
+                            Label(node.name, systemImage: "checkmark")
+                        } else {
+                            Text(node.name)
+                        }
+                    }
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .frame(minWidth: 120)
-            .disabled(manager.isBusy)
         }
+    }
+
+    private var currentNodeName: String {
+        let id = nodeBinding.wrappedValue
+        return nodes.first(where: { $0.id == id })?.name ?? L("Select", "选择")
+    }
+
+    // MARK: - Running Summary (read-only chips when enabled)
+
+    @ViewBuilder private var runningSummary: some View {
+        GlobalProxySummaryChip(label: L("Interface", "接口"), value: interface.displayName)
+        GlobalProxySummaryChip(label: L("Port", "端口"), value: "\(manager.config.port)")
+        GlobalProxySummaryChip(label: L("Model", "模型"), value: manager.config.virtualModel)
     }
 
     // MARK: - Configuration (interface + port + single virtual model)
@@ -65,19 +87,7 @@ struct OpenCodeGlobalProxySection: View {
 
     private var configContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                GlobalProxyField(label: L("Interface", "接口")) {
-                    Picker("", selection: interfaceBinding) {
-                        ForEach(OpenCodeProtocol.allCases, id: \.self) { proto in
-                            Text(proto.displayName).tag(proto)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(minWidth: 160)
-                    .disabled(isEnabled || manager.isBusy)
-                }
+            HStack(alignment: .top, spacing: 12) {
                 GlobalProxyField(label: L("Port", "端口")) {
                     TextField("14401", text: $portText)
                         .textFieldStyle(.roundedBorder)
@@ -85,12 +95,32 @@ struct OpenCodeGlobalProxySection: View {
                         .disabled(isEnabled)
                         .onChange(of: portText) { _, _ in commitSettings() }
                 }
+                GlobalProxyField(label: L("Interface", "接口")) {
+                    GlobalProxyChipMenu(
+                        brand: Self.brand,
+                        title: interface.displayName,
+                        systemImage: "arrow.left.arrow.right",
+                        isDisabled: isEnabled || manager.isBusy
+                    ) {
+                        ForEach(OpenCodeProtocol.allCases, id: \.self) { proto in
+                            Button {
+                                interfaceBinding.wrappedValue = proto
+                            } label: {
+                                if proto == interface {
+                                    Label(proto.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(proto.displayName)
+                                }
+                            }
+                        }
+                    }
+                }
                 Spacer()
             }
             GlobalProxyField(label: L("Model", "模型")) {
                 TextField(GlobalProxyConfig.defaultOpenCodeModel, text: $modelText)
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 320)
+                    .frame(width: 160)
                     .disabled(isEnabled)
                     .onChange(of: modelText) { _, _ in commitSettings() }
             }

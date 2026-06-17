@@ -33,7 +33,8 @@ struct ClaudeGlobalProxySection: View {
             errorText: manager.operationError,
             toggle: enableBinding,
             nodeControl: { nodeControl },
-            config: { configContent }
+            config: { configContent },
+            runningSummary: { runningSummary }
         )
         .onAppear(perform: syncFromConfig)
     }
@@ -43,17 +44,39 @@ struct ClaudeGlobalProxySection: View {
     private var nodeControl: some View {
         HStack(spacing: 6) {
             GlobalProxyInlineLabel(text: L("Active Node", "激活节点"))
-            Picker("", selection: nodeBinding) {
+            GlobalProxyChipMenu(
+                brand: Self.claudeBrand,
+                title: currentNodeName,
+                systemImage: "bolt.fill",
+                isDisabled: manager.isBusy
+            ) {
                 ForEach(nodes) { node in
-                    Text(node.name).tag(node.id)
+                    Button {
+                        nodeBinding.wrappedValue = node.id
+                    } label: {
+                        if node.id == nodeBinding.wrappedValue {
+                            Label(node.name, systemImage: "checkmark")
+                        } else {
+                            Text(node.name)
+                        }
+                    }
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .frame(minWidth: 120)
-            .disabled(manager.isBusy)
         }
+    }
+
+    private var currentNodeName: String {
+        let id = nodeBinding.wrappedValue
+        return nodes.first(where: { $0.id == id })?.name ?? L("Select", "选择")
+    }
+
+    // MARK: - Running Summary (read-only chips when enabled)
+
+    @ViewBuilder private var runningSummary: some View {
+        GlobalProxySummaryChip(label: L("Port", "端口"), value: "\(manager.config.port)")
+        GlobalProxySummaryChip(label: L("Opus", "Opus"), value: manager.config.claudeOpus)
+        GlobalProxySummaryChip(label: L("Sonnet", "Sonnet"), value: manager.config.claudeSonnet)
+        GlobalProxySummaryChip(label: L("Haiku", "Haiku"), value: manager.config.claudeHaiku)
     }
 
     // MARK: - Configuration (port + three-tier models; editable only while disabled)
@@ -75,6 +98,7 @@ struct ClaudeGlobalProxySection: View {
                 modelColumn(L("Opus", "Opus"), placeholder: GlobalProxyConfig.defaultClaudeOpus, text: $opusModel)
                 modelColumn(L("Sonnet", "Sonnet"), placeholder: GlobalProxyConfig.defaultClaudeSonnet, text: $sonnetModel)
                 modelColumn(L("Haiku", "Haiku"), placeholder: GlobalProxyConfig.defaultClaudeHaiku, text: $haikuModel)
+                Spacer(minLength: 0)
             }
             GlobalProxyTip(text: L(
                 "These three names are just fixed tier entries Claude Code sends — name them anything. Each is rewritten to the active node's real big / middle / small upstream model.",
@@ -83,12 +107,12 @@ struct ClaudeGlobalProxySection: View {
         }
     }
 
-    /// 一列模型：小标签在上、输入框在下，三列等宽填满整行。
+    /// 一列模型：小标签在上、输入框在下，固定宽度左对齐，与其它模型框一致。
     private func modelColumn(_ tier: String, placeholder: String, text: Binding<String>) -> some View {
-        GlobalProxyField(label: L("\(tier) Model", "\(tier) 模型"), fillWidth: true) {
+        GlobalProxyField(label: L("\(tier) Model", "\(tier) 模型")) {
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: .infinity)
+                .frame(width: 160)
                 .disabled(isEnabled)
                 .onChange(of: text.wrappedValue) { _, _ in commitSettings() }
         }

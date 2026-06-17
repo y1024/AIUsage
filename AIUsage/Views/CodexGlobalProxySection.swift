@@ -30,7 +30,8 @@ struct CodexGlobalProxySection: View {
             errorText: manager.operationError,
             toggle: enableBinding,
             nodeControl: { nodeControl },
-            config: { configContent }
+            config: { configContent },
+            runningSummary: { runningSummary }
         )
         .onAppear(perform: syncFromConfig)
     }
@@ -40,17 +41,37 @@ struct CodexGlobalProxySection: View {
     private var nodeControl: some View {
         HStack(spacing: 6) {
             GlobalProxyInlineLabel(text: L("Active Node", "激活节点"))
-            Picker("", selection: nodeBinding) {
+            GlobalProxyChipMenu(
+                brand: Self.codexBrand,
+                title: currentNodeName,
+                systemImage: "bolt.fill",
+                isDisabled: manager.isBusy
+            ) {
                 ForEach(nodes) { node in
-                    Text(node.name).tag(node.id)
+                    Button {
+                        nodeBinding.wrappedValue = node.id
+                    } label: {
+                        if node.id == nodeBinding.wrappedValue {
+                            Label(node.name, systemImage: "checkmark")
+                        } else {
+                            Text(node.name)
+                        }
+                    }
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .frame(minWidth: 120)
-            .disabled(manager.isBusy)
         }
+    }
+
+    private var currentNodeName: String {
+        let id = nodeBinding.wrappedValue
+        return nodes.first(where: { $0.id == id })?.name ?? L("Select", "选择")
+    }
+
+    // MARK: - Running Summary (read-only chips when enabled)
+
+    @ViewBuilder private var runningSummary: some View {
+        GlobalProxySummaryChip(label: L("Port", "端口"), value: "\(manager.config.port)")
+        GlobalProxySummaryChip(label: L("Model", "模型"), value: manager.config.virtualModel)
     }
 
     // MARK: - Configuration (port / virtual model; editable only while disabled)
@@ -65,14 +86,14 @@ struct CodexGlobalProxySection: View {
                         .disabled(isEnabled)
                         .onChange(of: portText) { _, _ in commitSettings() }
                 }
-                GlobalProxyField(label: L("Model", "模型")) {
-                    TextField(GlobalProxyConfig.defaultVirtualModel, text: $virtualModel)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 220)
-                        .disabled(isEnabled)
-                        .onChange(of: virtualModel) { _, _ in commitSettings() }
-                }
                 Spacer()
+            }
+            GlobalProxyField(label: L("Model", "模型")) {
+                TextField(GlobalProxyConfig.defaultVirtualModel, text: $virtualModel)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
+                    .disabled(isEnabled)
+                    .onChange(of: virtualModel) { _, _ in commitSettings() }
             }
             GlobalProxyTip(text: L(
                 "Model is just the fixed entry name Codex sends — name it anything. Each request is rewritten to the active node's real upstream model.",
