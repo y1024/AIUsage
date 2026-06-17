@@ -60,6 +60,8 @@
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
 | **Codex Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
 | **OpenCode Proxy** | Switch OpenCode across upstreams via a managed `opencode.json` block — OpenAI-compatible, Anthropic and Responses protocols, per-node usage attribution, per-model pricing and optional request logging |
+| **Global Proxy** | One fixed local endpoint per agent — hot-swap the active upstream node with zero CLI restart, per-node cost attribution, and automatic cross-track port arbitration |
+| **Unified API Providers** | Configure one upstream (Base URL, format, key, model library/pricing) once and distribute it to Codex / Claude / OpenCode at once; linked nodes inherit from the master and sync on change, with per-field local overrides |
 | **Call Analytics** | Count MCP / Skill / tool calls across Claude Code, Codex & OpenCode from local session logs — Top-N rankings, daily trend, and per-app zero-call ("zombie" skill/MCP) detection; read-only, zero instrumentation |
 | **Menu Bar** | Multi-account status bar icons, quota/cost metrics, per-proxy node switchers, quick-glance popover, colored progress bars |
 | **Credential Vault** | macOS Keychain storage for all managed credentials |
@@ -152,6 +154,26 @@ Switch OpenCode between any number of upstreams without hand-editing `opencode.j
 | **cc-switch sync** | One-click import of OpenCode providers from local cc-switch (upstream / models / key / pricing), deterministic-id dedup, configurable cc-switch directory |
 
 **Quick start:** Open AIUsage → OpenCode Proxy → New Node → Configure models & pricing → Activate. `~/.config/opencode/opencode.json` is taken over automatically (requires OpenCode ≥ 1.2 for usage tracking).
+
+### Global Proxy
+
+Instead of activating one node at a time, run a single fixed local endpoint per agent and hot-swap the active upstream behind it — the CLI never restarts and its config never changes.
+
+| Capability | What it does |
+|------------|-------------|
+| **Fixed endpoint** | Each agent points at one stable `127.0.0.1` port once; switching upstreams is in-process and CLI-transparent |
+| **Hot-swap active node** | Change the active node with zero restart; each request is rewritten to that node's real upstream model |
+| **Per-node attribution** | Cost and usage are recorded against the real active node and model, not a generic global bucket; ports are arbitrated across all three tracks to avoid collisions |
+
+### Unified API Providers
+
+Configure an upstream once and reuse it everywhere. Under **Providers → API Providers**, define a provider (Base URL, API format, key, model library and pricing) and distribute it to any combination of the three proxies — each gets a linked node.
+
+| Capability | What it does |
+|------------|-------------|
+| **Configure once, distribute** | One config feeds Codex / Claude / OpenCode; a compatibility matrix limits where each format can go |
+| **Inherit + local override** | Linked nodes follow the master and sync on change; editing a shared field on one node turns it into a local override that no longer syncs |
+| **Safe lifecycle** | Idempotent re-distribution (no duplicates), port deconfliction for new nodes, and cascade delete or unlink when removing a master |
 
 Usage and billing details for Claude Code and Codex are documented in [docs/USAGE_AND_BILLING.md](docs/USAGE_AND_BILLING.md). OpenCode cost is read directly from its local session ledger (`opencode.db`), pre-priced per [models.dev](https://models.dev).
 
