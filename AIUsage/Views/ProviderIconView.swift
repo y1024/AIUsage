@@ -52,9 +52,19 @@ struct ProviderIconView: View {
     var body: some View {
         Group {
             if let img = brandImage {
-                Image(nsImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                if img.isTemplate {
+                    // 单色品牌标志（如 OpenCode 官方黑白 mark）：强制按模板渲染并用 .primary 着色，
+                    // 随系统外观自适应（浅色黑、深色白），避免在深色菜单里渲染成纯黑而不可见。
+                    Image(nsImage: img)
+                        .resizable()
+                        .renderingMode(.template)
+                        .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(.primary)
+                } else {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                }
             } else {
                 Image(systemName: fallbackSymbol)
                     .resizable()

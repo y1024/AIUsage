@@ -14,10 +14,19 @@ struct MenuBarAccountRow: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var activationManager: ProviderActivationManager
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var proxyVM = ProxyViewModel.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovered = false
 
-    private var isActive: Bool { activationManager.isActiveAccount(entry) }
+    /// 防双高亮：Codex 代理节点占用 ~/.codex/config.toml 时即为生效身份，订阅账号一律视为未激活
+    /// （代理不改 auth.json，detectActiveCodexAccount 仍会据其内容回填激活账号，故在 UI 层兜底）。
+    /// 与 MenuBarView+TrackSwitcher、CodexProxyManagementView 的判定保持一致。
+    private var isActive: Bool {
+        if entry.providerId == "codex", proxyVM.activatedId(isCodex: true) != nil {
+            return false
+        }
+        return activationManager.isActiveAccount(entry)
+    }
     private var canActivate: Bool { activationManager.canActivateProvider(providerId) && !isActive }
     private var remainingPercent: Double? { entry.liveProvider?.remainingPercent }
     private var isCostProvider: Bool { entry.liveProvider?.category == ProviderCategory.localCost }
