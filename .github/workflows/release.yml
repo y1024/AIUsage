@@ -17,6 +17,10 @@ jobs:
   build-release:
     runs-on: macos-15
 
+    env:
+      MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -62,6 +66,50 @@ jobs:
             -destination "platform=macOS" \
             -resolvePackageDependencies \
             -derivedDataPath build/DerivedData
+
+      # Import the stable self-signed code signing certificate (issue #35).
+      # Skipped automatically if the secret is absent, in which case the
+      # packaging script falls back to ad-hoc signing.
+      - name: Import code signing certificate
+        if: ${{ env.MACOS_CERT_P12_BASE64 != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/aiusage-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          CERT_PATH="$RUNNER_TEMP/aiusage-signing.p12"
+
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" -P "$MACOS_CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+
+          # Add to the search list so codesign can resolve the identity.
+          security list-keychains -d user -s "$KEYCHAIN_PATH" \
+            $(security list-keychains -d user | sed 's/[\"[:space:]]//g')
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep -oE '[0-9A-F]{40}' | head -1)"
+          if [[ -z "$IDENTITY" ]]; then
+            IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN_PATH" \
+              | grep -oE '[0-9A-F]{40}' | head -1)"
+          fi
+          if [[ -z "$IDENTITY" ]]; then
+            echo "No code signing identity found in imported certificate" >&2
+            exit 1
+          fi
+
+          echo "MACOS_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "MACOS_SIGNING_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          rm -f "$CERT_PATH"
+          echo "Imported stable signing identity: $IDENTITY"
 
       - name: Build macOS release artifacts
         shell: bash

@@ -10,6 +10,7 @@
 - GitHub Releases 页面已有 `dmg` 和 `zip`
 - `appcast.xml` 已由工作流更新并回写到 `main`
 - Release Notes 已补成用户可读版本
+- 产物用稳定自签名证书签名（CI 已强制校验，详见「代码签名」一节）
 - 本地已重新同步远端 `main`
 
 只要缺一项，都不算真正发版完成。
@@ -140,6 +141,30 @@ git tag -fa v<version> -m "Release <version>"
 git push origin v<version> --force
 ```
 
+## 代码签名（稳定自签名证书）
+
+发布产物用**一张固定不变的自签名证书**签名（不是 ad-hoc）。原因：ad-hoc 签名指纹每次构建都变，macOS 钥匙串把指纹记在每个条目的 ACL 里，更新后旧的「始终允许」全部失效，用户每次更新都要重新授权（issue #35）。每次用同一张证书签，App 的 designated requirement 恒定（`certificate leaf = H"..."`），「始终允许」就能跨版本保留。
+
+工作机制（已写进发布管线，自动生效，无需手动操作）：
+
+- `release.yml` 的 `Import code signing certificate` 步骤：从 secret 解出 `.p12` → 临时钥匙串导入 → 取 identity → 写入 `MACOS_SIGNING_IDENTITY` / `MACOS_SIGNING_KEYCHAIN`。
+- `package-release.sh`：检测到 `MACOS_SIGNING_IDENTITY` 就用该证书签名，并**强制校验**产物是 cert-pinned（不是则 `exit 1`，绝不静默回退 ad-hoc）。secret 缺失时才回退 ad-hoc（方便 fork 构建）。
+
+依赖的仓库 secret（缺一不可，否则回退 ad-hoc）：
+
+- `MACOS_CERT_P12_BASE64`：证书 `.p12` 的 base64
+- `MACOS_CERT_PASSWORD`：`.p12` 密码
+
+证书首次生成（**只做一次，之后永远复用同一张**）：
+
+```bash
+./scripts/generate-signing-cert.sh
+# 产物在 dist/（已 gitignore）：aiusage-signing.p12 + .p12.base64
+# 把打印的密码和 .p12.base64 内容分别填进上面两个 secret
+```
+
+> ⚠️ 不要重新生成证书。换证书 = 换指纹 = 所有用户被多问一次「始终允许」。务必把 `dist/aiusage-signing.p12` 和密码离线备份好，长期复用。
+
 ## 关键坑点
 
 ### 1. 只看本地 Debug 没用
@@ -181,6 +206,13 @@ resource fork, Finder information, or similar detritus not allowed
 - 不要删掉 `scripts/package-release.sh` 里的 detritus 清理逻辑
 - 不要在桌面仓库目录里的 staging `.app` 上直接做签名
 - 先复制到 `/tmp` 临时目录签名和做 DMG staging，再把最终产物写回 `dist/`
+
+### 6. 签名证书必须长期复用同一张
+
+- 发布用稳定自签名证书（见「代码签名」一节），不是 ad-hoc
+- **绝不重新生成证书**：换证书 = 用户被多问一次「始终允许」
+- 证书或 secret 丢了：先找回备份，找不到再重生成（并预期老用户多授权一次）
+- CI 若误回退 ad-hoc，`package-release.sh` 会 `exit 1`，不会静默发车
 
 ## 最短手顺
 

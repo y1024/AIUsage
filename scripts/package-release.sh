@@ -96,10 +96,44 @@ else
   echo "  WARNING: Sparkle.framework Resources not found, skipping string injection"
 fi
 
-echo "Ad-hoc signing ${APP_NAME}.app..."
 strip_bundle_detritus "$APP_PATH"
-codesign --force --deep -s - "$APP_PATH"
+
+# Signing identity:
+#   - When MACOS_SIGNING_IDENTITY is set (release builds in CI), sign with a
+#     STABLE certificate. A stable signature keeps the app's designated
+#     requirement constant across versions, so a user's Keychain "Always Allow"
+#     grant survives updates instead of re-prompting on every release (issue #35).
+#   - Otherwise fall back to ad-hoc (local dev builds, or CI without the secret).
+SIGN_IDENTITY="${MACOS_SIGNING_IDENTITY:-}"
+SIGN_KEYCHAIN="${MACOS_SIGNING_KEYCHAIN:-}"
+
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  echo "Signing ${APP_NAME}.app with stable identity (${SIGN_IDENTITY})..."
+  CODESIGN_ARGS=(--force --deep)
+  if [[ -n "$SIGN_KEYCHAIN" ]]; then
+    CODESIGN_ARGS+=(--keychain "$SIGN_KEYCHAIN")
+  fi
+  codesign "${CODESIGN_ARGS[@]}" -s "$SIGN_IDENTITY" "$APP_PATH"
+else
+  echo "Ad-hoc signing ${APP_NAME}.app (no MACOS_SIGNING_IDENTITY set)..."
+  codesign --force --deep -s - "$APP_PATH"
+fi
 codesign --verify --verbose "$APP_PATH" || true
+
+# Guarantee: when a stable identity was requested, the output MUST be
+# certificate-signed (designated requirement pins the cert). If it silently fell
+# back to ad-hoc, the Keychain "Always Allow" fix would be lost — so fail loudly
+# instead of shipping a build that re-prompts users on every update (issue #35).
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  DESIGNATED_REQ="$(codesign -d -r- "$APP_PATH" 2>&1 || true)"
+  if ! echo "$DESIGNATED_REQ" | grep -qi 'certificate leaf'; then
+    echo "ERROR: stable signing was requested but the app is not certificate-signed." >&2
+    echo "Designated requirement:" >&2
+    echo "$DESIGNATED_REQ" >&2
+    exit 1
+  fi
+  echo "Verified stable certificate-pinned signature."
+fi
 
 rm -f "$ZIP_PATH" "$DMG_PATH"
 mkdir -p "$DMG_STAGING_DIR"
