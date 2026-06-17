@@ -55,6 +55,15 @@ struct CodexProxyEditorView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if let providerName = linkedProviderName {
+                        InheritanceBanner(providerName: providerName) {
+                            let providerId = profile.metadata.linkedProviderId
+                            dismiss()
+                            if let providerId {
+                                Task { await APIProviderDistributor.shared.resetToInherit(providerId: providerId, target: .codex) }
+                            }
+                        }
+                    }
                     introBanner
                     basicSection
                     networkSection
@@ -361,6 +370,13 @@ struct CodexProxyEditorView: View {
             && !proxy.modelMapping.bigModel.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// 链接到的「API 提供商」名称（非链接节点为 nil）。
+    private var linkedProviderName: String? {
+        guard let id = profile.metadata.linkedProviderId,
+              let master = APIProviderStore.shared.provider(id: id) else { return nil }
+        return master.displayName
+    }
+
     private func saveProfile() {
         // 单模型：defaultModel 与 bigModel 对齐；middle/small 留空不参与定价/统计。
         let model = profile.metadata.proxy.modelMapping.bigModel.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -370,6 +386,8 @@ struct CodexProxyEditorView: View {
         profile.metadata.proxy.defaultModel = model
         profile.metadata.proxy.syncSlotPricingFromLibrary()
         profile.syncEnvFromProxy()
+        // 链接节点：与主配置比对，标记本次编辑产生的本地覆盖（未链接则清空）。
+        profile = APIProviderDistributor.shared.stampOverrides(profile)
 
         Task {
             if isNew {

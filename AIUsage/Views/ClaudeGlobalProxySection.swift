@@ -22,102 +22,50 @@ struct ClaudeGlobalProxySection: View {
     private var isEnabled: Bool { manager.isEnabled }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
-            statusLine
-            if nodes.isEmpty {
-                Text(L("Create a Claude node first to use the global proxy.", "请先创建 Claude 节点后再使用全局代理。"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                configGrid
-            }
-            if let error = manager.operationError {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(isEnabled ? Self.claudeBrand.opacity(0.45) : Color.primary.opacity(0.06), lineWidth: 1)
+        GlobalProxySectionScaffold(
+            brand: Self.claudeBrand,
+            subtitle: L("Fixed endpoint; switch active node with zero restart.", "固定入口，切换激活节点零重启、CLI 无感。"),
+            isEnabled: isEnabled,
+            isBusy: manager.isBusy,
+            port: manager.config.port,
+            hasNodes: !nodes.isEmpty,
+            emptyHint: L("Create a Claude node first to use the global proxy.", "请先创建 Claude 节点后再使用全局代理。"),
+            errorText: manager.operationError,
+            toggle: enableBinding,
+            nodeControl: { nodeControl },
+            config: { configContent }
         )
         .onAppear(perform: syncFromConfig)
     }
 
-    // MARK: - Header (title + master toggle)
+    // MARK: - Active Node (header; hot-switch when enabled)
 
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
-                .font(.system(size: 14))
-                .foregroundStyle(Self.claudeBrand)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L("Global Proxy", "全局代理"))
-                    .font(.headline.weight(.bold))
-                Text(L("Fixed endpoint; switch active node with zero restart.", "固定入口，切换激活节点零重启、CLI 无感。"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if manager.isBusy {
-                ProgressView().controlSize(.small)
-            }
-            Toggle("", isOn: enableBinding)
-                .labelsHidden()
-                .toggleStyle(ProxyActivationToggleStyle(brandColor: Self.claudeBrand, isBusy: manager.isBusy))
-                .disabled(nodes.isEmpty || manager.isBusy)
-        }
-    }
-
-    private var statusLine: some View {
+    private var nodeControl: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(isEnabled ? Color.green : Color.secondary.opacity(0.5))
-                .frame(width: 7, height: 7)
-            Text(isEnabled
-                 ? L("Running on 127.0.0.1:\(manager.config.port)", "运行中 · 127.0.0.1:\(manager.config.port)")
-                 : L("Stopped", "已停用"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if isEnabled, let name = activeNodeName {
-                Text("·")
-                    .foregroundStyle(.secondary)
-                Text(L("Active: \(name)", "激活：\(name)"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Self.claudeBrand)
+            GlobalProxyInlineLabel(text: L("Active Node", "激活节点"))
+            Picker("", selection: nodeBinding) {
+                ForEach(nodes) { node in
+                    Text(node.name).tag(node.id)
+                }
             }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .frame(minWidth: 120)
+            .disabled(manager.isBusy)
         }
     }
 
-    // MARK: - Config Body (active node + port inline; three models in one row)
-    // 激活节点可在运行时热切换；端口/三模型仅停用态可改。三层模型并排一行，省纵向空间。
+    // MARK: - Configuration (port + three-tier models; editable only while disabled)
+    // 三层模型并排一行，省纵向空间；端口/三模型仅停用态可改。
 
-    private var configGrid: some View {
+    private var configContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 16) {
-                inlineField(L("Active Node", "激活节点")) {
-                    Picker("", selection: nodeBinding) {
-                        ForEach(nodes) { node in
-                            Text(node.name).tag(node.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(minWidth: 140)
-                    .disabled(manager.isBusy)
-                }
-                inlineField(L("Port", "端口")) {
+            HStack(spacing: 12) {
+                GlobalProxyField(label: L("Port", "端口")) {
                     TextField("14400", text: $portText)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 80)
+                        .frame(width: 90)
                         .disabled(isEnabled)
                         .onChange(of: portText) { _, _ in commitSettings() }
                 }
@@ -128,38 +76,21 @@ struct ClaudeGlobalProxySection: View {
                 modelColumn(L("Sonnet", "Sonnet"), placeholder: GlobalProxyConfig.defaultClaudeSonnet, text: $sonnetModel)
                 modelColumn(L("Haiku", "Haiku"), placeholder: GlobalProxyConfig.defaultClaudeHaiku, text: $haikuModel)
             }
-            Text(L(
+            GlobalProxyTip(text: L(
                 "These three names are just fixed tier entries Claude Code sends — name them anything. Each is rewritten to the active node's real big / middle / small upstream model.",
                 "三层模型名仅作 Claude Code 固定入口名，可任意取名；请求会按层改写为激活节点真实的 大 / 中 / 小 上游模型。"
             ))
-            .font(.system(size: 10))
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     /// 一列模型：小标签在上、输入框在下，三列等宽填满整行。
     private func modelColumn(_ tier: String, placeholder: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(L("\(tier) Model", "\(tier) 模型"))
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
+        GlobalProxyField(label: L("\(tier) Model", "\(tier) 模型"), fillWidth: true) {
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: .infinity)
                 .disabled(isEnabled)
                 .onChange(of: text.wrappedValue) { _, _ in commitSettings() }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// 标签在前、控件在后的紧凑内联字段（用于激活节点 / 端口）。
-    private func inlineField<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(spacing: 6) {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            content()
         }
     }
 
@@ -200,10 +131,6 @@ struct ClaudeGlobalProxySection: View {
             return selectedNodeId
         }
         return manager.activeNodeId ?? nodes.first?.id ?? ""
-    }
-
-    private var activeNodeName: String? {
-        manager.node(for: manager.activeNodeId)?.name
     }
 
     private func syncFromConfig() {
