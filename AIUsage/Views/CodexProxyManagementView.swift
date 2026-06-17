@@ -62,6 +62,7 @@ struct CodexSubscriptionSection: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject private var activation = ProviderActivationManager.shared
     @ObservedObject private var proxyVM = ProxyViewModel.shared
+    @ObservedObject private var globalProxy = GlobalProxyManager.shared
     @ObservedObject private var orderStore = CodexSubscriptionOrderStore.shared
 
     // 手势驱动的实时重排状态：仅记录被拖行 id 与跟手位移，行高由 PreferenceKey 测量。
@@ -75,8 +76,9 @@ struct CodexSubscriptionSection: View {
     // 与节点列表的 codexProxy 品牌色一致。
     private static let codexBrand = Color(red: 0.40, green: 0.52, blue: 0.92)
 
-    /// 代理节点占用 config.toml 时即为生效身份，订阅一律视为未激活（与菜单栏一致，杜绝双高亮）。
-    private var proxyActive: Bool { proxyVM.activatedId(isCodex: true) != nil }
+    /// 代理占用 config.toml（每节点代理 或 全局统一代理）时即为生效身份，订阅一律视为未激活
+    /// （与菜单栏一致，杜绝双高亮）。全局代理启用时还会禁用激活开关（单独激活被互斥拦截）。
+    private var proxyActive: Bool { proxyVM.activatedId(isCodex: true) != nil || globalProxy.isEnabled }
 
     var body: some View {
         let ordered = orderStore.ordered(entries)
@@ -331,6 +333,7 @@ struct CodexSubscriptionSection: View {
             Spacer(minLength: 8)
 
             // 与节点列表统一的激活开关：开=激活该账号（互斥切换），关=停用（清除激活标记）。
+            // 全局代理启用时单独激活被互斥拦截，开关禁用并提示去全局代理面板切换。
             Toggle("", isOn: Binding(
                 get: { isActive },
                 set: { newValue in
@@ -343,6 +346,11 @@ struct CodexSubscriptionSection: View {
             ))
             .labelsHidden()
             .toggleStyle(ProxyActivationToggleStyle(brandColor: Self.codexBrand, isBusy: false))
+            .disabled(globalProxy.isEnabled)
+            .help(globalProxy.isEnabled
+                  ? L("Global proxy is enabled; switch the active node in the global proxy card.",
+                      "全局代理已启用，请在全局代理卡片切换激活节点。")
+                  : "")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

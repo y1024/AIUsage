@@ -23,17 +23,33 @@ extension MenuBarView {
             ? CodexSubscriptionOrderStore.shared.ordered(
                 appState.providerAccountGroups.first { $0.providerId == "codex" }?.accounts ?? [])
             : []
+        // 全局统一代理（仅 Codex 轨）：启用时常驻代理接管 config.toml，整条轨道由它生效。
+        // 此时账号 / 节点的单独激活被互斥拦截，故菜单项禁用、订阅不高亮；生效名取全局激活节点。
+        let globalEnabled = family.isCodex && globalProxy.isEnabled
+        let globalActiveNode = globalEnabled ? globalProxy.node(for: globalProxy.activeNodeId) : nil
+
         // 单一激活：代理节点占用 config.toml 时即为生效身份，订阅不再视为 active（防启动期竞态双高亮）。
-        let activeSub = activeNode == nil
+        let activeSub = (activeNode == nil && !globalEnabled)
             ? subEntries.first { ProviderActivationManager.shared.isActiveAccount($0) }
             : nil
-        let isOn = activeNode != nil || activeSub != nil
-        let activeLabel = activeNode?.name
-            ?? activeSub?.accountPrimaryLabel
-            ?? L("Off", "未启用")
+        let isOn = activeNode != nil || activeSub != nil || globalEnabled
+        let activeLabel: String = {
+            if globalEnabled {
+                let name = globalActiveNode?.name ?? L("Global proxy", "全局代理")
+                return L("\(name) (Global)", "\(name)（全局）")
+            }
+            return activeNode?.name ?? activeSub?.accountPrimaryLabel ?? L("Off", "未启用")
+        }()
 
         return Menu {
             if family.isCodex {
+                if globalEnabled {
+                    Section(L("Global Proxy", "全局代理")) {
+                        Text(globalActiveNode.map { L("Active: \($0.name)", "生效中：\($0.name)") }
+                             ?? L("Enabled", "已启用"))
+                        Text(L("Switch nodes in the proxy page", "请在代理页切换激活节点"))
+                    }
+                }
                 if subEntries.isEmpty && familyNodes.isEmpty {
                     Text(L("No Codex accounts or nodes", "暂无 Codex 账号或节点"))
                 }
@@ -41,11 +57,13 @@ extension MenuBarView {
                     Section(L("Subscription", "订阅账号")) {
                         ForEach(subEntries, id: \.id) { codexSubscriptionMenuItem($0) }
                     }
+                    .disabled(globalEnabled)
                 }
                 if !familyNodes.isEmpty {
                     Section(L("API Nodes", "API 节点")) {
                         ForEach(familyNodes) { proxyNodeMenuItem($0) }
                     }
+                    .disabled(globalEnabled)
                 }
             } else if familyNodes.isEmpty {
                 Text(L("No proxy nodes", "暂无代理节点"))
@@ -200,7 +218,8 @@ extension MenuBarView {
     /// Codex 订阅账号菜单项：点击激活（写 auth.json，自动停用代理节点），已激活打勾。
     @ViewBuilder
     private func codexSubscriptionMenuItem(_ entry: ProviderAccountEntry) -> some View {
-        let proxyActive = proxyVM.activatedId(isCodex: true) != nil
+        // 代理接管 config.toml（每节点代理 或 全局统一代理）时，订阅一律视为未激活（防双高亮）。
+        let proxyActive = proxyVM.activatedId(isCodex: true) != nil || globalProxy.isEnabled
         let isActive = !proxyActive && ProviderActivationManager.shared.isActiveAccount(entry)
         Button {
             try? ProviderActivationManager.shared.activateAccount(entry: entry)

@@ -49,6 +49,8 @@ enum ProxyRuntimeError: LocalizedError {
     case proxyPortInUseByNode(Int, String, String)
     case activationStatePersistFailed
     case deactivationStatePersistFailed
+    /// Codex 全局代理已启用时，单节点激活被接管：应改用全局代理切换激活节点。
+    case codexManagedByGlobalProxy
 
     var errorDescription: String? {
         switch self {
@@ -75,6 +77,11 @@ enum ProxyRuntimeError: LocalizedError {
             return AppSettings.shared.t("The node started, but AIUsage could not persist the activated state.", "节点已启动，但 AIUsage 无法保存激活状态。")
         case .deactivationStatePersistFailed:
             return AppSettings.shared.t("The node stopped, but AIUsage could not persist the deactivated state.", "节点已停止，但 AIUsage 无法保存停用状态。")
+        case .codexManagedByGlobalProxy:
+            return AppSettings.shared.t(
+                "The Codex global proxy is enabled. Switch the active node from the global proxy panel, or turn it off to activate nodes individually.",
+                "Codex 全局代理已启用。请在全局代理面板里切换激活节点，或先关闭全局代理再单独激活节点。"
+            )
         }
     }
 }
@@ -579,6 +586,11 @@ class ProxyViewModel: ObservableObject {
         }
 
         let isCodex = config.nodeType.isCodex
+
+        // 全局代理接管 Codex 轨时，禁止每节点激活（改由全局代理面板切换激活节点）。
+        if isCodex, GlobalProxyManager.shared.config.isEnabled {
+            throw ProxyRuntimeError.codexManagedByGlobalProxy
+        }
 
         if activatedId(isCodex: isCodex) == id {
             return

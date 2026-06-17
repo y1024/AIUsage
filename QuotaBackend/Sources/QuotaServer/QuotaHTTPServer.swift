@@ -43,12 +43,66 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     let engine = ProviderEngine()
     var proxyService: ClaudeProxyService?
     var proxyConfig: ClaudeProxyConfiguration?
-    var codexProxyService: CodexProxyService?
-    var codexConfig: CodexProxyConfiguration?
     var openCodeProxyService: OpenCodeProxyService?
     var openCodeConfig: OpenCodeProxyConfiguration?
     var httpsConfig: HTTPSConfig?
     private let lifecycleQueue = DispatchQueue(label: "com.aiusage.quotaserver.lifecycle")
+
+    // MARK: - Global Proxy (hot-swappable Codex upstream)
+    // 全局统一代理模式下，本进程常驻在固定端口，由宿主 App 通过受 token 保护的本地 admin 端点
+    // 原子热替换 Codex 上游（base_url/key/model），无需重启进程 / 无需重写 CLI 配置 / 端口不变。
+    // codex 三态（service/config/activeNodeId）跨连接并发读 + admin 线程写，统一用 codexStateLock 保护。
+    private let codexStateLock = NSLock()
+    private var _codexProxyService: CodexProxyService?
+    private var _codexConfig: CodexProxyConfiguration?
+    private var _activeNodeId: String?
+
+    /// 当前 Codex 代理服务（全局模式下可被 admin 热替换）。
+    var codexProxyService: CodexProxyService? {
+        get { codexStateLock.withLock { _codexProxyService } }
+        set { codexStateLock.withLock { _codexProxyService = newValue } }
+    }
+    /// 当前 Codex 上游配置（全局模式下可被 admin 热替换）。
+    var codexConfig: CodexProxyConfiguration? {
+        get { codexStateLock.withLock { _codexConfig } }
+        set { codexStateLock.withLock { _codexConfig = newValue } }
+    }
+    /// 当前生效节点 id：全局模式下随热切换变化，用于给 PROXY_LOG 打上正确的节点归因。
+    var activeNodeId: String? {
+        get { codexStateLock.withLock { _activeNodeId } }
+        set { codexStateLock.withLock { _activeNodeId = newValue } }
+    }
+
+    /// 全局代理 admin 端点的 Bearer token（仅全局模式下由启动环境注入；为 nil 时 admin 端点关闭）。
+    let globalProxyAdminKey: String?
+    /// 全局模式下对客户端固定不变的 client key（热切换只换上游，绝不换 client key，保证 CLI 配置无需重写）。
+    let fixedCodexClientKey: String?
+
+    /// 原子热替换 Codex 上游：用新上游构造 service，连同 config / activeNodeId 一次性换入（单次加锁），
+    /// 保证并发请求要么看到旧三态、要么看到新三态，不会读到半新半旧的组合。client key 恒用固定值。
+    /// 返回 false 表示新配置非法（如缺 key/URL），调用方保持旧上游不变。
+    func applyCodexUpstream(_ update: CodexUpstreamUpdate) -> Bool {
+        let newConfig = CodexProxyConfiguration(
+            enabled: true,
+            bindPort: port,
+            mode: .openaiConvert,
+            upstreamBaseURL: update.baseURL,
+            openAIUpstreamAPI: .responses,
+            upstreamAPIKey: update.apiKey,
+            expectedClientKey: fixedCodexClientKey,
+            upstreamModel: update.model,
+            maxOutputTokens: update.maxOutputTokens
+        )
+        guard let newService = try? CodexProxyService(configuration: newConfig) else {
+            return false
+        }
+        codexStateLock.withLock {
+            _codexConfig = newConfig
+            _codexProxyService = newService
+            _activeNodeId = update.nodeId
+        }
+        return true
+    }
     private var ipv4Listener: NWListener?
     private var ipv6Listener: NWListener?
     private var httpsListener: NWListener?
@@ -67,14 +121,20 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         self.host = host
         self.port = port
         self.proxyConfig = proxyConfig
-        self.codexConfig = codexConfig
         self.openCodeConfig = openCodeConfig
         self.httpsConfig = httpsConfig
+
+        let env = ProcessInfo.processInfo.environment
+        self.globalProxyAdminKey = env["GLOBAL_PROXY_ADMIN_KEY"].flatMap { $0.isEmpty ? nil : $0 }
+        self.fixedCodexClientKey = codexConfig?.expectedClientKey
+        self._activeNodeId = env["GLOBAL_PROXY_NODE_ID"].flatMap { $0.isEmpty ? nil : $0 }
+        self._codexConfig = codexConfig
+
         if let config = proxyConfig, config.enabled, config.mode == .openaiConvert {
             self.proxyService = try? ClaudeProxyService(configuration: config)
         }
         if let codexConfig, codexConfig.enabled, codexConfig.mode == .openaiConvert {
-            self.codexProxyService = try? CodexProxyService(configuration: codexConfig)
+            self._codexProxyService = try? CodexProxyService(configuration: codexConfig)
         }
         if let openCodeConfig, openCodeConfig.enabled {
             self.openCodeProxyService = try? OpenCodeProxyService(configuration: openCodeConfig)
@@ -344,6 +404,11 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
         case ("POST", "/v1/messages"):
             return await handleMessagesEndpoint(request: request, headers: corsHeaders)
+
+        // MARK: - Global Proxy Admin (hot-swap Codex upstream)
+
+        case ("POST", "/__aiusage/admin/codex-upstream"):
+            return handleCodexUpstreamAdmin(request: request, headers: corsHeaders)
 
         // MARK: - Codex Proxy Endpoint
 

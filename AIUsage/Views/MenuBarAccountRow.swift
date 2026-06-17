@@ -12,6 +12,9 @@ struct MenuBarAccountRow: View {
     /// Codex 代理是否有节点正在生效（由父视图统一观察 ProxyViewModel 后下传，
     /// 避免每行各自 @ObservedObject 订阅造成的重复刷新）。
     let codexProxyActive: Bool
+    /// Codex 全局统一代理是否启用（由父视图统一观察 GlobalProxyManager 后下传）。
+    /// 启用时整条 Codex 轨由常驻代理接管，订阅账号一律视为未激活且不可激活（互斥）。
+    let codexGlobalProxyManaged: Bool
     @Binding var activationMessage: String?
     @Binding var activationSuccess: Bool
     @EnvironmentObject var appState: AppState
@@ -20,16 +23,21 @@ struct MenuBarAccountRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovered = false
 
-    /// 防双高亮：Codex 代理节点占用 ~/.codex/config.toml 时即为生效身份，订阅账号一律视为未激活
-    /// （代理不改 auth.json，detectActiveCodexAccount 仍会据其内容回填激活账号，故在 UI 层兜底）。
+    /// 防双高亮：Codex 代理节点占用 ~/.codex/config.toml（每节点代理 或 全局统一代理）时即为生效身份，
+    /// 订阅账号一律视为未激活（代理不改 auth.json，detectActiveCodexAccount 仍会据其内容回填，故 UI 层兜底）。
     /// 与 MenuBarView+TrackSwitcher、CodexProxyManagementView 的判定保持一致。
     private var isActive: Bool {
-        if entry.providerId == "codex", codexProxyActive {
+        if entry.providerId == "codex", codexProxyActive || codexGlobalProxyManaged {
             return false
         }
         return activationManager.isActiveAccount(entry)
     }
-    private var canActivate: Bool { activationManager.canActivateProvider(providerId) && !isActive }
+    /// 全局代理启用时，Codex 账号激活被接管：封锁单独激活（不显示切换按钮，点击也不触发）。
+    /// 每节点代理（codexProxyActive）仍允许账号切换——切换会自动停用该代理（既有自动交接语义）。
+    private var canActivate: Bool {
+        if entry.providerId == "codex", codexGlobalProxyManaged { return false }
+        return activationManager.canActivateProvider(providerId) && !isActive
+    }
     private var remainingPercent: Double? { entry.liveProvider?.remainingPercent }
     private var isCostProvider: Bool { entry.liveProvider?.category == ProviderCategory.localCost }
     private var costMonthUsd: Double? { entry.liveProvider?.costSummary?.month?.usd }

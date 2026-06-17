@@ -143,7 +143,8 @@ extension QuotaHTTPServer {
                     inputTokens: result.usage?.inputTokens ?? 0,
                     outputTokens: result.usage?.outputTokens ?? 0,
                     cacheCreationTokens: 0,
-                    cacheReadTokens: result.usage?.cachedTokens ?? 0
+                    cacheReadTokens: result.usage?.cachedTokens ?? 0,
+                    nodeId: activeNodeId
                 )
             } else {
                 let bodyText = String(data: result.data, encoding: .utf8) ?? ""
@@ -154,7 +155,8 @@ extension QuotaHTTPServer {
                     responseTimeMs: elapsed,
                     errorMessage: String(bodyText.prefix(500)),
                     errorType: "upstream_error",
-                    statusCode: result.statusCode
+                    statusCode: result.statusCode,
+                    nodeId: activeNodeId
                 )
             }
 
@@ -176,7 +178,8 @@ extension QuotaHTTPServer {
                 responseTimeMs: elapsed,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
-                statusCode: errorResult.statusCode
+                statusCode: errorResult.statusCode,
+                nodeId: activeNodeId
             )
             httpLog.error("  ✗ Codex passthrough error: \(error.localizedDescription)")
             var responseHeaders = headers
@@ -236,7 +239,8 @@ extension QuotaHTTPServer {
                 inputTokens: usage?.inputTokens ?? 0,
                 outputTokens: usage?.outputTokens ?? 0,
                 cacheCreationTokens: 0,
-                cacheReadTokens: usage?.cachedTokens ?? 0
+                cacheReadTokens: usage?.cachedTokens ?? 0,
+                nodeId: activeNodeId
             )
         } catch {
             httpLog.error("  ✗ Codex streaming passthrough error: \(error.localizedDescription)")
@@ -257,7 +261,8 @@ extension QuotaHTTPServer {
                 firstTokenMs: firstTokenMs,
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
-                statusCode: errorResult.statusCode
+                statusCode: errorResult.statusCode,
+                nodeId: activeNodeId
             )
         }
 

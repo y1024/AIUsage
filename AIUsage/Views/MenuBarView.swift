@@ -10,6 +10,7 @@ struct MenuBarView: View {
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @ObservedObject var proxyVM = ProxyViewModel.shared
     @ObservedObject var openCodeStore = OpenCodeNodeStore.shared
+    @ObservedObject var globalProxy = GlobalProxyManager.shared
     @ObservedObject private var settings = AppSettings.shared
     @State private var activationMessage: String?
     @State private var activationSuccess = true
@@ -181,6 +182,7 @@ struct MenuBarView: View {
                             MenuBarProviderSection(
                                 group: group,
                                 codexProxyActive: proxyVM.activatedId(isCodex: true) != nil,
+                                codexGlobalProxyManaged: globalProxy.isEnabled,
                                 activationMessage: $activationMessage,
                                 activationSuccess: $activationSuccess
                             )

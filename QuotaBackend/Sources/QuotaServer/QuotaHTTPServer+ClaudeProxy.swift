@@ -755,7 +755,8 @@ extension QuotaHTTPServer {
         cacheReadTokens: Int = 0,
         errorMessage: String? = nil,
         errorType: String? = nil,
-        statusCode: Int? = nil
+        statusCode: Int? = nil,
+        nodeId: String? = nil
     ) {
         var parts = [
             "\"type\":\"proxy_request_log\"",
@@ -780,6 +781,11 @@ extension QuotaHTTPServer {
         }
         if let code = statusCode {
             parts.append("\"status_code\":\(code)")
+        }
+        // 全局统一代理：一个进程随激活节点轮转服务多个节点，按 node_id 把日志归因到当前节点
+        // （宿主 App 解析时优先用 node_id 而非进程 configId）。
+        if let nodeId, !nodeId.isEmpty {
+            parts.append("\"node_id\":\(escapeJSON(nodeId))")
         }
         // stdout is parsed by the macOS host app for structured log ingestion
         print("PROXY_LOG:{\(parts.joined(separator: ","))}")

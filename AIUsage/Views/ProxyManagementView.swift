@@ -83,6 +83,8 @@ struct ProxyManagementView: View {
                         if family.isCodex {
                             // Codex 通用配置只管理激活时合并进 config.toml 的片段；实时文件入口统一放在顶部工具栏。
                             CodexGlobalConfigSection()
+                            // 全局统一代理：固定入口 + 热切换激活节点（启用时接管 config.toml）。
+                            CodexGlobalProxySection()
                             // 统一切换器（订阅账号 + API 节点，单一互斥激活）。
                             if !codexSubscriptionEntries.isEmpty {
                                 CodexSubscriptionSection(entries: codexSubscriptionEntries)
