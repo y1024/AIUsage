@@ -107,19 +107,19 @@ extension ProxyViewModel {
         configurations.compactMap { config in
             guard config.needsProxyProcess, runtimeService.isProxyRunning(config.id) else { return nil }
             let track = config.nodeType.isCodex ? "Codex" : "Claude Code"
-            return ProxyPortArbiter.Owner(id: config.id, port: config.port, track: track, label: config.name)
+            return ProxyPortArbiter.Owner(id: config.id, ports: config.listeningPorts, track: track, label: config.name)
         }
     }
 
     /// Returns a user-facing error message if the target port is already in use, nil otherwise.
-    /// 跨 Claude/Codex/OpenCode 三轨判定：任一轨道有正在运行的代理占用该端口即冲突。
+    /// 跨 Claude/Codex/OpenCode 三轨判定：任一轨道有正在运行的代理占用本节点任一监听端口（含 HTTPS）即冲突。
     func portConflictDescription(for config: ProxyConfiguration) -> String? {
-        guard let owner = ProxyPortArbiter.conflictingOwner(forPort: config.port, excluding: config.id) else {
+        guard let conflict = ProxyPortArbiter.conflict(forPorts: config.listeningPorts, excluding: config.id) else {
             return nil
         }
         return AppSettings.shared.t(
-            "Port \(config.port) is already in use by node \"\(owner.label)\" under the \(owner.track) proxy. Please change the port in node settings before starting.",
-            "端口 \(config.port) 已被「\(owner.track) 代理」下的节点「\(owner.label)」占用。请先在节点设置中修改端口再启动。"
+            "Port \(conflict.port) is already in use by node \"\(conflict.label)\" under the \(conflict.track) proxy. Please change the port in node settings before starting.",
+            "端口 \(conflict.port) 已被「\(conflict.track) 代理」下的节点「\(conflict.label)」占用。请先在节点设置中修改端口再启动。"
         )
     }
 

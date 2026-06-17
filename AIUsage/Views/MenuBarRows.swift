@@ -6,6 +6,8 @@ import QuotaBackend
 
 struct MenuBarProviderSection: View {
     let group: ProviderAccountGroup
+    /// Codex 代理是否有节点正在生效：由 MenuBarView 统一观察后下传至账号行。
+    let codexProxyActive: Bool
     @Binding var activationMessage: String?
     @Binding var activationSuccess: Bool
     @EnvironmentObject var appState: AppState
@@ -27,6 +29,7 @@ struct MenuBarProviderSection: View {
                     entry: entry,
                     providerId: group.providerId,
                     accentColor: accentColor,
+                    codexProxyActive: codexProxyActive,
                     activationMessage: $activationMessage,
                     activationSuccess: $activationSuccess
                 )

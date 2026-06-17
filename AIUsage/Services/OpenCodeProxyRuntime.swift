@@ -73,7 +73,7 @@ final class OpenCodeProxyRuntime: ObservableObject {
             guard instance.process?.isRunning == true else { return nil }
             return ProxyPortArbiter.Owner(
                 id: instance.node.id,
-                port: instance.node.proxyPort,
+                ports: [instance.node.proxyPort],
                 track: "OpenCode",
                 label: instance.node.displayName
             )
@@ -101,8 +101,8 @@ final class OpenCodeProxyRuntime: ObservableObject {
         }
         // 跨轨端口仲裁：端口被任一条正在运行的代理（OpenCode/Claude/Codex）占用时直接报可读错误
         // （否则 killStaleProcesses 会把那条活代理误杀）。
-        if let owner = ProxyPortArbiter.conflictingOwner(forPort: node.proxyPort, excluding: node.id) {
-            throw ProxyRuntimeError.proxyPortInUseByNode(node.proxyPort, owner.track, owner.label)
+        if let conflict = ProxyPortArbiter.conflict(forPorts: [node.proxyPort], excluding: node.id) {
+            throw ProxyRuntimeError.proxyPortInUseByNode(conflict.port, conflict.track, conflict.label)
         }
 
         stopProcess(nodeId: node.id)

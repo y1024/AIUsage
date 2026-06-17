@@ -9,12 +9,14 @@ struct MenuBarAccountRow: View {
     let entry: ProviderAccountEntry
     let providerId: String
     let accentColor: Color
+    /// Codex 代理是否有节点正在生效（由父视图统一观察 ProxyViewModel 后下传，
+    /// 避免每行各自 @ObservedObject 订阅造成的重复刷新）。
+    let codexProxyActive: Bool
     @Binding var activationMessage: String?
     @Binding var activationSuccess: Bool
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var activationManager: ProviderActivationManager
     @ObservedObject private var settings = AppSettings.shared
-    @ObservedObject private var proxyVM = ProxyViewModel.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovered = false
 
@@ -22,7 +24,7 @@ struct MenuBarAccountRow: View {
     /// （代理不改 auth.json，detectActiveCodexAccount 仍会据其内容回填激活账号，故在 UI 层兜底）。
     /// 与 MenuBarView+TrackSwitcher、CodexProxyManagementView 的判定保持一致。
     private var isActive: Bool {
-        if entry.providerId == "codex", proxyVM.activatedId(isCodex: true) != nil {
+        if entry.providerId == "codex", codexProxyActive {
             return false
         }
         return activationManager.isActiveAccount(entry)

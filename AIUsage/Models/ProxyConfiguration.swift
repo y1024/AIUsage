@@ -321,6 +321,16 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
 
     var effectiveHTTPSPort: Int { httpsPort ?? (port + 1) }
 
+    /// 该节点代理进程实际监听的端口集合（用于跨轨端口仲裁）：HTTP 入站端口恒占用；
+    /// 开启 HTTPS 时进程会额外监听 HTTPS 端口（QuotaServer 同时起 HTTP + HTTPS 两个 listener）。
+    /// 非代理节点（直连）不起进程、不占端口，返回空。
+    var listeningPorts: [Int] {
+        guard needsProxyProcess else { return [] }
+        var ports = [port]
+        if enableHTTPS { ports.append(effectiveHTTPSPort) }
+        return ports
+    }
+
     var needsProxyProcess: Bool {
         nodeType == .openaiProxy
             || nodeType == .codexProxy

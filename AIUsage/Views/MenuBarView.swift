@@ -180,6 +180,7 @@ struct MenuBarView: View {
                         ForEach(quotaProviderGroups) { group in
                             MenuBarProviderSection(
                                 group: group,
+                                codexProxyActive: proxyVM.activatedId(isCodex: true) != nil,
                                 activationMessage: $activationMessage,
                                 activationSuccess: $activationSuccess
                             )
