@@ -45,6 +45,8 @@ enum ProxyRuntimeError: LocalizedError {
     case quotaServerNotFound
     case proxyStartFailed(String)
     case proxyPortInUse(Int)
+    /// 端口已被本 App 另一条正在运行的代理（Claude/Codex/OpenCode 任一轨）占用：附 (端口, 代理家族, 占用节点名)。
+    case proxyPortInUseByNode(Int, String, String)
     case activationStatePersistFailed
     case deactivationStatePersistFailed
 
@@ -63,6 +65,11 @@ enum ProxyRuntimeError: LocalizedError {
             return AppSettings.shared.t(
                 "Port \(port) is already in use by another process. Quit the program occupying it (or restart AIUsage to clear leftover proxies), then try again.",
                 "端口 \(port) 已被其它进程占用。请关闭占用该端口的程序（或重启 AIUsage 清理残留代理）后重试。"
+            )
+        case .proxyPortInUseByNode(let port, let track, let name):
+            return AppSettings.shared.t(
+                "Port \(port) is already in use by node \"\(name)\" under the \(track) proxy. Change this node's port, or stop that node first.",
+                "端口 \(port) 已被「\(track) 代理」下的节点「\(name)」占用。请修改本节点端口，或先停用那个节点。"
             )
         case .activationStatePersistFailed:
             return AppSettings.shared.t("The node started, but AIUsage could not persist the activated state.", "节点已启动，但 AIUsage 无法保存激活状态。")

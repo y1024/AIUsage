@@ -66,6 +66,20 @@ final class OpenCodeProxyRuntime: ObservableObject {
         runningNodeIds.contains(nodeId)
     }
 
+    /// OpenCode 轨道当前正在监听的代理：供跨轨端口仲裁聚合。
+    /// 读自运行实例的真实进程状态，避免与 store 标记漂移。
+    func runningPortOwners() -> [ProxyPortArbiter.Owner] {
+        instances.values.compactMap { instance in
+            guard instance.process?.isRunning == true else { return nil }
+            return ProxyPortArbiter.Owner(
+                id: instance.node.id,
+                port: instance.node.proxyPort,
+                track: "OpenCode",
+                label: instance.node.displayName
+            )
+        }
+    }
+
     /// 启动恢复开始时，把待恢复节点预标记为「启动中」，覆盖 reap→launch 的整段窗口，
     /// 避免横幅在进程就绪前闪现（`launch` 完成/失败时会逐个清除自己的标记）。
     func beginRestoring(nodeIds: [String]) {
@@ -85,14 +99,10 @@ final class OpenCodeProxyRuntime: ObservableObject {
             instance.node = node
             return
         }
-        // 端口被其它运行中节点占用：直接报可读错误（否则 killStaleProcesses 会误杀它）。
-        if let conflict = instances.values.first(where: {
-            $0.node.id != node.id && $0.process?.isRunning == true && $0.node.proxyPort == node.proxyPort
-        }) {
-            throw ProxyRuntimeError.proxyStartFailed(AppSettings.shared.t(
-                "Port \(node.proxyPort) is already in use by node \"\(conflict.node.displayName)\". Change the port in node settings first.",
-                "端口 \(node.proxyPort) 已被节点「\(conflict.node.displayName)」占用，请先在节点设置中修改端口。"
-            ))
+        // 跨轨端口仲裁：端口被任一条正在运行的代理（OpenCode/Claude/Codex）占用时直接报可读错误
+        // （否则 killStaleProcesses 会把那条活代理误杀）。
+        if let owner = ProxyPortArbiter.conflictingOwner(forPort: node.proxyPort, excluding: node.id) {
+            throw ProxyRuntimeError.proxyPortInUseByNode(node.proxyPort, owner.track, owner.label)
         }
 
         stopProcess(nodeId: node.id)

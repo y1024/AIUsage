@@ -100,7 +100,7 @@ struct OpenCodeNodeCard: View, Equatable {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(node.displayName)
                         .font(.system(size: 15, weight: .bold))
-                    Text(node.baseURL.nilIfBlank ?? L("Base URL not set", "未设置 Base URL"))
+                    Text(node.displayURL.nilIfBlank ?? L("Base URL not set", "未设置 Base URL"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

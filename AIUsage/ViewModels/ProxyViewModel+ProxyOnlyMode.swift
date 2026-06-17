@@ -101,20 +101,26 @@ extension ProxyViewModel {
 
     // MARK: - Port Conflict Detection
 
-    /// Returns a user-facing error message if the target port is already in use, nil otherwise.
-    func portConflictDescription(for config: ProxyConfiguration) -> String? {
-        let targetPort = config.port
-        let runningPorts = runtimeService.runningPorts(from: configurations)
-
-        for (runningId, port) in runningPorts where port == targetPort && runningId != config.id {
-            guard let conflicting = configurations.first(where: { $0.id == runningId }) else { continue }
-            return AppSettings.shared.t(
-                "Port \(targetPort) is already in use by node \"\(conflicting.name)\". Please change the port in node settings before starting.",
-                "端口 \(targetPort) 已被节点「\(conflicting.name)」占用。请先在节点设置中修改端口再启动。"
-            )
+    /// Claude/Codex 轨道当前正在监听的代理：供跨轨端口仲裁聚合。
+    /// 仅统计进程确实在运行的节点（激活但代理已崩溃的不占端口）。
+    func runningProxyPortOwners() -> [ProxyPortArbiter.Owner] {
+        configurations.compactMap { config in
+            guard config.needsProxyProcess, runtimeService.isProxyRunning(config.id) else { return nil }
+            let track = config.nodeType.isCodex ? "Codex" : "Claude Code"
+            return ProxyPortArbiter.Owner(id: config.id, port: config.port, track: track, label: config.name)
         }
+    }
 
-        return nil
+    /// Returns a user-facing error message if the target port is already in use, nil otherwise.
+    /// 跨 Claude/Codex/OpenCode 三轨判定：任一轨道有正在运行的代理占用该端口即冲突。
+    func portConflictDescription(for config: ProxyConfiguration) -> String? {
+        guard let owner = ProxyPortArbiter.conflictingOwner(forPort: config.port, excluding: config.id) else {
+            return nil
+        }
+        return AppSettings.shared.t(
+            "Port \(config.port) is already in use by node \"\(owner.label)\" under the \(owner.track) proxy. Please change the port in node settings before starting.",
+            "端口 \(config.port) 已被「\(owner.track) 代理」下的节点「\(owner.label)」占用。请先在节点设置中修改端口再启动。"
+        )
     }
 
     // MARK: - Copy Launch Command

@@ -388,15 +388,6 @@ final class ProxyRuntimeService {
         stopProxy(config)
     }
 
-    /// Returns the set of ports currently occupied by running proxy processes.
-    func runningPorts(from configurations: [ProxyConfiguration]) -> [String: Int] {
-        var result: [String: Int] = [:]
-        for config in configurations where isProxyRunning(config.id) {
-            result[config.id] = config.port
-        }
-        return result
-    }
-
     func isProxyRunning(_ configId: String) -> Bool {
         guard let process = runningProcesses[configId] else { return false }
         if !process.isRunning {
@@ -420,6 +411,13 @@ final class ProxyRuntimeService {
         if runningProcesses[config.id]?.isRunning == true {
             runtimeLog.info("Proxy already running for node \(config.name, privacy: .public)")
             return
+        }
+
+        // 跨轨端口仲裁：端口已被另一条正在运行的代理（Claude/Codex/OpenCode）占用时直接报错，
+        // 必须在 killStaleProcesses 之前——否则会把对方这条活代理当作残留 helper 误杀。
+        if let owner = ProxyPortArbiter.conflictingOwner(forPort: config.port, excluding: config.id) {
+            runtimeLog.error("Port \(config.port, privacy: .public) already used by \(owner.track, privacy: .public) node \(owner.label, privacy: .public) while starting \(config.name, privacy: .public)")
+            throw ProxyRuntimeError.proxyPortInUseByNode(config.port, owner.track, owner.label)
         }
 
         do {

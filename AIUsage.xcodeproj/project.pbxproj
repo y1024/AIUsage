@@ -92,6 +92,7 @@
 		B1BAT0032F98000300A15674 /* BatchImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1BAT0022F98000300A15674 /* BatchImportView.swift */; };
 		B1C2D3E4F5A60001 /* StatusBarItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5A60002 /* StatusBarItemView.swift */; };
 		B1REFA012F97002000A15674 /* ProxyRuntimeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */; };
+		B1PA00012F97002000A15674 /* ProxyPortArbiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1PA00002F97002000A15674 /* ProxyPortArbiter.swift */; };
 		B1REFB012F97002000A15674 /* ProviderRefreshResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */; };
 		B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */; };
 		B3943D26F03B43809C53419E /* ProxyStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */; };
@@ -242,6 +243,7 @@
 		B1BAT0022F98000300A15674 /* BatchImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchImportView.swift; sourceTree = "<group>"; };
 		B1C2D3E4F5A60002 /* StatusBarItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarItemView.swift; sourceTree = "<group>"; };
 		B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyRuntimeService.swift; sourceTree = "<group>"; };
+		B1PA00002F97002000A15674 /* ProxyPortArbiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyPortArbiter.swift; sourceTree = "<group>"; };
 		B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRefreshResult.swift; sourceTree = "<group>"; };
 		B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TLSCertificateManager.swift; sourceTree = "<group>"; };
 		C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONWebEditorAssets.swift; sourceTree = "<group>"; };
@@ -402,6 +404,7 @@
 			children = (
 				5EFAD7442F87AC7100A15674 /* APIService.swift */,
 				B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */,
+				B1PA00002F97002000A15674 /* ProxyPortArbiter.swift */,
 				C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */,
 				C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */,
 				C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */,
@@ -650,6 +653,7 @@
 				5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */,
 				5EFAD7742F87AFE700A15674 /* APIService.swift in Sources */,
 				B1REFA012F97002000A15674 /* ProxyRuntimeService.swift in Sources */,
+				B1PA00012F97002000A15674 /* ProxyPortArbiter.swift in Sources */,
 				B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */,
 				5EFAD7752F87AFE700A15674 /* ProviderCard.swift in Sources */,
 				5EF0C0D22F95000100A15674 /* ProviderCard+MultiWindowQuota.swift in Sources */,

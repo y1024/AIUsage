@@ -405,6 +405,12 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         "http://127.0.0.1:\(proxyPort)/v1"
     }
 
+    /// 节点列表副标题展示用地址：与 Claude/Codex 卡片口径一致——
+    /// 代理模式显示本地代理地址（host:port，不含 /v1），直连模式显示上游 baseURL。
+    var displayURL: String {
+        proxyEnabled ? "http://127.0.0.1:\(proxyPort)" : (baseURL.nilIfBlank ?? "")
+    }
+
     /// 去掉末尾 /v1 的 baseURL。Anthropic passthrough 轨道按「上游根 + 入站完整路径
     /// /v1/messages」拼 URL，而节点 baseURL 习惯含 /v1（SDK 语义），需剥掉避免重复。
     var baseURLWithoutV1Suffix: String {
