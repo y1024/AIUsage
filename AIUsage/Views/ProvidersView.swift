@@ -12,7 +12,6 @@ struct ProvidersView: View {
     @EnvironmentObject var accountStore: AccountStore
     @Environment(\.colorScheme) private var colorScheme
     @State private var searchText = ""
-    @State private var selectedChannel: String = "all"
     @State private var selectedProviderFilter: String = "all"
     @State private var selectedCategory: ProviderListCategory = .accounts
     @State private var accountEditorTarget: ProviderEditorTarget?
@@ -67,7 +66,7 @@ struct ProvidersView: View {
     }
 
     private var availableProviderFilters: [ProviderAccountGroup] {
-        serviceGroups.filter { selectedChannel == "all" || $0.channel == selectedChannel }
+        serviceGroups
     }
 
     private var hiddenAccounts: [StoredProviderAccount] {

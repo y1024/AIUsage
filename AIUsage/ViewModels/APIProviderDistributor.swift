@@ -171,24 +171,27 @@ final class APIProviderDistributor {
             proxy.usePassthroughProxy = true
         }
 
-        // 模型库（共享）。槽位是 Claude/Codex 专属：新节点用默认模型播种，已存在则保留本地槽位。
+        // 模型库（共享）。Claude 的大/中/小槽位是本地映射（仅新节点播种、之后保留）；
+        // Codex 单模型即 bigModel（codexModel 取自 bigModel.name），属共享字段，始终跟随主配置。
         if wins(APIProviderSharedKey.models) {
             proxy.modelLibrary = provider.models.isEmpty ? nil : provider.models
         }
         if wins(APIProviderSharedKey.defaultModel) {
             let dm = provider.effectiveDefaultModel
             proxy.defaultModel = dm
-            if existing == nil {
-                if family.isCodex {
-                    proxy.modelMapping.bigModel.name = dm
+            if family.isCodex {
+                // Codex 运行时改写用的是 codexModel(=bigModel.name)，proxy.defaultModel 对其无效，
+                // 故 bigModel 必须始终随主配置同步——否则「立即同步」改不到 Codex 真实上游模型。
+                proxy.modelMapping.bigModel.name = dm
+                if existing == nil {
                     proxy.modelMapping.middleModel.name = ""
                     proxy.modelMapping.smallModel.name = ""
-                } else {
-                    // 通用上游：三槽位先全部指向默认模型（用户可在节点编辑器按需细分，属本地配置）。
-                    proxy.modelMapping.bigModel.name = dm
-                    proxy.modelMapping.middleModel.name = dm
-                    proxy.modelMapping.smallModel.name = dm
                 }
+            } else if existing == nil {
+                // 通用上游：新节点三槽位先全部指向默认模型（用户可在节点编辑器按需细分，属本地配置）。
+                proxy.modelMapping.bigModel.name = dm
+                proxy.modelMapping.middleModel.name = dm
+                proxy.modelMapping.smallModel.name = dm
             }
         }
         proxy.syncSlotPricingFromLibrary()
