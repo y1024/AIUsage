@@ -90,7 +90,7 @@ extension SettingsView {
                             Image(systemName: proxySelected ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(proxySelected ? Color.blue : Color.secondary)
                                 .font(.system(size: 14))
-                            Image(systemName: "network")
+                            Image(systemName: "point.3.connected.trianglepath.dotted")
                                 .font(.system(size: 12))
                                 .frame(width: 14, height: 14)
                             Text(L("Proxy Stats", "代理统计"))

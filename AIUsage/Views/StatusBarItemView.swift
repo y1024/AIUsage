@@ -90,7 +90,7 @@ struct StatusBarItemView: View {
                     id: "proxy-stats",
                     providerId: "proxy",
                     kind: kind,
-                    icon: "network"
+                    icon: "point.3.connected.trianglepath.dotted"
                 ))
             }
         }
