@@ -242,3 +242,15 @@ else
   fi
   echo "Skipping Sparkle signing (SPARKLE_SIGN_TOOL or SPARKLE_EDDSA_PRIVATE_KEY not set)"
 fi
+
+# Remove the freshly built app bundle from DerivedData. The shippable artifacts
+# already live in dist/, but macOS LaunchServices auto-registers any .app it
+# finds — leaving build products around makes Launchpad/Spotlight show several
+# duplicate "AIUsage" entries next to the real /Applications copy. Set
+# KEEP_BUILD_APP=1 to keep it (e.g. to debug the raw build product).
+if [[ "${KEEP_BUILD_APP:-0}" != "1" && -d "$SOURCE_APP_PATH" ]]; then
+  LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  [[ -x "$LSREGISTER" ]] && "$LSREGISTER" -u "$SOURCE_APP_PATH" 2>/dev/null || true
+  rm -rf "$SOURCE_APP_PATH"
+  echo "Removed build product app bundle (avoids duplicate LaunchServices registration): $SOURCE_APP_PATH"
+fi
