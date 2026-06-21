@@ -15,7 +15,11 @@ concurrency:
 
 jobs:
   build-release:
-    runs-on: macos-15
+    # Must match the project's Swift 6.2 toolchain (SWIFT_DEFAULT_ACTOR_ISOLATION,
+    # @concurrent). macos-26 ships Xcode 26.x by default; older images (macos-15 =
+    # Xcode 16.4 / Swift 6.0) silently ignore those settings and fail to build.
+    # Deployment target is unaffected (stays MACOSX_DEPLOYMENT_TARGET = 14.0).
+    runs-on: macos-26
 
     env:
       MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}

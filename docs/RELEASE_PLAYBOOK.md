@@ -214,6 +214,35 @@ resource fork, Finder information, or similar detritus not allowed
 - 证书或 secret 丢了：先找回备份，找不到再重生成（并预期老用户多授权一次）
 - CI 若误回退 ad-hoc，`package-release.sh` 会 `exit 1`，不会静默发车
 
+### 7. CI 的 Xcode 必须匹配项目的 Swift 6.2 工具链
+
+项目 `project.pbxproj` 启用了 **Swift 6.2 专属设置/写法**，源码也按此编写：
+
+- `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`（未显式标注的类型/方法隐式变 `@MainActor`）
+- `SWIFT_APPROACHABLE_CONCURRENCY = YES`
+- 源码里用到 `@concurrent`（把 `nonisolated async` 强制切到全局并发执行器）
+
+这些**只有 Xcode 26（Swift 6.2）认**。旧 runner（`macos-15` 默认 Xcode 16.4 / Swift 6.0）会：
+
+- **静默忽略** `SWIFT_DEFAULT_ACTOR_ISOLATION` → 未标注方法退化成 `nonisolated`，一访问 `@MainActor` 成员就报 `main actor-isolated ... from a nonisolated context`
+- **不认识** `@concurrent` → 直接编译失败
+
+症状最坑：本地 Xcode 26 编译/运行都正常，CI 却 `Build macOS release artifacts` 报 `exit code 65`（issue #28 发版时踩过）。
+
+规则：
+
+- `release.yml` 用 `runs-on: macos-26`（默认 Xcode 26.5，和本地开发同一套 17F42）。**不要**改回 `macos-15`/旧 Xcode。
+- 这跟最低系统无关：`MACOSX_DEPLOYMENT_TARGET = 14.0` 不变，老用户（macOS 14+）照常能装能跑。用哪个 SDK 编译 ≠ 最低运行系统。
+- 想在本地复现旧工具链的隔离行为、一次性抓出所有「隐式 MainActor」依赖：
+
+```bash
+xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release \
+  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO \
+  SWIFT_DEFAULT_ACTOR_ISOLATION=nonisolated build
+```
+
+- 反过来：要用新的 Swift 6.x 写法（`@concurrent` 等）前，先确认 CI 工具链跟得上，否则会出现「本地过、CI 挂」。
+
 ## 最短手顺
 
 ```bash
