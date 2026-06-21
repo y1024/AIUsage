@@ -13,10 +13,14 @@ extension ProviderRefreshCoordinator {
             return .failure()
         }
         guard let result = await engine.fetchForCredential(providerId: providerId, credentialId: credentialId),
-              let summary = result.summary else {
+              result.summary != nil else {
             return .failure()
         }
-        let converted = localizeProviderData(convertSummary(summary), language: language)
+        // convert + localize 在后台执行器完成（nonisolated @concurrent），主线程只拿回结果。
+        let language = self.language
+        guard let converted = await localizedProviderResults(from: [result], language: language).first?.provider else {
+            return .failure()
+        }
         await accountStore.reconcileAccountRegistry(with: [converted])
 
         if let index = providers.firstIndex(where: { $0.id == converted.id }) {
@@ -150,9 +154,12 @@ extension ProviderRefreshCoordinator {
         APIService.shared.updateBaseURL("http://\(settings.remoteHost):\(settings.remotePort)")
         do {
             let results = try await APIService.shared.fetchProviderResults(providerId)
-            let localizedProviders = results.map { result in
-                (provider: localizeProviderData(result.summary, language: language), ok: result.ok)
-            }
+            // 主线程仅重组为 Sendable 元组（无正则），本地化在后台执行器完成。
+            let language = self.language
+            let localizedProviders = await localizedProviderList(
+                results.map { (provider: $0.summary, ok: $0.ok) },
+                language: language
+            )
             await accountStore.reconcileAccountRegistry(with: localizedProviders.map(\.provider))
             replaceProviderEntries(
                 for: providerId,
@@ -202,13 +209,18 @@ extension ProviderRefreshCoordinator {
         APIService.shared.updateBaseURL("http://\(settings.remoteHost):\(settings.remotePort)")
         do {
             let dashboard = try await APIService.shared.fetchDashboard(providerIds: selectedProviderIDList())
-            let localizedProviders = dashboard.providers.map { wrapper in
-                (provider: localizeProviderData(wrapper.summary, language: language), ok: wrapper.ok)
-            }
+            // 主线程仅重组为 Sendable 元组（无正则）；providers + overview 本地化在后台执行器完成。
+            let language = self.language
+            let batch = await localizedRemoteDashboard(
+                dashboard.providers.map { (provider: $0.summary, ok: $0.ok) },
+                overview: dashboard.overview,
+                language: language
+            )
+            let localizedProviders = batch.providers
             let stabilizedProviders = stabilizedBulkRefreshProviders(localizedProviders.map(\.provider))
             await accountStore.reconcileAccountRegistry(with: stabilizedProviders)
             providers = visibleProviders(from: stabilizedProviders)
-            overview = localizeOverview(dashboard.overview, language: language)
+            overview = batch.overview
             return .classified(
                 totalResults: dashboard.providers.count,
                 refreshedProviders: localizedProviders.filter(\.ok).map(\.provider),

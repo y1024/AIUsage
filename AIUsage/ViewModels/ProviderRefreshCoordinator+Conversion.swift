@@ -267,6 +267,27 @@ extension ProviderRefreshCoordinator {
         return (providers, overview)
     }
 
+    // 远程模式：APIService 返回的已是 ProviderData / DashboardOverview（无需 convertSummary），
+    // 仅做本地化。同样用 @concurrent 切到后台执行器，主线程只拿结果。
+
+    @concurrent
+    nonisolated func localizedProviderList(
+        _ items: [(provider: ProviderData, ok: Bool)],
+        language: String
+    ) async -> [(provider: ProviderData, ok: Bool)] {
+        items.map { (localizeProviderData($0.provider, language: language), $0.ok) }
+    }
+
+    @concurrent
+    nonisolated func localizedRemoteDashboard(
+        _ items: [(provider: ProviderData, ok: Bool)],
+        overview: DashboardOverview,
+        language: String
+    ) async -> (providers: [(provider: ProviderData, ok: Bool)], overview: DashboardOverview) {
+        let providers = items.map { (provider: localizeProviderData($0.provider, language: language), ok: $0.ok) }
+        return (providers, localizeOverview(overview, language: language))
+    }
+
     // 规则#9：高成本对象（130+ 项字典、正则编译）只建一次复用，不在每次本地化里重建/重编译。
     // 这是数据刷新期间主线程的头号 CPU 热点（见 issue #28 Instruments profile）。
     private static let exactTranslations: [String: String] = [
