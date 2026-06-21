@@ -507,7 +507,10 @@ struct ProxySettings: Codable, Equatable {
         case .anthropicDirect:
             if usePassthroughProxy {
                 let proxyURL = "http://\(host):\(port)"
-                return .init(baseURL: proxyURL, authToken: anthropicAPIKey,
+                // 透明代理：Claude Code 用「客户端 Key」鉴权本地代理（留空回退上游 Key，此时
+                // 代理放行任意 Key），真实上游 Key 由代理用 ANTHROPIC_UPSTREAM_KEY 转发。
+                let clientToken = expectedClientKey.isEmpty ? anthropicAPIKey : expectedClientKey
+                return .init(baseURL: proxyURL, authToken: clientToken,
                              defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
             }
             return .init(baseURL: anthropicBaseURL, authToken: anthropicAPIKey,

@@ -342,6 +342,20 @@ struct ProxyConfigEditorView: View {
                     .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
                 }
 
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("Client API Key (Optional)", "客户端 API Key（可选）"))
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    SecureField(L("Leave empty to accept any key", "留空则接受任意 Key"),
+                                text: $profile.metadata.proxy.expectedClientKey)
+                        .textFieldStyle(.roundedBorder)
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.shield.fill").foregroundStyle(.green)
+                        Text(L("If set, Claude Code authenticates to the local proxy with this key (written as the token in settings.json). The real upstream key stays in the proxy.",
+                               "设置后，Claude Code 用此 Key 访问本地代理（写入 settings.json 的鉴权 token）；真实上游 Key 仅保留在代理内。"))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+
                 Divider()
 
                 Toggle(isOn: Binding(
