@@ -17,6 +17,10 @@ enum AppSection: String, Hashable {
     case opencodeManagement
     case inbox
     case settings
+
+    /// 旧版「服务商」入口的 rawValue。v0.11 后拆成 `providerAccounts` + `apiProviders`，
+    /// 仅用于迁移历史持久化数据（隐藏状态等），不再作为有效导航分区。
+    static let legacyProvidersRawValue = "providers"
 }
 
 // MARK: - Quota card appearance
@@ -249,8 +253,16 @@ final class AppSettings: ObservableObject {
 
     /// 侧边栏中被用户隐藏的导航分区（存 `AppSection.rawValue`）。常驻分区即使被写入也不会真正隐藏。
     @Published var hiddenSidebarSections: Set<String> = {
-        let stored = UserDefaults.standard.stringArray(forKey: DefaultsKey.hiddenSidebarSections) ?? []
-        return Set(stored)
+        let defaults = UserDefaults.standard
+        var stored = Set(defaults.stringArray(forKey: DefaultsKey.hiddenSidebarSections) ?? [])
+        // 迁移：旧版「服务商」(providers) 已拆成「订阅账号」+「API 提供商」两个入口。
+        // 曾隐藏旧入口的用户，两个新入口都继承隐藏；同时清除不再有效的孤儿键并落盘。
+        if stored.remove(AppSection.legacyProvidersRawValue) != nil {
+            stored.insert(AppSection.providerAccounts.rawValue)
+            stored.insert(AppSection.apiProviders.rawValue)
+            defaults.set(Array(stored), forKey: DefaultsKey.hiddenSidebarSections)
+        }
+        return stored
     }()
 
     private var cancellables = Set<AnyCancellable>()
