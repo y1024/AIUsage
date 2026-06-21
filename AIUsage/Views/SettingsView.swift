@@ -65,6 +65,8 @@ struct SettingsView: View {
     @State var keepRunningInBackground = UserDefaults.standard.object(forKey: DefaultsKey.keepRunningInBackground) as? Bool ?? true
     /// 启动后隐藏主窗口、仅驻留菜单栏（issue #30）。缺省 false。
     @State var launchHidden = UserDefaults.standard.bool(forKey: DefaultsKey.launchHidden)
+    /// 关闭主窗口时最小化到托盘（issue #39）。缺省 false，与隐藏 Dock 解耦。
+    @State var closeToTray = UserDefaults.standard.bool(forKey: DefaultsKey.closeToTray)
     @State var launchAtLogin: Bool = {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled

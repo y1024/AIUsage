@@ -118,28 +118,53 @@ extension SettingsView {
 
             Divider()
 
-            // issue #31：后台运行与 Dock 显示解耦。隐藏 Dock 时必须常驻（仅菜单栏入口），
-            // 故强制显示为开并禁用；Dock 可见时用户可自由选择关窗是否退出。
+            // issue #39：关闭时最小化到托盘。Dock 可见时关窗即隐藏 Dock 图标、常驻菜单栏，
+            // 从菜单栏唤起再恢复 Dock。隐藏 Dock 模式下本就只在菜单栏，故强制显示为开并禁用。
             settingsToggleRow(
-                title: L("Keep Running in Background", "保持后台运行"),
+                title: L("Minimize to Tray on Close", "关闭时最小化到托盘"),
                 subtitle: hideDockIcon
                     ? L(
-                        "Always on while the Dock icon is hidden — the app stays in the menu bar.",
+                        "Always on while the Dock icon is hidden — the app lives in the menu bar.",
                         "隐藏 Dock 图标时始终开启——应用常驻菜单栏。"
+                    )
+                    : L(
+                        "Closing the main window hides the Dock icon and keeps the app in the menu bar. Reopen it from the menu bar icon.",
+                        "关闭主窗口时隐藏 Dock 图标并常驻菜单栏；可从菜单栏图标随时唤起。"
+                    ),
+                isOn: Binding(
+                    get: { hideDockIcon ? true : closeToTray },
+                    set: {
+                        closeToTray = $0
+                        UserDefaults.standard.set($0, forKey: DefaultsKey.closeToTray)
+                    }
+                )
+            )
+            .disabled(hideDockIcon)
+
+            Divider()
+
+            // issue #31：后台运行与 Dock 显示解耦。隐藏 Dock 或「最小化到托盘」时必须常驻
+            // （仅菜单栏入口），故强制显示为开并禁用；否则用户可自由选择关窗是否退出。
+            settingsToggleRow(
+                title: L("Keep Running in Background", "保持后台运行"),
+                subtitle: (hideDockIcon || closeToTray)
+                    ? L(
+                        "Always on while minimizing to the menu bar.",
+                        "最小化到菜单栏时始终开启。"
                     )
                     : L(
                         "Keep the app running after closing the main window. Turn off to quit on close.",
                         "关闭主窗口后继续在后台运行。关闭此项则关窗即退出。"
                     ),
                 isOn: Binding(
-                    get: { hideDockIcon ? true : keepRunningInBackground },
+                    get: { (hideDockIcon || closeToTray) ? true : keepRunningInBackground },
                     set: {
                         keepRunningInBackground = $0
                         UserDefaults.standard.set($0, forKey: DefaultsKey.keepRunningInBackground)
                     }
                 )
             )
-            .disabled(hideDockIcon)
+            .disabled(hideDockIcon || closeToTray)
 
             Divider()
 

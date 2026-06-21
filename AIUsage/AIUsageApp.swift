@@ -218,8 +218,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         // issue #31：Dock 显示与后台运行解耦。
         // 隐藏 Dock（仅菜单栏模式）必须常驻，否则关窗即无入口；
-        // Dock 可见时按用户的「保持后台运行」开关，缺省 true（保持历史行为，关窗不退出）。
         if UserDefaults.standard.bool(forKey: DefaultsKey.hideDockIcon) { return false }
+        // issue #39：关闭时最小化到托盘——关窗即隐藏 Dock 图标、常驻菜单栏，不退出；
+        // 从菜单栏唤起主窗口时再恢复 Dock 图标（见 AppState.presentMainWindow）。
+        if UserDefaults.standard.bool(forKey: DefaultsKey.closeToTray) {
+            NSApp.setActivationPolicy(.accessory)
+            return false
+        }
+        // Dock 可见时按用户的「保持后台运行」开关，缺省 true（保持历史行为，关窗不退出）。
         let keepRunning = UserDefaults.standard.object(forKey: DefaultsKey.keepRunningInBackground) as? Bool ?? true
         return !keepRunning
     }

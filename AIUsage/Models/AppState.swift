@@ -176,6 +176,7 @@ class AppState: ObservableObject {
 
     func presentMainWindow(section: AppSection) {
         selectedSection = section
+        restoreDockIconIfMinimizedToTray()
 
         if let mainWindowPresenter {
             mainWindowPresenter(section)
@@ -183,6 +184,14 @@ class AppState: ObservableObject {
         }
 
         bringMainWindowToFront()
+    }
+
+    /// issue #39：「关闭时最小化到托盘」收起后从菜单栏唤起主窗口时，把因关窗切到 .accessory 的
+    /// Dock 图标恢复回 .regular。用户显式选择「隐藏 Dock 图标」时不恢复（尊重该设置）。
+    private func restoreDockIconIfMinimizedToTray() {
+        guard !UserDefaults.standard.bool(forKey: DefaultsKey.hideDockIcon) else { return }
+        guard NSApp.activationPolicy() != .regular else { return }
+        NSApp.setActivationPolicy(.regular)
     }
 
     func bringMainWindowToFront() {

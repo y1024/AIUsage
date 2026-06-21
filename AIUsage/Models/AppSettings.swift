@@ -105,6 +105,9 @@ enum DefaultsKey {
     static let claudeCodeDailyThreshold = "claudeCodeDailyThreshold"
     static let claudeCodeLastNotifiedDate = "claudeCodeLastNotifiedDate"
     static let claudeCodeRefreshInterval = "claudeCodeRefreshInterval"
+    /// 关闭主窗口时最小化到托盘（issue #39）：Dock 可见时关窗即隐藏 Dock 图标并常驻菜单栏，
+    /// 从菜单栏唤起时再恢复 Dock 图标。缺省=false。
+    static let closeToTray = "closeToTray"
     static let cnyExchangeRate = "cnyExchangeRate"
     static let displayCurrency = "displayCurrency"
     static let hiddenSidebarSections = "hiddenSidebarSections"
