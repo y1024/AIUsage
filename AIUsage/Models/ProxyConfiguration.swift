@@ -12,16 +12,6 @@ enum NodeType: String, Codable, CaseIterable {
     /// Codex 节点：把 OpenAI 兼容上游接入 Codex（写 ~/.codex/config.toml，本地起 QuotaServer）。
     var isCodex: Bool { self == .codexProxy }
 
-    /// 接口类型显示名：按上游协议族命名，统一去掉 Direct/Proxy 字样
-    /// （直连/代理的区别由「透明代理」开关与说明文字体现，不再混进名字）。
-    var interfaceTypeName: String {
-        switch self {
-        case .anthropicDirect: return "Anthropic"
-        case .openaiProxy: return AppSettings.shared.t("OpenAI Compatible", "OpenAI 兼容")
-        case .codexProxy: return "Codex"
-        }
-    }
-
     /// 列表卡片徽章里的协议短名（比接口类型名更紧凑）。
     var badgeProtocolName: String {
         switch self {

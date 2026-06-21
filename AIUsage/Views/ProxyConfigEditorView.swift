@@ -25,6 +25,15 @@ enum EditorTab: String, CaseIterable {
     }
 }
 
+// MARK: - Interface Choice
+// 接口类型三选一（与 OpenCode 的三卡片一致）。openaiProxy 内部的 Chat/Responses
+// 子选项在此被拍平成两张卡，映射到 (nodeType, openAIUpstreamAPI)。
+enum ClaudeInterfaceChoice: Hashable {
+    case anthropic
+    case openAIChatCompletions
+    case openAIResponses
+}
+
 // MARK: - Proxy Config Editor
 
 struct ProxyConfigEditorView: View {
@@ -223,26 +232,66 @@ struct ProxyConfigEditorView: View {
             SelectableCardPicker(
                 options: [
                     SelectableCardOption(
-                        NodeType.anthropicDirect,
-                        title: NodeType.anthropicDirect.interfaceTypeName,
+                        ClaudeInterfaceChoice.anthropic,
+                        title: "Anthropic",
                         subtitle: L("Connect to Anthropic or a compatible API.",
                                     "连接 Anthropic 或兼容 API。"),
-                        systemImage: NodeType.anthropicDirect.iconName,
+                        systemImage: "bolt.horizontal.fill",
                         tint: ProxyBrand.anthropic
                     ),
                     SelectableCardOption(
-                        NodeType.openaiProxy,
-                        title: NodeType.openaiProxy.interfaceTypeName,
-                        subtitle: L("Translate Claude API to OpenAI-compatible via a local proxy.",
-                                    "经本地代理把 Claude API 转为 OpenAI 兼容接口。"),
-                        systemImage: NodeType.openaiProxy.iconName,
+                        ClaudeInterfaceChoice.openAIChatCompletions,
+                        title: "OpenAI Chat Completions",
+                        subtitle: L("Convert to OpenAI /chat/completions via a local proxy.",
+                                    "经本地代理转成 OpenAI /chat/completions。"),
+                        systemImage: "arrow.triangle.swap",
                         tint: ProxyBrand.openAI
+                    ),
+                    SelectableCardOption(
+                        ClaudeInterfaceChoice.openAIResponses,
+                        title: "OpenAI Responses",
+                        subtitle: L("Convert to OpenAI /responses via a local proxy.",
+                                    "经本地代理转成 OpenAI /responses。"),
+                        systemImage: "arrow.up.forward.app.fill",
+                        tint: ProxyBrand.codex
                     )
                 ],
-                selection: $profile.metadata.nodeType,
-                onChange: { newType in
-                    guard isNew else { return }
-                    switch newType {
+                selection: interfaceChoice
+            )
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    /// 接口类型三卡片 ↔ (nodeType, openAIUpstreamAPI) 的双向映射。
+    private var interfaceChoice: Binding<ClaudeInterfaceChoice> {
+        Binding(
+            get: {
+                switch profile.metadata.nodeType {
+                case .anthropicDirect: return .anthropic
+                case .openaiProxy:
+                    return profile.metadata.proxy.openAIUpstreamAPI == .responses
+                        ? .openAIResponses : .openAIChatCompletions
+                case .codexProxy:
+                    return .openAIChatCompletions
+                }
+            },
+            set: { choice in
+                let oldType = profile.metadata.nodeType
+                switch choice {
+                case .anthropic:
+                    profile.metadata.nodeType = .anthropicDirect
+                case .openAIChatCompletions:
+                    profile.metadata.nodeType = .openaiProxy
+                    profile.metadata.proxy.openAIUpstreamAPI = .chatCompletions
+                case .openAIResponses:
+                    profile.metadata.nodeType = .openaiProxy
+                    profile.metadata.proxy.openAIUpstreamAPI = .responses
+                }
+                // 新建时仅在接口族切换（Anthropic ↔ OpenAI）时重置默认模型/映射；
+                // Chat ↔ Responses 同属 openaiProxy，不重置用户已填的模型。
+                if isNew, oldType != profile.metadata.nodeType {
+                    switch profile.metadata.nodeType {
                     case .anthropicDirect:
                         profile.metadata.proxy.modelMapping = .anthropicDefault
                         profile.metadata.proxy.defaultModel = "claude-sonnet-4-6"
@@ -250,15 +299,12 @@ struct ProxyConfigEditorView: View {
                         profile.metadata.proxy.modelMapping = .openAIDefault
                         profile.metadata.proxy.defaultModel = "gpt-5.5"
                     case .codexProxy:
-                        profile.metadata.proxy.modelMapping = .codexDefault
-                        profile.metadata.proxy.defaultModel = ProxyConfiguration.ModelMapping.codexDefault.bigModel.name
+                        break
                     }
-                    profile.syncEnvFromProxy()
                 }
-            )
-        }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+                profile.syncEnvFromProxy()
+            }
+        )
     }
 
     // MARK: - Basic Section
@@ -275,7 +321,7 @@ struct ProxyConfigEditorView: View {
                 TextField(
                     profile.metadata.nodeType == .anthropicDirect
                         ? L("e.g., Anthropic Official", "例如：Anthropic 官方")
-                        : L("e.g., OpenAI Compatible", "例如：OpenAI 兼容"),
+                        : L("e.g., OpenAI / DeepSeek", "例如：OpenAI / DeepSeek"),
                     text: $profile.metadata.name
                 )
                 .textFieldStyle(.roundedBorder)
@@ -439,23 +485,6 @@ struct ProxyConfigEditorView: View {
                 Text(L(
                     "Enter only the provider root URL. AIUsage will append /v1 and the selected endpoint automatically, and older values ending in /v1 or /v1/chat/completions remain compatible.",
                     "这里只填写服务根地址即可。AIUsage 会根据所选接口自动补上 /v1 和具体端点，旧版本里以 /v1 或 /v1/chat/completions 结尾的配置也会自动兼容。"
-                ))
-                .font(.caption2).foregroundStyle(.tertiary)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L("Upstream API", "上游接口")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                CapsuleSegmentedPicker(
-                    options: [
-                        CapsuleSegmentOption(OpenAIUpstreamAPI.chatCompletions, title: "Chat Completions"),
-                        CapsuleSegmentOption(OpenAIUpstreamAPI.responses, title: "Responses")
-                    ],
-                    selection: $profile.metadata.proxy.openAIUpstreamAPI,
-                    tint: ProxyBrand.openAI
-                )
-                Text(L(
-                    "Responses is recommended for new OpenAI integrations. Keep Chat Completions for older compatible providers that only implement /v1/chat/completions.",
-                    "官方新的 OpenAI 集成更推荐 Responses；如果你的兼容服务仍只实现 /v1/chat/completions，请继续选择 Chat Completions。"
                 ))
                 .font(.caption2).foregroundStyle(.tertiary)
             }
