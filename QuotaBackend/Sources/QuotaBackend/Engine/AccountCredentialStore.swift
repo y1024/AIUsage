@@ -27,6 +27,10 @@ public final class AccountCredentialStore: @unchecked Sendable {
     private static let keychainAccessibility = kSecAttrAccessibleAfterFirstUnlock
     private let lock = NSLock()
     private var cachedCredentialsByStorageKey: [String: AccountCredential]?
+    /// Opaque blobs from other stores folded into the same single keychain item
+    /// (e.g. the account registry from SecureAccountVault), so the whole app keeps
+    /// exactly one keychain item and at most one "Always Allow" prompt.
+    private var cachedAuxiliary: [String: Data] = [:]
 
     // Ad-hoc signed builds can't satisfy the Data Protection Keychain's
     // entitlement requirement, so DP writes always fail with -34018. Cache that
@@ -46,6 +50,9 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
     private struct CredentialVault: Codable {
         let credentials: [AccountCredential]
+        /// Auxiliary blobs co-located in the same keychain item (key → opaque Data).
+        /// Optional so older vault JSON (credentials only) still decodes unchanged.
+        var auxiliary: [String: Data]?
     }
 
     // MARK: - CRUD
@@ -204,16 +211,15 @@ public final class AccountCredentialStore: @unchecked Sendable {
         }
 
         if !dpKeychainUnavailable, let dpVault = loadVaultFromDataProtectionKeychainUnsafe() {
-            cachedCredentialsByStorageKey = dpVault
-            return dpVault
+            return applyLoadedVaultUnsafe(dpVault)
         }
 
         if let legacyVault = loadVaultFromLegacyKeychainUnsafe() {
-            cachedCredentialsByStorageKey = legacyVault
+            let dict = applyLoadedVaultUnsafe(legacyVault)
             if !dpKeychainUnavailable {
-                migrateVaultToDataProtectionKeychainUnsafe(legacyVault)
+                migrateVaultToDataProtectionKeychainUnsafe()
             }
-            return legacyVault
+            return dict
         }
 
         let legacyCredentials = loadCredentialsByLegacySearchUnsafe()
@@ -221,17 +227,64 @@ public final class AccountCredentialStore: @unchecked Sendable {
             uniqueKeysWithValues: legacyCredentials.map { (storageKey($0), $0) }
         )
         cachedCredentialsByStorageKey = migratedVault
+        cachedAuxiliary = [:]
 
         guard !migratedVault.isEmpty else { return migratedVault }
 
         if !dpKeychainUnavailable {
-            migrateVaultToDataProtectionKeychainUnsafe(migratedVault)
+            migrateVaultToDataProtectionKeychainUnsafe()
         }
         for key in migratedVault.keys {
             deleteCredentialStorageKeyUnsafe(key)
         }
         deleteLegacyCredentialIndexUnsafe()
         return migratedVault
+    }
+
+    /// Cache the decoded vault (credentials + auxiliary blobs) and return the
+    /// credential dictionary keyed by storage key.
+    @discardableResult
+    private func applyLoadedVaultUnsafe(_ vault: CredentialVault) -> [String: AccountCredential] {
+        let dict = Dictionary(
+            uniqueKeysWithValues: vault.credentials.map { (storageKey($0), $0) }
+        )
+        cachedCredentialsByStorageKey = dict
+        cachedAuxiliary = vault.auxiliary ?? [:]
+        return dict
+    }
+
+    private func encodeCurrentVaultUnsafe() throws -> Data {
+        let orderedCredentials = (cachedCredentialsByStorageKey ?? [:]).values.sorted(by: credentialSort)
+        return try JSONEncoder().encode(
+            CredentialVault(credentials: orderedCredentials, auxiliary: cachedAuxiliary.isEmpty ? nil : cachedAuxiliary)
+        )
+    }
+
+    // MARK: - Auxiliary blob storage (folded into the single vault item)
+
+    /// Read an opaque blob co-located in the credential vault item.
+    /// Used by app-side stores (e.g. SecureAccountVault) so the whole app keeps
+    /// a single keychain item and at most one access prompt.
+    public func loadAuxiliaryData(forKey key: String) -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        _ = loadCredentialVaultOrMigrateUnsafe()
+        return cachedAuxiliary[key]
+    }
+
+    /// Write (or clear, when `data` is nil) an opaque blob into the credential
+    /// vault item, preserving the stored credentials.
+    public func saveAuxiliaryData(_ data: Data?, forKey key: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let vault = loadCredentialVaultOrMigrateUnsafe()
+        if let data {
+            cachedAuxiliary[key] = data
+        } else {
+            cachedAuxiliary.removeValue(forKey: key)
+        }
+        try saveCredentialVaultUnsafe(vault)
     }
 
     private func dpVaultQuery() -> [String: Any] {
@@ -243,25 +296,20 @@ public final class AccountCredentialStore: @unchecked Sendable {
         ]
     }
 
-    private func loadVaultFromDataProtectionKeychainUnsafe() -> [String: AccountCredential]? {
+    private func loadVaultFromDataProtectionKeychainUnsafe() -> CredentialVault? {
         var query = dpVaultQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let vault = try? JSONDecoder().decode(CredentialVault.self, from: data) else {
+        guard status == errSecSuccess, let data = result as? Data else {
             return nil
         }
-
-        return Dictionary(
-            uniqueKeysWithValues: vault.credentials.map { (storageKey($0), $0) }
-        )
+        return try? JSONDecoder().decode(CredentialVault.self, from: data)
     }
 
-    private func loadVaultFromLegacyKeychainUnsafe() -> [String: AccountCredential]? {
+    private func loadVaultFromLegacyKeychainUnsafe() -> CredentialVault? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.service,
@@ -272,22 +320,15 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let vault = try? JSONDecoder().decode(CredentialVault.self, from: data) else {
+        guard status == errSecSuccess, let data = result as? Data else {
             return nil
         }
-
-        return Dictionary(
-            uniqueKeysWithValues: vault.credentials.map { (storageKey($0), $0) }
-        )
+        return try? JSONDecoder().decode(CredentialVault.self, from: data)
     }
 
-    private func migrateVaultToDataProtectionKeychainUnsafe(_ vault: [String: AccountCredential]) {
+    private func migrateVaultToDataProtectionKeychainUnsafe() {
         do {
-            try writeToDPKeychainUnsafe(
-                try JSONEncoder().encode(CredentialVault(credentials: vault.values.sorted(by: credentialSort)))
-            )
+            try writeToDPKeychainUnsafe(try encodeCurrentVaultUnsafe())
             deleteLegacyVaultItemUnsafe()
             credentialLog.info("Migrated credential vault to Data Protection Keychain")
         } catch CredentialStoreError.keychainWriteFailed(let status) where status == errSecMissingEntitlement {
@@ -308,7 +349,9 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
     private func saveCredentialVaultUnsafe(_ credentialsByStorageKey: [String: AccountCredential]) throws {
         let orderedCredentials = credentialsByStorageKey.values.sorted(by: credentialSort)
-        let data = try JSONEncoder().encode(CredentialVault(credentials: orderedCredentials))
+        let data = try JSONEncoder().encode(
+            CredentialVault(credentials: orderedCredentials, auxiliary: cachedAuxiliary.isEmpty ? nil : cachedAuxiliary)
+        )
 
         if !dpKeychainUnavailable {
             do {

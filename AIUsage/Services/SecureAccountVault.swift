@@ -1,177 +1,90 @@
 import Foundation
 import Security
 import os.log
+import QuotaBackend
 
 private let vaultLog = Logger(subsystem: "com.aiusage.desktop", category: "SecureAccountVault")
 
+/// Stores the provider account registry. To keep the whole app down to a single
+/// keychain item (and at most one "Always Allow" prompt), the registry is folded
+/// into the credential vault item owned by `AccountCredentialStore` as an
+/// auxiliary blob. The old standalone keychain item is migrated once on first
+/// access and then deleted.
 final class SecureAccountVault: @unchecked Sendable {
     nonisolated static let shared = SecureAccountVault()
 
-    private let service = "com.aiusage.desktop.providerAccounts"
-    private let account = "registry"
+    /// Key under which the registry blob lives inside the unified vault item.
+    private static let auxiliaryKey = "providerAccounts.registry"
 
-    // Ad-hoc signed builds (no Apple Developer Team) can't satisfy the
-    // `keychain-access-groups` entitlement required by the Data Protection
-    // Keychain, so DP writes always fail with errSecMissingEntitlement (-34018).
-    // Track that state once per process to avoid spamming warnings on every save.
-    private let flagLock = NSLock()
-    private var _dpKeychainUnavailable = false
-    private var dpKeychainUnavailable: Bool {
-        flagLock.lock(); defer { flagLock.unlock() }
-        return _dpKeychainUnavailable
-    }
-    private func markDPKeychainUnavailable(status: OSStatus) {
-        flagLock.lock()
-        let alreadySet = _dpKeychainUnavailable
-        _dpKeychainUnavailable = true
-        flagLock.unlock()
-        if !alreadySet {
-            vaultLog.info("Data Protection Keychain unavailable (OSStatus \(status)); using legacy keychain. Expected for ad-hoc signed builds.")
-        }
-    }
+    // Old standalone item coordinates, kept only for one-time migration.
+    private static let legacyService = "com.aiusage.desktop.providerAccounts"
+    private static let legacyAccount = "registry"
 
     private init() {}
 
     // MARK: - Public API
 
     nonisolated func loadAccounts() -> [StoredProviderAccount] {
-        if !dpKeychainUnavailable, let data = readFromDataProtectionKeychain() {
+        if let data = AccountCredentialStore.shared.loadAuxiliaryData(forKey: Self.auxiliaryKey) {
             return decodeAccounts(data)
         }
-        if let data = readFromLegacyKeychain() {
-            let accounts = decodeAccounts(data)
-            if !dpKeychainUnavailable {
-                migrateToDataProtectionKeychain(data)
-            }
-            return accounts
+
+        // Not yet folded in: migrate the old standalone item if present.
+        guard let legacyData = readOldRegistryItem() else { return [] }
+        do {
+            try AccountCredentialStore.shared.saveAuxiliaryData(legacyData, forKey: Self.auxiliaryKey)
+            deleteOldRegistryItems()
+            vaultLog.info("Migrated account registry into the unified credential vault item")
+        } catch {
+            // Leave the old item in place so a later launch can retry the migration.
+            vaultLog.warning("Account registry migration deferred: \(error.localizedDescription, privacy: .public)")
         }
-        return []
+        return decodeAccounts(legacyData)
     }
 
     nonisolated func saveAccounts(_ accounts: [StoredProviderAccount]) throws {
         let data = try JSONEncoder().encode(accounts)
-        if !dpKeychainUnavailable {
-            do {
-                try writeToDataProtectionKeychain(data)
-                return
-            } catch VaultError.osStatus(let status) where status == errSecMissingEntitlement {
-                markDPKeychainUnavailable(status: status)
-            } catch {
-                vaultLog.warning("DP Keychain write failed, falling back to legacy: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-        try writeToLegacyKeychain(data)
+        try AccountCredentialStore.shared.saveAuxiliaryData(data, forKey: Self.auxiliaryKey)
     }
 
-    // MARK: - Data Protection Keychain
+    // MARK: - Legacy standalone item (migration source)
 
-    private func dataProtectionQuery() -> [String: Any] {
-        [
+    /// Read the old `providerAccounts/registry` item (Data Protection first,
+    /// then legacy file-based keychain). Returns nil when neither exists.
+    private func readOldRegistryItem() -> Data? {
+        if let data = readOldItem(dataProtection: true) { return data }
+        return readOldItem(dataProtection: false)
+    }
+
+    private func readOldItem(dataProtection: Bool) -> Data? {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecUseDataProtectionKeychain as String: true
-        ]
-    }
-
-    private func readFromDataProtectionKeychain() -> Data? {
-        var query = dataProtectionQuery()
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess else { return nil }
-        return item as? Data
-    }
-
-    private func writeToDataProtectionKeychain(_ data: Data) throws {
-        let base = dataProtectionQuery()
-        let update: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
-        ]
-
-        let status = SecItemUpdate(base as CFDictionary, update as CFDictionary)
-        if status == errSecItemNotFound {
-            var create = base
-            create[kSecValueData as String] = data
-            create[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            let addStatus = SecItemAdd(create as CFDictionary, nil)
-            guard addStatus == errSecSuccess else {
-                throw VaultError.osStatus(addStatus)
-            }
-        } else if status != errSecSuccess {
-            throw VaultError.osStatus(status)
-        }
-    }
-
-    // MARK: - Legacy Keychain
-
-    private func readFromLegacyKeychain() -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrService as String: Self.legacyService,
+            kSecAttrAccount as String: Self.legacyAccount,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
+        if dataProtection {
+            query[kSecUseDataProtectionKeychain as String] = true
+        }
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-
-        if status != errSecSuccess && status != errSecItemNotFound {
-            let msg = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
-            vaultLog.error("Legacy keychain read failed: \(msg)")
-        }
-
         guard status == errSecSuccess else { return nil }
         return item as? Data
     }
 
-    private func writeToLegacyKeychain(_ data: Data) throws {
-        let baseQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        let update: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
-        ]
-
-        let status = SecItemUpdate(baseQuery as CFDictionary, update as CFDictionary)
-        if status == errSecItemNotFound {
-            var create = baseQuery
-            create[kSecValueData as String] = data
-            create[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            let addStatus = SecItemAdd(create as CFDictionary, nil)
-            guard addStatus == errSecSuccess else {
-                throw VaultError.osStatus(addStatus)
+    private func deleteOldRegistryItems() {
+        for dataProtection in [true, false] {
+            var query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: Self.legacyService,
+                kSecAttrAccount as String: Self.legacyAccount
+            ]
+            if dataProtection {
+                query[kSecUseDataProtectionKeychain as String] = true
             }
-        } else if status != errSecSuccess {
-            throw VaultError.osStatus(status)
-        }
-    }
-
-    private func deleteLegacyKeychainItem() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(query as CFDictionary)
-    }
-
-    private func migrateToDataProtectionKeychain(_ data: Data) {
-        do {
-            try writeToDataProtectionKeychain(data)
-            deleteLegacyKeychainItem()
-            vaultLog.info("Migrated account registry to Data Protection Keychain")
-        } catch VaultError.osStatus(let status) where status == errSecMissingEntitlement {
-            markDPKeychainUnavailable(status: status)
-        } catch {
-            vaultLog.warning("DP migration skipped (entitlement missing?), using legacy keychain")
+            SecItemDelete(query as CFDictionary)
         }
     }
 
@@ -183,20 +96,6 @@ final class SecureAccountVault: @unchecked Sendable {
         } catch {
             vaultLog.error("Account registry decode failed: \(String(describing: error), privacy: .public)")
             return []
-        }
-    }
-}
-
-enum VaultError: LocalizedError {
-    case osStatus(OSStatus)
-
-    var errorDescription: String? {
-        switch self {
-        case .osStatus(let status):
-            if let message = SecCopyErrorMessageString(status, nil) as String? {
-                return message
-            }
-            return "Keychain error: \(status)"
         }
     }
 }
