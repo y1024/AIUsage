@@ -1,10 +1,12 @@
 import SwiftUI
 
 // MARK: - Proxy Editor Controls
-// 三套代理编辑器共用的现代化选择控件，替换系统 `.segmented` Picker：
-// - SelectableCardPicker：接口类型这类「多选项 + 说明」的可选卡片（图标 + 标题 + 副标题）。
-// - CapsuleSegmentedPicker：Chat Completions / Responses 这类二/三选一的胶囊分段。
-// 同时集中三套代理的品牌色，消除各卡片文件里重复定义的颜色常量。
+// 四端编辑器（Claude / Codex / OpenCode 代理 + API 提供商）共用的现代化控件，
+// 统一替换系统 `.segmented` Picker 与各自的分区/标签写法：
+// - CapsuleSegmentedPicker：货币 / 合并策略这类二三选一的胶囊分段。
+// - CapsuleInterfacePicker：接口类型胶囊分段 + 随选中变化的一行说明（复用 SelectableCardOption）。
+// - EditorCard / EditorFieldLabel：统一的圆角分区卡片与字段标签。
+// 同时集中各代理的品牌色，消除各卡片文件里重复定义的颜色常量。
 
 // MARK: - Brand Palette
 
@@ -31,69 +33,6 @@ struct SelectableCardOption<Value: Hashable>: Identifiable {
         self.subtitle = subtitle
         self.systemImage = systemImage
         self.tint = tint
-    }
-}
-
-/// 水平排布的可选卡片组（等宽自适应）。选中卡片用品牌色描边 + 浅底高亮 + 实心勾。
-struct SelectableCardPicker<Value: Hashable>: View {
-    let options: [SelectableCardOption<Value>]
-    @Binding var selection: Value
-    var onChange: ((Value) -> Void)? = nil
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ForEach(options) { option in
-                card(option)
-            }
-        }
-    }
-
-    private func card(_ option: SelectableCardOption<Value>) -> some View {
-        let isSelected = option.id == selection
-        return Button {
-            guard selection != option.id else { return }
-            selection = option.id
-            onChange?(option.id)
-        } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: option.systemImage)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(isSelected ? option.tint : Color.secondary)
-                    Spacer(minLength: 0)
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 13))
-                        .foregroundStyle(isSelected ? option.tint : Color.secondary.opacity(0.35))
-                }
-                Text(option.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-                if let subtitle = option.subtitle {
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(isSelected ? option.tint.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(
-                        isSelected ? option.tint.opacity(0.75) : Color.primary.opacity(0.08),
-                        lineWidth: isSelected ? 1.5 : 1
-                    )
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 }
 
@@ -143,12 +82,108 @@ struct CapsuleSegmentedPicker<Value: Hashable>: View {
                 .font(.caption.weight(isSelected ? .semibold : .medium))
                 .foregroundStyle(isSelected ? Color.white : Color.secondary)
                 .lineLimit(1)
-                .padding(.horizontal, fillWidth ? 0 : 16)
+                .minimumScaleFactor(0.85)
+                .padding(.horizontal, fillWidth ? 4 : 16)
                 .frame(maxWidth: fillWidth ? .infinity : nil)
                 .padding(.vertical, 6)
                 .background(Capsule().fill(isSelected ? tint : Color.clear))
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Capsule Interface Picker
+
+/// 「接口类型」专用：胶囊分段（每段一个接口）+ 下方随选中变化的一行说明（图标 + 副标题）。
+/// 复用 SelectableCardOption 的数据（标题做段名、副标题做说明、tint 做选中色），
+/// 三个代理编辑器与 API 提供商共用，替换原先占高的大卡片，更紧凑、更防过宽。
+struct CapsuleInterfacePicker<Value: Hashable>: View {
+    let options: [SelectableCardOption<Value>]
+    @Binding var selection: Value
+    var onChange: ((Value) -> Void)? = nil
+
+    private var selected: SelectableCardOption<Value>? {
+        options.first { $0.id == selection }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CapsuleSegmentedPicker(
+                options: options.map { CapsuleSegmentOption($0.id, title: $0.title) },
+                selection: $selection,
+                tint: selected?.tint ?? .accentColor,
+                fillWidth: true,
+                onChange: onChange
+            )
+
+            if let selected, let subtitle = selected.subtitle {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: selected.systemImage)
+                        .font(.caption)
+                        .foregroundStyle(selected.tint)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: selection)
+    }
+}
+
+// MARK: - Editor Section Card
+
+/// 四端编辑器共用的圆角分区卡片（统一视觉：标题 + 圆角浅底容器）。
+struct EditorCard<Content: View>: View {
+    var title: String?
+    var spacing: CGFloat = 12
+    @ViewBuilder var content: () -> Content
+
+    init(_ title: String? = nil, spacing: CGFloat = 12, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.spacing = spacing
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            if let title {
+                Text(title).font(.headline.weight(.bold))
+            }
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+}
+
+// MARK: - Editor Field Label
+
+/// 四端编辑器共用的字段标签（统一字号/字重，可选必填星号）。
+struct EditorFieldLabel: View {
+    let title: String
+    var required: Bool = false
+
+    init(_ title: String, required: Bool = false) {
+        self.title = title
+        self.required = required
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if required {
+                Text("*")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.red)
+            }
+        }
     }
 }

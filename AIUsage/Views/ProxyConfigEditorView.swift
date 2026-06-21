@@ -225,11 +225,8 @@ struct ProxyConfigEditorView: View {
     // MARK: - Node Type Section
 
     private var nodeTypeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(L("Interface Type", "接口类型"))
-                .font(.headline.weight(.bold))
-
-            SelectableCardPicker(
+        EditorCard(L("Interface Type", "接口类型")) {
+            CapsuleInterfacePicker(
                 options: [
                     SelectableCardOption(
                         ClaudeInterfaceChoice.anthropic,
@@ -241,7 +238,7 @@ struct ProxyConfigEditorView: View {
                     ),
                     SelectableCardOption(
                         ClaudeInterfaceChoice.openAIChatCompletions,
-                        title: "OpenAI Chat Completions",
+                        title: L("OpenAI Chat", "OpenAI Chat"),
                         subtitle: L("Convert to OpenAI /chat/completions via a local proxy.",
                                     "经本地代理转成 OpenAI /chat/completions。"),
                         systemImage: "arrow.triangle.swap",
@@ -249,7 +246,7 @@ struct ProxyConfigEditorView: View {
                     ),
                     SelectableCardOption(
                         ClaudeInterfaceChoice.openAIResponses,
-                        title: "OpenAI Responses",
+                        title: L("OpenAI Responses", "OpenAI Responses"),
                         subtitle: L("Convert to OpenAI /responses via a local proxy.",
                                     "经本地代理转成 OpenAI /responses。"),
                         systemImage: "arrow.up.forward.app.fill",
@@ -259,8 +256,6 @@ struct ProxyConfigEditorView: View {
                 selection: interfaceChoice
             )
         }
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
     }
 
     /// 接口类型三卡片 ↔ (nodeType, openAIUpstreamAPI) 的双向映射。
@@ -352,6 +347,14 @@ struct ProxyConfigEditorView: View {
                     .foregroundStyle(.secondary)
                 SecureKeyField("sk-ant-...", text: $profile.metadata.proxy.anthropicAPIKey)
             }
+
+            ModelFetchControls(
+                state: modelFetch,
+                baseURL: profile.metadata.proxy.anthropicBaseURL,
+                apiKey: profile.metadata.proxy.anthropicAPIKey,
+                style: .anthropic,
+                requiresAPIKey: false
+            )
 
             Divider()
 
@@ -660,8 +663,7 @@ struct ProxyConfigEditorView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(L("Expected Client API Key (Optional)", "客户端 API Key（可选）"))
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                SecureField(L("Leave empty to accept any key", "留空则接受任意 Key"), text: $profile.metadata.proxy.expectedClientKey)
-                    .textFieldStyle(.roundedBorder)
+                SecureKeyField(L("Leave empty to accept any key", "留空则接受任意 Key"), text: $profile.metadata.proxy.expectedClientKey)
             }
             HStack(spacing: 6) {
                 Image(systemName: "lock.shield.fill").foregroundStyle(.green)

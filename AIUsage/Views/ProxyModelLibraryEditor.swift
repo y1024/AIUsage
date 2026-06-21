@@ -65,12 +65,13 @@ struct ProxyModelLibraryEditor: View {
                     "Set cache-write = 1.25× input and cache-read = 0.1× input for every model with an input price.",
                     "为所有已填输入价的模型按 ×1.25 / ×0.1 计算缓存写入与读取单价。"
                 ))
-                Picker("", selection: $currency) {
-                    Text("USD ($)").tag(ProxyConfiguration.PricingCurrency.usd)
-                    Text("CNY (¥)").tag(ProxyConfiguration.PricingCurrency.cny)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
+                CapsuleSegmentedPicker(
+                    options: [
+                        CapsuleSegmentOption(ProxyConfiguration.PricingCurrency.usd, title: "USD ($)"),
+                        CapsuleSegmentOption(ProxyConfiguration.PricingCurrency.cny, title: "CNY (¥)")
+                    ],
+                    selection: $currency
+                )
             }
 
             FetchedModelAppendList(

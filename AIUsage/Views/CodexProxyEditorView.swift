@@ -286,8 +286,7 @@ struct CodexProxyEditorView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(L("Client API Key (Optional)", "客户端 API Key（可选）"))
                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                SecureField(L("Leave empty to use a default key", "留空则使用默认 Key"), text: $profile.metadata.proxy.expectedClientKey)
-                    .textFieldStyle(.roundedBorder)
+                SecureKeyField(L("Leave empty to use a default key", "留空则使用默认 Key"), text: $profile.metadata.proxy.expectedClientKey)
             }
             HStack(spacing: 6) {
                 Image(systemName: "lock.shield.fill").foregroundStyle(.green)

@@ -117,11 +117,12 @@ struct OpenCodeNodeEditorView: View {
                             }
                         }
                     }
-                    basicSection
-                    proxySection
-                    modelsSection
-                    advancedParametersSection
-                    mergePolicySection
+                    EditorCard(L("Interface Type", "接口类型")) { interfaceSection }
+                    EditorCard(L("Basic Information", "基本信息")) { basicSection }
+                    EditorCard(L("Local Proxy", "本地代理")) { proxySection }
+                    EditorCard { modelsSection }
+                    EditorCard { advancedParametersSection }
+                    EditorCard { mergePolicySection }
                 }
                 .padding(18)
             }
@@ -167,22 +168,34 @@ struct OpenCodeNodeEditorView: View {
                     .foregroundStyle(.tertiary)
                 Spacer()
             }
-            Picker("", selection: Binding(
-                get: { node.commonConfigMode ?? .followGlobal },
-                set: { node.commonConfigMode = $0 }
-            )) {
-                ForEach(CommonConfigMode.allCases, id: \.self) { mode in
-                    Text(mode.label).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            CapsuleSegmentedPicker(
+                options: CommonConfigMode.allCases.map { CapsuleSegmentOption($0, title: $0.label) },
+                selection: Binding(
+                    get: { node.commonConfigMode ?? .followGlobal },
+                    set: { node.commonConfigMode = $0 }
+                ),
+                fillWidth: true
+            )
             Text((node.commonConfigMode ?? .followGlobal).description)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    private var interfaceSection: some View {
+        CapsuleInterfacePicker(
+            options: OpenCodeProtocol.allCases.map { proto in
+                SelectableCardOption(
+                    proto,
+                    title: proto.badgeName,
+                    subtitle: "\(proto.displayName) · \(proto.requestPath)",
+                    systemImage: Self.protocolIcon(proto),
+                    tint: Self.protocolTint(proto)
+                )
+            },
+            selection: $node.protocolType,
+            onChange: { _ in connectivity = .idle }
+        )
     }
 
     private var basicSection: some View {
@@ -190,21 +203,6 @@ struct OpenCodeNodeEditorView: View {
             fieldLabel(L("Node Name", "节点名称"), required: false)
             TextField(L("e.g. DeepSeek Official", "如：DeepSeek 官方"), text: $node.name)
                 .textFieldStyle(.roundedBorder)
-
-            fieldLabel(L("Interface Type", "接口类型"), required: false)
-            SelectableCardPicker(
-                options: OpenCodeProtocol.allCases.map { proto in
-                    SelectableCardOption(
-                        proto,
-                        title: proto.displayName,
-                        subtitle: proto.requestPath,
-                        systemImage: Self.protocolIcon(proto),
-                        tint: Self.protocolTint(proto)
-                    )
-                },
-                selection: $node.protocolType,
-                onChange: { _ in connectivity = .idle }
-            )
 
             fieldLabel(L("Base URL", "Base URL"), required: true)
             TextField(baseURLPlaceholder, text: $node.baseURL)
@@ -335,14 +333,10 @@ struct OpenCodeNodeEditorView: View {
                         "为所有已填输入价的模型按 ×1.25 / ×0.1 计算缓存写入与读取单价。"
                     ))
                 }
-                Picker("", selection: $node.pricingCurrency) {
-                    ForEach(OpenCodePricingCurrency.allCases, id: \.self) { currency in
-                        Text(currency.label).tag(currency)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 200)
-                .labelsHidden()
+                CapsuleSegmentedPicker(
+                    options: OpenCodePricingCurrency.allCases.map { CapsuleSegmentOption($0, title: $0.label) },
+                    selection: $node.pricingCurrency
+                )
             }
 
             ModelFetchControls(

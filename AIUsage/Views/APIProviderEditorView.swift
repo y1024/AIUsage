@@ -61,11 +61,12 @@ struct APIProviderEditorView: View {
             header
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    basicSection
-                    modelsSection
-                    advancedSection
-                    distributionSection
+                VStack(alignment: .leading, spacing: 16) {
+                    EditorCard(L("API Format", "接口格式")) { formatSection }
+                    EditorCard(L("Basic Information", "基本信息")) { basicSection }
+                    EditorCard { modelsSection }
+                    EditorCard { advancedSection }
+                    EditorCard(L("Distribute To", "分发到")) { distributionSection }
                 }
                 .padding(18)
             }
@@ -110,23 +111,44 @@ struct APIProviderEditorView: View {
 
     // MARK: - Sections
 
+    private var formatSection: some View {
+        CapsuleInterfacePicker(
+            options: [
+                SelectableCardOption(
+                    APIFormat.openAIChatCompletions,
+                    title: "OpenAI Chat",
+                    subtitle: L("OpenAI /chat/completions (DeepSeek, Ollama, gateways…).",
+                                "OpenAI /chat/completions（DeepSeek、Ollama、第三方网关…）。"),
+                    systemImage: "arrow.triangle.swap",
+                    tint: ProxyBrand.openAI
+                ),
+                SelectableCardOption(
+                    APIFormat.anthropic,
+                    title: "Anthropic",
+                    subtitle: L("Anthropic /v1/messages (official or compatible gateways).",
+                                "Anthropic /v1/messages（官方或兼容网关）。"),
+                    systemImage: "bolt.horizontal.fill",
+                    tint: ProxyBrand.anthropic
+                ),
+                SelectableCardOption(
+                    APIFormat.openAIResponses,
+                    title: "OpenAI Responses",
+                    subtitle: L("OpenAI /v1/responses (the only format Codex accepts).",
+                                "OpenAI /v1/responses（Codex 仅支持此格式）。"),
+                    systemImage: "arrow.up.forward.app.fill",
+                    tint: ProxyBrand.codex
+                )
+            ],
+            selection: $draft.format
+        )
+    }
+
     private var basicSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 fieldLabel(L("Name", "名称"), required: false)
                 TextField(L("e.g. DeepSeek Official", "如：DeepSeek 官方"), text: $draft.name)
                     .textFieldStyle(.roundedBorder)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                fieldLabel(L("API Format", "接口格式"), required: true)
-                Picker("", selection: $draft.format) {
-                    ForEach(APIFormat.allCases) { format in
-                        Text(format.displayName).tag(format)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -139,9 +161,7 @@ struct APIProviderEditorView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 fieldLabel(L("API Key", "API Key"), required: false)
-                SecureField("sk-...", text: $draft.apiKey)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
+                SecureKeyField("sk-...", text: $draft.apiKey)
             }
         }
     }
@@ -200,8 +220,6 @@ struct APIProviderEditorView: View {
 
     private var distributionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(L("Distribute To", "分发到"))
-                .font(.subheadline.weight(.semibold))
             Text(L(
                 "Selected proxies get a linked node mapped from this provider. Unchecking removes that proxy's linked node.",
                 "勾选的代理会生成一个由本提供商映射的链接节点；取消勾选会移除该代理下的链接节点。"
