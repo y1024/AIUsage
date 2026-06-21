@@ -173,8 +173,7 @@ struct OpenCodeNodeEditorView: View {
                 selection: Binding(
                     get: { node.commonConfigMode ?? .followGlobal },
                     set: { node.commonConfigMode = $0 }
-                ),
-                fillWidth: true
+                )
             )
             Text((node.commonConfigMode ?? .followGlobal).description)
                 .font(.caption2)

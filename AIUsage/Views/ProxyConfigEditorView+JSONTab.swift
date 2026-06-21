@@ -10,18 +10,16 @@ extension ProxyConfigEditorView {
             Text(L("Common Config", "通用配置"))
                 .font(.headline.weight(.bold))
 
-            Picker("", selection: Binding(
-                get: { profile.metadata.proxy.commonConfigMode ?? .followGlobal },
-                set: {
-                    profile.metadata.proxy.commonConfigMode = $0
-                    refreshFinalSettingsPreview()
-                }
-            )) {
-                ForEach(CommonConfigMode.allCases, id: \.self) { mode in
-                    Text(mode.label).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
+            CapsuleSegmentedPicker(
+                options: CommonConfigMode.allCases.map { CapsuleSegmentOption($0, title: $0.label) },
+                selection: Binding(
+                    get: { profile.metadata.proxy.commonConfigMode ?? .followGlobal },
+                    set: {
+                        profile.metadata.proxy.commonConfigMode = $0
+                        refreshFinalSettingsPreview()
+                    }
+                )
+            )
 
             Text((profile.metadata.proxy.commonConfigMode ?? .followGlobal).description)
                 .font(.caption2)

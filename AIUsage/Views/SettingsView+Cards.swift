@@ -13,12 +13,13 @@ extension SettingsView {
             subtitle: L("Language, appearance, and basic preferences.", "语言、外观和基本偏好设置。")
         ) {
             settingsBlock(title: L("Language", "语言")) {
-                Picker("", selection: $settings.language) {
-                    Text("English").tag("en")
-                    Text("中文").tag("zh")
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 220, alignment: .leading)
+                CapsuleSegmentedPicker(
+                    options: [
+                        CapsuleSegmentOption("en", title: "English"),
+                        CapsuleSegmentOption("zh", title: "中文")
+                    ],
+                    selection: $settings.language
+                )
             }
 
             Divider()
@@ -27,13 +28,14 @@ extension SettingsView {
                 title: L("Theme", "主题"),
                 subtitle: L("Choose app appearance: follow system, light, or dark.", "选择外观模式：跟随系统、浅色或深色。")
             ) {
-                Picker("", selection: $settings.themeMode) {
-                    Text(L("System", "系统")).tag("system")
-                    Text(L("Light", "浅色")).tag("light")
-                    Text(L("Dark", "深色")).tag("dark")
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 280, alignment: .leading)
+                CapsuleSegmentedPicker(
+                    options: [
+                        CapsuleSegmentOption("system", title: L("System", "系统")),
+                        CapsuleSegmentOption("light", title: L("Light", "浅色")),
+                        CapsuleSegmentOption("dark", title: L("Dark", "深色"))
+                    ],
+                    selection: $settings.themeMode
+                )
             }
 
             Divider()
@@ -42,15 +44,16 @@ extension SettingsView {
                 title: L("Display Currency", "显示货币"),
                 subtitle: L("Currency for cost display across the app.", "应用中费用显示的货币单位。")
             ) {
-                Picker("", selection: Binding(
-                    get: { UserDefaults.standard.string(forKey: DefaultsKey.displayCurrency) ?? "USD" },
-                    set: { UserDefaults.standard.set($0, forKey: DefaultsKey.displayCurrency) }
-                )) {
-                    Text("USD ($)").tag("USD")
-                    Text("CNY (¥)").tag("CNY")
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 200, alignment: .leading)
+                CapsuleSegmentedPicker(
+                    options: [
+                        CapsuleSegmentOption("USD", title: "USD ($)"),
+                        CapsuleSegmentOption("CNY", title: "CNY (¥)")
+                    ],
+                    selection: Binding(
+                        get: { UserDefaults.standard.string(forKey: DefaultsKey.displayCurrency) ?? "USD" },
+                        set: { UserDefaults.standard.set($0, forKey: DefaultsKey.displayCurrency) }
+                    )
+                )
             }
 
             Divider()
@@ -152,11 +155,13 @@ extension SettingsView {
             subtitle: L("Backend mode and refresh intervals.", "后端模式和数据刷新频率。")
         ) {
             settingsBlock(title: L("Backend Mode", "后端模式")) {
-                Picker("", selection: $settings.backendMode) {
-                    Text(L("Local", "本地")).tag("local")
-                    Text(L("Remote", "远程")).tag("remote")
-                }
-                .pickerStyle(.segmented)
+                CapsuleSegmentedPicker(
+                    options: [
+                        CapsuleSegmentOption("local", title: L("Local", "本地")),
+                        CapsuleSegmentOption("remote", title: L("Remote", "远程"))
+                    ],
+                    selection: $settings.backendMode
+                )
                 .onChange(of: settings.backendMode) { _, _ in
                     settings.saveSettings()
                     refreshCoordinator.refreshAllProviders()
@@ -346,25 +351,19 @@ extension SettingsView {
             subtitle: L("Adjust how quota cards present information.", "调整额度卡片的呈现方式。")
         ) {
             settingsBlock(title: L("Quota card style", "额度卡片样式")) {
-                Picker("", selection: $settings.quotaIndicatorStyle) {
-                    ForEach(CardQuotaIndicatorStyle.allCases, id: \.self) { style in
-                        Text(quotaStyleTitle(style)).tag(style)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 340, alignment: .leading)
+                CapsuleSegmentedPicker(
+                    options: CardQuotaIndicatorStyle.allCases.map { CapsuleSegmentOption($0, title: quotaStyleTitle($0)) },
+                    selection: $settings.quotaIndicatorStyle
+                )
             }
 
             Divider()
 
             settingsBlock(title: L("Progress meaning", "进度语义")) {
-                Picker("", selection: $settings.quotaIndicatorMetric) {
-                    ForEach(CardQuotaIndicatorMetric.allCases, id: \.self) { metric in
-                        Text(quotaMetricTitle(metric)).tag(metric)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 240, alignment: .leading)
+                CapsuleSegmentedPicker(
+                    options: CardQuotaIndicatorMetric.allCases.map { CapsuleSegmentOption($0, title: quotaMetricTitle($0)) },
+                    selection: $settings.quotaIndicatorMetric
+                )
             }
 
             Divider()
