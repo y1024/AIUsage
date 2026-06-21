@@ -155,7 +155,6 @@
 		C1OE001A2FB0004000B26789 /* OpenCodeConnectivityTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */; };
 		C1OE001C2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */; };
 		C1OE001E2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */; };
-		C1OE00202FB0005000B26789 /* OpenCodeConfigLayering.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001F2FB0005000B26789 /* OpenCodeConfigLayering.swift */; };
 		C1OE00222FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */; };
 		C1OE00242FB0007000B26789 /* CCSwitchLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */; };
 		C1PM00022FB0000300B26789 /* ProxyManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */; };
@@ -320,7 +319,6 @@
 		C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConnectivityTester.swift; sourceTree = "<group>"; };
 		C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeManagementView+Toolbar.swift"; sourceTree = "<group>"; };
 		C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGlobalConfigSection.swift; sourceTree = "<group>"; };
-		C1OE001F2FB0005000B26789 /* OpenCodeConfigLayering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConfigLayering.swift; sourceTree = "<group>"; };
 		C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeNodeStore+CCSwitchSync.swift"; sourceTree = "<group>"; };
 		C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCSwitchLocator.swift; sourceTree = "<group>"; };
 		C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Toolbar.swift"; sourceTree = "<group>"; };
@@ -503,7 +501,6 @@
 				C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */,
 				C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */,
 				C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */,
-				C1OE001F2FB0005000B26789 /* OpenCodeConfigLayering.swift */,
 				C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */,
 				C1MB00072FB0000400B26789 /* MenuBarRows.swift */,
 				C1MB00092FB0000400B26789 /* MenuBarSupport.swift */,
@@ -745,7 +742,6 @@
 				C1OE00122FB0003000B26789 /* ModelSuggestionField.swift in Sources */,
 				C1OE001A2FB0004000B26789 /* OpenCodeConnectivityTester.swift in Sources */,
 				C1OE001E2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift in Sources */,
-				C1OE00202FB0005000B26789 /* OpenCodeConfigLayering.swift in Sources */,
 				C1OE00142FB0004000B26789 /* OpenCodeNodeStatsStore.swift in Sources */,
 				C1CA00022FCA005000B26789 /* CallAnalyticsStore.swift in Sources */,
 				C1CA00042FCA005000B26789 /* CallAnalyticsView.swift in Sources */,

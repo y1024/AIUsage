@@ -150,7 +150,8 @@ enum OpenCodeProtocol: String, Codable, CaseIterable {
     var displayName: String {
         switch self {
         case .openAICompatible:
-            return AppSettings.shared.t("OpenAI Compatible", "OpenAI 兼容")
+            // OpenAI 有两套接口（Chat Completions / Responses），明确叫法避免「兼容」含糊。
+            return "OpenAI Chat Completions"
         case .anthropic:
             return "Anthropic"
         case .openAIResponses:
@@ -161,7 +162,7 @@ enum OpenCodeProtocol: String, Codable, CaseIterable {
     /// 卡片徽章用短名（与 Claude/Codex 页「接口类型 · 直连/代理」措辞对齐）。
     var badgeName: String {
         switch self {
-        case .openAICompatible: return "OpenAI"
+        case .openAICompatible: return "Chat Completions"
         case .anthropic: return "Anthropic"
         case .openAIResponses: return "Responses"
         }
@@ -199,6 +200,9 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
     var proxyEnabled: Bool
     /// 本地透传代理监听端口。
     var proxyPort: Int
+    /// 客户端访问本地代理时校验的 Key（仅代理模式生效）。留空 = 接受任意（环回放行）。
+    /// 设置后：opencode.json 的 apiKey 写成此值，本地代理校验 x-api-key/Authorization。
+    var expectedClientKey: String
     /// 定价币种：none = 不计价（不写 cost 块）。单价存在每个模型条目上（每模型独立），
     /// 写入受管块各模型的 `cost` 字段（USD，CNY 录入按近似汇率折算），OpenCode 据此
     /// 把每条消息的费用算进 opencode.db——统计金额即真实消费。
@@ -238,6 +242,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         presencePenalty: Double? = nil,
         proxyEnabled: Bool = false,
         proxyPort: Int = OpenCodeNode.defaultProxyPort,
+        expectedClientKey: String = "",
         pricingCurrency: OpenCodePricingCurrency = .none,
         commonConfigMode: CommonConfigMode? = nil,
         linkedProviderId: String? = nil,
@@ -263,6 +268,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         self.presencePenalty = presencePenalty
         self.proxyEnabled = proxyEnabled
         self.proxyPort = proxyPort
+        self.expectedClientKey = expectedClientKey
         self.pricingCurrency = pricingCurrency
         self.commonConfigMode = commonConfigMode
         self.linkedProviderId = linkedProviderId
@@ -278,7 +284,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         case models                    // legacy: [String]
         case defaultModel, providerSlug, contextLimit, outputLimit
         case temperature, topP, maxOutputTokens, frequencyPenalty, presencePenalty
-        case proxyEnabled, proxyPort
+        case proxyEnabled, proxyPort, expectedClientKey
         case pricingCurrency
         case priceInputPerMillion      // legacy: 节点级单价
         case priceOutputPerMillion
@@ -309,6 +315,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         presencePenalty = try c.decodeIfPresent(Double.self, forKey: .presencePenalty)
         proxyEnabled = try c.decodeIfPresent(Bool.self, forKey: .proxyEnabled) ?? false
         proxyPort = try c.decodeIfPresent(Int.self, forKey: .proxyPort) ?? Self.defaultProxyPort
+        expectedClientKey = try c.decodeIfPresent(String.self, forKey: .expectedClientKey) ?? ""
         commonConfigMode = try c.decodeIfPresent(CommonConfigMode.self, forKey: .commonConfigMode)
         linkedProviderId = try c.decodeIfPresent(String.self, forKey: .linkedProviderId)
         overriddenKeys = try c.decodeIfPresent(Set<String>.self, forKey: .overriddenKeys)
@@ -358,6 +365,7 @@ struct OpenCodeNode: Identifiable, Codable, Equatable {
         try c.encodeIfPresent(presencePenalty, forKey: .presencePenalty)
         try c.encode(proxyEnabled, forKey: .proxyEnabled)
         try c.encode(proxyPort, forKey: .proxyPort)
+        try c.encode(expectedClientKey, forKey: .expectedClientKey)
         try c.encode(pricingCurrency, forKey: .pricingCurrency)
         try c.encodeIfPresent(commonConfigMode, forKey: .commonConfigMode)
         try c.encodeIfPresent(linkedProviderId, forKey: .linkedProviderId)

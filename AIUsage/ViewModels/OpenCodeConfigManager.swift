@@ -245,9 +245,9 @@ final class OpenCodeConfigManager {
 
         var options: [String: Any] = ["baseURL": baseURLOverride ?? node.baseURL]
         if baseURLOverride != nil {
-            // 代理模式：真实 Key 留在代理进程环境里，配置里只放占位符
-            // （AI SDK 各包都需要非空 apiKey 才不会去找环境变量）。
-            options["apiKey"] = "aiusage-proxy"
+            // 代理模式：真实 Key 留在代理进程环境里，配置里只放客户端 Key（设了则代理据此鉴权），
+            // 留空时回退占位符（AI SDK 各包都需要非空 apiKey 才不会去找环境变量）。
+            options["apiKey"] = node.expectedClientKey.nilIfBlank ?? "aiusage-proxy"
         } else if let apiKey = node.apiKey.nilIfBlank {
             options["apiKey"] = apiKey
         }
@@ -315,15 +315,6 @@ final class OpenCodeConfigManager {
             defaultModel: node.effectiveDefaultModel ?? "",
             baseURLOverride: baseURLOverride
         )
-    }
-
-    /// 受管层独立成块（分层标注用）：$schema/model/provider[managedId]。
-    func managedLayer(node: OpenCodeNode, baseURLOverride: String? = nil) -> [String: Any] {
-        [
-            "$schema": "https://opencode.ai/config.json",
-            "model": "\(node.managedProviderId)/\(node.effectiveDefaultModel ?? "")",
-            "provider": [node.managedProviderId: managedProviderEntry(node: node, baseURLOverride: baseURLOverride)],
-        ]
     }
 
     // MARK: - Launch Command Export

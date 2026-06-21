@@ -1,30 +1,10 @@
 import SwiftUI
 
 // MARK: - OpenCode Node Editor
-// 新建/编辑 OpenCode 接入节点的 sheet，与 Claude/Codex 编辑器同款 Tab 结构：
-// 「节点设置」（名称/协议/Base URL/Key/模型/上限/代理模式）+「JSON 预览」
-// （激活后 opencode.json 的最终内容，只读，便于核对受管块）。
+// 新建/编辑 OpenCode 接入节点的 sheet（单页表单，与 Codex 编辑器一致）：
+// 名称 / 接口类型 / Base URL / Key / 本地代理 / 模型 / 上限与参数 / 合并策略。
 // 保存交由调用方落库；激活节点的编辑会即时重写 opencode.json。
-
-/// 编辑器顶部标签页（避免与 Claude 编辑器的全局 EditorTab 重名）。
-enum OpenCodeEditorTab: CaseIterable {
-    case settings
-    case jsonPreview
-
-    var label: String {
-        switch self {
-        case .settings: return L("Settings", "节点设置")
-        case .jsonPreview: return L("JSON Preview", "JSON 预览")
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .settings: return "slider.horizontal.3"
-        case .jsonPreview: return "curlybraces"
-        }
-    }
-}
+// 实时 opencode.json 可在主模块「opencode.json」入口查看，故此处不再内置只读预览。
 
 struct OpenCodeNodeEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -39,13 +19,14 @@ struct OpenCodeNodeEditorView: View {
     @State private var expandedModalityRows: Set<UUID> = []
     @StateObject private var modelFetch = ModelFetchState()
     @State private var connectivity: ConnectivityResult = .idle
-    @State private var selectedTab: OpenCodeEditorTab = .settings
     /// 生成参数的文本镜像：temperature/topP/penalty 的 0 是合法值，用文本输入避免 0 哨兵歧义，
     /// 解析为可选 Double（空/非法 = nil）。maxOutputTokens 直接绑定 node（Int，0 = 不写）。
     @State private var temperatureText: String
     @State private var topPText: String
     @State private var frequencyPenaltyText: String
     @State private var presencePenaltyText: String
+    /// 「上限 / 模型参数」折叠栏（默认收起，减少占用空间）。
+    @State private var showAdvancedParameters = false
     private let isNew: Bool
 
     struct ModelRow: Identifiable {
@@ -124,42 +105,33 @@ struct OpenCodeNodeEditorView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            tabBar
-            Divider()
 
-            Group {
-                switch selectedTab {
-                case .settings:
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            if let providerName = linkedProviderName {
-                                InheritanceBanner(providerName: providerName) {
-                                    let providerId = node.linkedProviderId
-                                    dismiss()
-                                    if let providerId {
-                                        Task { await APIProviderDistributor.shared.resetToInherit(providerId: providerId, target: .openCode) }
-                                    }
-                                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let providerName = linkedProviderName {
+                        InheritanceBanner(providerName: providerName) {
+                            let providerId = node.linkedProviderId
+                            dismiss()
+                            if let providerId {
+                                Task { await APIProviderDistributor.shared.resetToInherit(providerId: providerId, target: .openCode) }
                             }
-                            basicSection
-                            modelsSection
-                            limitsSection
-                            parametersSection
-                            proxySection
                         }
-                        .padding(18)
                     }
-                case .jsonPreview:
-                    jsonPreviewTab
+                    basicSection
+                    proxySection
+                    modelsSection
+                    advancedParametersSection
+                    mergePolicySection
                 }
+                .padding(18)
             }
             .frame(maxHeight: .infinity)
 
             Divider()
             footer
         }
-        // 与 Claude/Codex 编辑器同尺寸（设置 750、JSON 预览 1100，高 800）。
-        .frame(width: selectedTab == .jsonPreview ? 1100 : 750, height: 800)
+        // 单页表单，与 Codex 编辑器同尺寸。
+        .frame(width: 750, height: 800)
     }
 
     // MARK: - Sections
@@ -175,122 +147,9 @@ struct OpenCodeNodeEditorView: View {
         .padding(.vertical, 13)
     }
 
-    // MARK: - Tab Bar (Claude/Codex 编辑器同款)
-
-    private var tabBar: some View {
-        HStack(spacing: 2) {
-            ForEach(OpenCodeEditorTab.allCases, id: \.self) { tab in
-                Button {
-                    // 平滑过渡窗口宽度（JSON 预览 1100 ↔ 设置 750），避免切换时骤变。
-                    withAnimation(.easeInOut(duration: 0.28)) {
-                        selectedTab = tab
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(tab.label)
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundStyle(selectedTab == tab ? Color.white : .secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule().fill(selectedTab == tab ? Self.brand : Color.clear)
-                    )
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 8)
-    }
-
-    // MARK: - JSON Preview Tab
-    // 分层最终预览（与 Claude 编辑器「最终 JSON」同款）：合并策略选择器 +
-    // 行级来源标注（无标=用户原文 / C=通用 / N=受管 / O=通用覆盖原文）。
-
-    /// 草稿节点的合并策略下，应并入的通用配置片段（nil = 不合并）。
-    private var draftCommonSettings: [String: Any]? {
-        let store = OpenCodeNodeStore.shared
-        let mode = node.commonConfigMode ?? .followGlobal
-        guard mode.shouldMerge(globalEnabled: store.globalConfig.enabled),
-              !store.globalConfig.settings.isEmpty else { return nil }
-        return store.globalConfig.settings
-    }
-
-    private var jsonPreviewTab: some View {
-        let manager = OpenCodeConfigManager.shared
-        let baseURLOverride = node.proxyEnabled ? node.proxyLocalBaseURL : nil
-        let common = draftCommonSettings
-        // 干净原文只读一次盘，预览合并与行标注共用，避免同次刷新双次读盘。
-        let pristine = manager.pristineConfig()
-        let merged = manager.previewMergedConfig(
-            node: draftNode,
-            baseURLOverride: baseURLOverride,
-            commonSettings: common,
-            pristine: pristine
-        )
-        let jsonText = OpenCodeConfigManager.jsonString(merged)
-        let markers = OpenCodeConfigLayering.lineMarkers(
-            text: jsonText,
-            pristine: pristine,
-            common: common ?? [:],
-            managed: manager.managedLayer(node: draftNode, baseURLOverride: baseURLOverride)
-        )
-
-        return VStack(alignment: .leading, spacing: 10) {
-            mergePolicySection
-
-            HStack(spacing: 8) {
-                Text(L("opencode.json after activation", "激活后的 opencode.json"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                sourceLegend(L("Original", "用户原文"), .secondary.opacity(0.35))
-                sourceLegend(L("Common", "通用配置"), .blue)
-                sourceLegend(L("Managed", "节点受管"), .green)
-                sourceLegend(L("Override", "通用覆盖"), .orange)
-                Button {
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.setString(jsonText, forType: .string)
-                } label: {
-                    Label(L("Copy", "复制"), systemImage: "doc.on.doc")
-                }
-                .controlSize(.small)
-            }
-
-            JSONRawEditorView(
-                jsonText: .constant(jsonText),
-                error: .constant(nil),
-                title: "opencode.json",
-                isEditable: false,
-                showsActions: false,
-                lineMarkers: markers
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
-            )
-
-            Text(node.proxyEnabled
-                 ? L(
-                     "Read-only preview, merged with your existing config. Proxy mode: baseURL points to the local proxy and the real key stays in the proxy process.",
-                     "只读预览，已与现有配置合并。代理模式：baseURL 指向本地代理，真实 Key 保留在代理进程内。"
-                 )
-                 : L(
-                     "Read-only preview, merged with your existing config (managed provider block + top-level model).",
-                     "只读预览，已与现有配置合并（受管 provider 块 + 顶层 model 指向）。"
-                 ))
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-        }
-        .padding(18)
-    }
+    // MARK: - Common Config (Merge Policy)
+    // 通用配置合并策略（followGlobal/alwaysMerge/neverMerge）：激活时决定是否把全局
+    // 通用配置片段并入该节点写出的 opencode.json。原在 JSON 预览页，预览移除后下沉到表单。
 
     private var mergePolicySection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -324,17 +183,6 @@ struct OpenCodeNodeEditorView: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-    }
-
-    private func sourceLegend(_ label: String, _ color: Color) -> some View {
-        HStack(spacing: 3) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(color.opacity(0.25))
-                .frame(width: 16, height: 8)
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
     }
 
     private var basicSection: some View {
@@ -771,6 +619,30 @@ struct OpenCodeNodeEditorView: View {
         }
     }
 
+    // MARK: - Advanced (Limits + Parameters)
+    // 「上限」与「模型参数」都属于可选高级项，默认收起以减少占用空间。
+
+    private var advancedParametersSection: some View {
+        DisclosureGroup(isExpanded: $showAdvancedParameters) {
+            VStack(alignment: .leading, spacing: 16) {
+                limitsSection
+                parametersSection
+            }
+            .padding(.top, 10)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L("Limits & Model Parameters", "上限与模型参数"))
+                    .font(.caption.weight(.semibold))
+                Text(L("Optional", "可选"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
     // MARK: - Proxy
 
     private var proxySection: some View {
@@ -807,6 +679,28 @@ struct OpenCodeNodeEditorView: View {
                     .foregroundStyle(.tertiary)
             }
             .opacity(node.proxyEnabled ? 1 : 0.55)
+
+            // 客户端访问本地代理时校验的 Key（仅代理模式生效，与 Claude/Codex 一致）。
+            if node.proxyEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("Client API Key (Optional)", "客户端 API Key（可选）"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    SecureKeyField(L("Leave empty to accept any key", "留空则接受任意 Key"),
+                                   text: $node.expectedClientKey)
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.shield.fill").foregroundStyle(.green)
+                        Text(L(
+                            "If set, OpenCode authenticates to the local proxy with this key (written as apiKey in opencode.json). The real upstream key stays in the proxy.",
+                            "设置后，OpenCode 用此 Key 访问本地代理（写入 opencode.json 的 apiKey）；真实上游 Key 仅保留在代理内。"
+                        ))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.top, 2)
+            }
 
             if node.proxyEnabled, node.protocolType == .openAIResponses, node.apiKey.nilIfBlank == nil {
                 Label(
@@ -884,6 +778,7 @@ struct OpenCodeNodeEditorView: View {
         saved.name = node.name.trimmingCharacters(in: .whitespaces)
         saved.baseURL = node.baseURL.trimmingCharacters(in: .whitespaces)
         saved.apiKey = node.apiKey.trimmingCharacters(in: .whitespaces)
+        saved.expectedClientKey = node.expectedClientKey.trimmingCharacters(in: .whitespaces)
         saved.modelEntries = parsedEntries.map { entry in
             var clamped = entry
             clamped.priceInputPerMillion = max(0, clamped.priceInputPerMillion)

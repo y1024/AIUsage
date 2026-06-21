@@ -221,6 +221,7 @@ final class OpenCodeProxyRuntime: ObservableObject {
             && a.baseURL == b.baseURL
             && a.apiKey == b.apiKey
             && a.proxyPort == b.proxyPort
+            && a.expectedClientKey == b.expectedClientKey
     }
 
     private func stopProcess(nodeId: String) {
@@ -270,22 +271,28 @@ final class OpenCodeProxyRuntime: ObservableObject {
                     "CODEX_CLIENT_KEY", "OPENCODE_CLIENT_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"] {
             environment.removeValue(forKey: key)
         }
+        // 客户端访问本地代理时校验的 Key（留空 = 环回放行）。按协议落到各轨道对应的环境变量：
+        // opencode→OPENCODE_CLIENT_KEY，codex→CODEX_CLIENT_KEY，passthrough→ANTHROPIC_API_KEY。
+        let clientKey = node.expectedClientKey.trimmingCharacters(in: .whitespacesAndNewlines)
         switch node.protocolType {
         case .openAICompatible:
             environment["PROXY_TARGET"] = "opencode"
             environment["OPENAI_BASE_URL"] = node.baseURL
             environment["OPENAI_API_KEY"] = node.apiKey
+            if !clientKey.isEmpty { environment["OPENCODE_CLIENT_KEY"] = clientKey }
         case .openAIResponses:
             // Codex 轨道要求非空 Key（responses 上游均需认证）。
             environment["PROXY_TARGET"] = "codex"
             environment["OPENAI_API_MODE"] = "responses"
             environment["OPENAI_BASE_URL"] = node.baseURL
             environment["OPENAI_API_KEY"] = node.apiKey
+            if !clientKey.isEmpty { environment["CODEX_CLIENT_KEY"] = clientKey }
         case .anthropic:
             // passthrough 轨道按「上游根 + /v1/messages」拼 URL，传入不含 /v1 的根地址。
             environment["PROXY_MODE"] = "passthrough"
             environment["ANTHROPIC_UPSTREAM_URL"] = node.baseURLWithoutV1Suffix
             environment["ANTHROPIC_UPSTREAM_KEY"] = node.apiKey
+            if !clientKey.isEmpty { environment["ANTHROPIC_API_KEY"] = clientKey }
         }
 
         let process = Process()
