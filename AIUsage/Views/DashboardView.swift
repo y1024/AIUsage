@@ -22,11 +22,18 @@ struct DashboardView: View {
                     skeletonHeatmap
                 }
 
-                providersSection
+                if !isAccountsModuleHidden {
+                    providersSection
+                }
             }
             .padding()
         }
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    /// 订阅账号模块被隐藏（设置 → 侧边栏可见性）时，仪表盘的「服务商」账号区随之消失。
+    private var isAccountsModuleHidden: Bool {
+        appState.settings.hiddenSidebarSections.contains(AppSection.providerAccounts.rawValue)
     }
 
     /// 首次加载中、本地 Token 统计还没扫到时，仅对热力图区域显示骨架（而非整页）。
@@ -391,7 +398,7 @@ struct DashboardView: View {
                     providerId: entry.providerId,
                     title: entry.cardTitle,
                     accountLabel: entry.footerAccountLabel,
-                    onConnect: { appState.selectedSection = .providers }
+                    onConnect: { appState.selectedSection = .providerAccounts }
                 )
             } else {
                 ManagedProviderAccountCard(account: entry, provider: live)
@@ -405,7 +412,7 @@ struct DashboardView: View {
                 accountLabel: entry.footerAccountLabel
             )
         } else {
-            SavedAccountCard(account: entry, onReconnect: { appState.selectedSection = .providers })
+            SavedAccountCard(account: entry, onReconnect: { appState.selectedSection = .providerAccounts })
                 .environmentObject(appState)
                 .environmentObject(refreshCoordinator)
         }

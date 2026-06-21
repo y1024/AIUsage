@@ -6,7 +6,10 @@ import Combine
 
 enum AppSection: String, Hashable {
     case dashboard
-    case providers
+    /// 订阅账号：监控登录类账号（Claude / Codex / Cursor 等）的订阅额度与用量。
+    case providerAccounts
+    /// API 提供商：统一上游配置，分发到三套代理。
+    case apiProviders
     case costTracking
     case callAnalytics
     case proxyManagement

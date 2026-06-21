@@ -1249,8 +1249,11 @@
 /* Views/ContentView.swift */
 "nav.inbox" = "Inbox";
 
-/* Views/ContentView.swift */
-"nav.providers" = "Providers";
+/* Views/SidebarNavigation.swift */
+"nav.provider_accounts" = "Subscriptions";
+
+/* Views/SidebarNavigation.swift */
+"nav.api_providers" = "API Providers";
 
 /* Views/ContentView.swift */
 "nav.proxy_management" = "Claude Code Proxy";

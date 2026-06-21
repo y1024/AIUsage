@@ -118,9 +118,12 @@ struct ContentView: View {
                 case .dashboard:
                     DashboardView()
                         .navigationTitle(L("Dashboard", "仪表盘"))
-                case .providers:
-                    ProvidersView()
-                        .navigationTitle(L("Providers", "服务商"))
+                case .providerAccounts:
+                    ProvidersView(category: .accounts)
+                        .navigationTitle(L("Subscriptions", "订阅账号"))
+                case .apiProviders:
+                    ProvidersView(category: .apiProviders)
+                        .navigationTitle(L("API Providers", "API 提供商"))
                 case .costTracking:
                     StatsHubView()
                         .navigationTitle(L("Usage Stats", "用量统计"))

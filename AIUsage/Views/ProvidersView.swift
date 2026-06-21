@@ -11,9 +11,10 @@ struct ProvidersView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var accountStore: AccountStore
     @Environment(\.colorScheme) private var colorScheme
+    /// 单类目页面：由侧边栏的「订阅账号」/「API 提供商」分别承载（不再内置切换）。
+    let category: ProviderListCategory
     @State private var searchText = ""
     @State private var selectedProviderFilter: String = "all"
-    @State private var selectedCategory: ProviderListCategory = .accounts
     @State private var accountEditorTarget: ProviderEditorTarget?
     /// 顶部工具栏「新增 API 提供商」的触发信号（按钮在工具栏，编辑器在 APIProviderListView）。
     @State private var requestNewAPIProvider = false
@@ -21,7 +22,7 @@ struct ProvidersView: View {
         VStack(spacing: 0) {
             toolbar
 
-            if selectedCategory == .accounts {
+            if category == .accounts {
                 filterBar
                 Divider()
                 accountsBody
@@ -118,20 +119,12 @@ struct ProvidersView: View {
 
     // MARK: - Toolbar
 
-    // 确定性两行布局：两个分类（账号 / API 提供商）共用完全一致的工具栏结构——
-    // 第一行搜索框 + 右侧操作区（按分类切换内容但占同一槽位），第二行渠道分段控件。
-    // 避免 ViewThatFits 因两个分类操作区宽度不同而在单/双行间跳变，导致分段控件错位。
     private var toolbar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                searchControl
-                    .frame(maxWidth: .infinity)
+        HStack(spacing: 12) {
+            searchControl
+                .frame(maxWidth: .infinity)
 
-                toolbarActions
-            }
-
-            categoryControl
-                .frame(width: 260)
+            toolbarActions
         }
         .padding(.horizontal, 18)
         .padding(.top, 16)
@@ -141,45 +134,17 @@ struct ProvidersView: View {
 
     private var searchControl: some View {
         ProviderSearchControl(
-            placeholder: selectedCategory == .accounts
+            placeholder: category == .accounts
                 ? L("Search accounts...", "搜索账号...", key: "providers.search.placeholder")
                 : L("Search API providers...", "搜索 API 提供商..."),
             text: $searchText
         )
     }
 
-    private var categoryControl: some View {
-        HStack(spacing: 8) {
-            Label {
-                Text(L("Channel", "渠道", key: "providers.channel"))
-                    .font(.caption.weight(.semibold))
-            } icon: {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundStyle(.secondary)
-            .labelStyle(.titleAndIcon)
-
-            CapsuleSegmentedPicker(
-                options: [
-                    CapsuleSegmentOption(ProviderListCategory.accounts, title: L("Accounts", "账号")),
-                    CapsuleSegmentOption(ProviderListCategory.apiProviders, title: L("API Providers", "API 提供商"))
-                ],
-                selection: $selectedCategory
-            )
-        }
-        .padding(.leading, 10)
-        .padding(.trailing, 6)
-        .padding(.vertical, 5)
-        .frame(height: 34)
-        .background(controlBackground)
-        .overlay(controlBorder)
-    }
-
-    /// 右侧操作区：按分类切换内容，但始终占据工具栏第一行同一槽位（位置不跳变）。
+    /// 右侧操作区：按当前类目渲染对应操作。
     @ViewBuilder
     private var toolbarActions: some View {
-        switch selectedCategory {
+        switch category {
         case .accounts:
             accountToolbarActions
         case .apiProviders:
@@ -262,16 +227,6 @@ struct ProvidersView: View {
                     .fill(Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.35 : 0.55))
                     .frame(height: 0.5)
             }
-    }
-
-    private var controlBackground: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.82 : 0.94))
-    }
-
-    private var controlBorder: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .stroke(Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.38 : 0.55), lineWidth: 0.5)
     }
 
     private var filterBar: some View {

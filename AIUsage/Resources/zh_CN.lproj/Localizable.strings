@@ -1249,8 +1249,11 @@
 /* Views/ContentView.swift */
 "nav.inbox" = "消息";
 
-/* Views/ContentView.swift */
-"nav.providers" = "服务商";
+/* Views/SidebarNavigation.swift */
+"nav.provider_accounts" = "订阅账号";
+
+/* Views/SidebarNavigation.swift */
+"nav.api_providers" = "API 提供商";
 
 /* Views/ContentView.swift */
 "nav.proxy_management" = "Claude Code 代理";
