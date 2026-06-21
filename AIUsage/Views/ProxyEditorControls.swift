@@ -111,10 +111,12 @@ struct CapsuleSegmentOption<Value: Hashable>: Identifiable {
 }
 
 /// 药丸轨道 + 选中段实心填充的分段控件，替换 `.segmented` Picker 的二/三选一场景。
+/// 默认按内容收紧（不撑满整行）；`fillWidth = true` 时各段等宽铺满。
 struct CapsuleSegmentedPicker<Value: Hashable>: View {
     let options: [CapsuleSegmentOption<Value>]
     @Binding var selection: Value
     var tint: Color = .accentColor
+    var fillWidth: Bool = false
     var onChange: ((Value) -> Void)? = nil
 
     var body: some View {
@@ -126,6 +128,7 @@ struct CapsuleSegmentedPicker<Value: Hashable>: View {
         .padding(3)
         .background(Capsule().fill(Color.primary.opacity(0.06)))
         .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+        .fixedSize(horizontal: !fillWidth, vertical: false)
         .animation(.easeInOut(duration: 0.15), value: selection)
     }
 
@@ -140,7 +143,8 @@ struct CapsuleSegmentedPicker<Value: Hashable>: View {
                 .font(.caption.weight(isSelected ? .semibold : .medium))
                 .foregroundStyle(isSelected ? Color.white : Color.secondary)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, fillWidth ? 0 : 16)
+                .frame(maxWidth: fillWidth ? .infinity : nil)
                 .padding(.vertical, 6)
                 .background(Capsule().fill(isSelected ? tint : Color.clear))
                 .contentShape(Capsule())
