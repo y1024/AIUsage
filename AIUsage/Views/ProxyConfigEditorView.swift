@@ -124,7 +124,10 @@ struct ProxyConfigEditorView: View {
                     if tab == .json && selectedTab != .json {
                         syncToJSON()
                     }
-                    selectedTab = tab
+                    // 平滑过渡窗口宽度（JSON 双栏 1100 ↔ 表单 750），避免切换时骤变。
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        selectedTab = tab
+                    }
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: tab.icon)

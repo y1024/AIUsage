@@ -181,7 +181,10 @@ struct OpenCodeNodeEditorView: View {
         HStack(spacing: 2) {
             ForEach(OpenCodeEditorTab.allCases, id: \.self) { tab in
                 Button {
-                    selectedTab = tab
+                    // 平滑过渡窗口宽度（JSON 预览 1100 ↔ 设置 750），避免切换时骤变。
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        selectedTab = tab
+                    }
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: tab.icon)
