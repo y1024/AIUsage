@@ -383,6 +383,8 @@ struct CodexProxyEditorView: View {
         profile.metadata.proxy.modelMapping.middleModel.name = ""
         profile.metadata.proxy.modelMapping.smallModel.name = ""
         profile.metadata.proxy.defaultModel = model
+        profile.metadata.proxy.expectedClientKey = profile.metadata.proxy.expectedClientKey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         profile.metadata.proxy.syncSlotPricingFromLibrary()
         profile.syncEnvFromProxy()
         // 链接节点：与主配置比对，标记本次编辑产生的本地覆盖（未链接则清空）。

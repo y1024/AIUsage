@@ -725,6 +725,8 @@ struct ProxyConfigEditorView: View {
         } else {
             profile.syncEnvFromProxy()
         }
+        profile.metadata.proxy.expectedClientKey = profile.metadata.proxy.expectedClientKey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         profile.metadata.proxy.syncSlotPricingFromLibrary()
         // 链接节点：与主配置比对，标记本次编辑产生的本地覆盖（未链接则清空）。
         profile = APIProviderDistributor.shared.stampOverrides(profile)
