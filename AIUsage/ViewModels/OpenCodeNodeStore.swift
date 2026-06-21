@@ -85,8 +85,6 @@ final class OpenCodeNodeStore: ObservableObject {
         return nodes.first { $0.id == activeNodeId }
     }
 
-    var usesJSONC: Bool { configManager.usesJSONC }
-
     var configPath: String { configManager.configPath }
 
     // MARK: - CRUD

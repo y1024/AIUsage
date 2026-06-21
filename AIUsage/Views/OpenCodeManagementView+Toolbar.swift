@@ -9,23 +9,9 @@ import UniformTypeIdentifiers
 extension OpenCodeManagementView {
 
     // MARK: - Warning Banners
-    // 仅保留异常告警（JSONC 无法接管 / 代理进程故障）；常态信息不占版面，
+    // 仅保留异常告警（代理进程故障）；常态信息不占版面，
     // 与 Claude/Codex 页一致（接管状态由节点卡片的激活开关表达）。
-
-    @ViewBuilder
-    var statusBanner: some View {
-        if store.usesJSONC {
-            banner(
-                icon: "exclamationmark.triangle.fill",
-                tint: .orange,
-                title: L("opencode.jsonc detected", "检测到 opencode.jsonc"),
-                message: L(
-                    "AIUsage cannot safely rewrite JSONC (comments would be lost). Migrate it to opencode.json to enable node switching.",
-                    "AIUsage 无法安全改写 JSONC（注释会丢失）。请先迁移为 opencode.json 再使用节点切换。"
-                )
-            )
-        }
-    }
+    // 注: opencode.jsonc 现已支持接管（注释由备份保真还原），不再提示迁移。
 
     /// 运行时本会话接管（建立了 Instance）、但当前进程不在运行且不在启动/重启窗口内的节点
     /// = 真·故障，需横幅提示。以「运行时是否接管」为准而非持久配置：设置关闭未恢复时为空，

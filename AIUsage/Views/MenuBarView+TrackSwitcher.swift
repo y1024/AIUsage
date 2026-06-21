@@ -205,7 +205,7 @@ extension MenuBarView {
                 let isActive = openCodeStore.activeNodeId == node.id
                 return MenuBarTrackPanelRow(
                     id: node.id, name: node.displayName, isActive: isActive,
-                    isDisabled: openCodeStore.usesJSONC || !node.isComplete
+                    isDisabled: !node.isComplete
                 ) {
                     if isActive { try? openCodeStore.deactivate() }
                     else { Task { try? await openCodeStore.activate(node) } }

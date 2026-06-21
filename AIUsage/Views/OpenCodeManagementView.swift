@@ -45,7 +45,6 @@ struct OpenCodeManagementView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 16) {
-                        statusBanner
                         proxyErrorBanner
                         actionBar
                         OpenCodeOverviewStrip(store: store, statsStore: statsStore, proxyRuntime: proxyRuntime)
@@ -73,7 +72,7 @@ struct OpenCodeManagementView: View {
         .sheet(isPresented: $showConfigFileEditor) {
             LocalSettingsEditorView(
                 filePath: store.configPath,
-                displayTitle: "~/.config/opencode/opencode.json",
+                displayTitle: "~/.config/opencode/\((store.configPath as NSString).lastPathComponent)",
                 subtitle: L("Live configuration file for OpenCode", "OpenCode 当前生效的配置文件")
             )
         }
@@ -216,7 +215,7 @@ struct OpenCodeManagementView: View {
             isProxyOnlyRunning: store.proxyOnlyNodeIds.contains(node.id),
             isSelected: isSelected,
             isBusy: activationInProgress,
-            activationDisabled: store.usesJSONC || !node.isComplete,
+            activationDisabled: !node.isComplete,
             statsRequests: mergedRequests,
             statsCostUsd: mergedCost,
             lastRequestAt: mergedLastUsed,

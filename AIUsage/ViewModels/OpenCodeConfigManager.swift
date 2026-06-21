@@ -9,16 +9,18 @@ import os.log
 // provider id 按节点区分（node.managedProviderId）——opencode.db 的消息会携带它作为
 // providerID，Phase 1 统计据此把用量/费用归因到具体节点。
 //
-// 数据来源/写入目标: $XDG_CONFIG_HOME/opencode/opencode.json（默认 ~/.config/opencode/）
-// 工作方式: 结构化 JSON 读写。激活前把「干净原文」备份到 opencode.json.aiusage.bak
-//          （备份即真相源，重复激活幂等），还原即覆盖回原文。
-// 边界: 检测到 opencode.jsonc（含注释，无法保真重写）或 JSON 解析失败时拒绝接管。
+// 数据来源/写入目标: $XDG_CONFIG_HOME/opencode/opencode.json（默认 ~/.config/opencode/）；
+//          存在 opencode.jsonc 时优先接管它（OpenCode 实际读取的文件）。
+// 工作方式: 结构化 JSON 读写。激活前把「干净原文逐字备份」到 <配置>.aiusage.bak
+//          （备份即真相源，重复激活幂等），还原即整文覆盖回原文。
+// JSONC: 接管 opencode.jsonc 时——逐字备份原文（注释保真）→ 去注释/尾随逗号解析（JSONCSanitizer）
+//        → 注入受管块后以无注释 JSON 写回（OpenCode 仍能解析）；停用时从备份完整还原（注释回来）。
+//        即接管期间注释临时不可见，停用后恢复。仅 JSON 解析彻底失败时拒绝接管。
 // 安全: 写入的配置含 API Key，落盘后恢复 0600 权限。
 
 private let openCodeConfigLog = Logger(subsystem: "com.aiusage.desktop", category: "OpenCodeConfig")
 
 enum OpenCodeConfigError: LocalizedError {
-    case jsoncUnsupported
     case invalidJSON
     case nodeIncomplete
     case failedToWriteFile
@@ -26,15 +28,10 @@ enum OpenCodeConfigError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .jsoncUnsupported:
-            return AppSettings.shared.t(
-                "opencode.jsonc (with comments) is in use. AIUsage cannot rewrite it safely — please migrate it to opencode.json first.",
-                "检测到 opencode.jsonc（含注释），AIUsage 无法安全改写——请先将其迁移为 opencode.json。"
-            )
         case .invalidJSON:
             return AppSettings.shared.t(
-                "opencode.json could not be parsed as JSON, refusing to take over.",
-                "opencode.json 无法解析为 JSON，已拒绝接管。"
+                "The opencode config could not be parsed as JSON, refusing to take over.",
+                "opencode 配置无法解析为 JSON，已拒绝接管。"
             )
         case .nodeIncomplete:
             return AppSettings.shared.t(
@@ -76,7 +73,12 @@ final class OpenCodeConfigManager {
         return (home as NSString).appendingPathComponent(".config/opencode")
     }
 
+    /// OpenCode 实际读取并由本类接管的配置文件：存在 opencode.jsonc 时优先它，否则 opencode.json。
     var configPath: String {
+        usesJSONC ? jsoncPath : jsonPath
+    }
+
+    private var jsonPath: String {
         (configDirectory as NSString).appendingPathComponent("opencode.json")
     }
 
@@ -90,7 +92,7 @@ final class OpenCodeConfigManager {
 
     // MARK: - State
 
-    /// 用户使用 jsonc 配置时无法接管（无法保真重写注释）。
+    /// 用户使用 opencode.jsonc（带注释）作为配置文件。接管期间以无注释 JSON 改写，停用从备份还原注释。
     var usesJSONC: Bool {
         fileManager.fileExists(atPath: jsoncPath)
     }
@@ -115,35 +117,20 @@ final class OpenCodeConfigManager {
     /// - Parameter commonSettings: 通用配置片段（按节点合并策略由调用方决定传入与否）。
     ///   合并顺序：用户原文 ← 通用配置 ← 受管块（受管键始终最终生效）。
     func activate(node: OpenCodeNode, baseURLOverride: String? = nil, commonSettings: [String: Any]? = nil) throws {
-        guard !usesJSONC else { throw OpenCodeConfigError.jsoncUnsupported }
         guard let defaultModel = node.effectiveDefaultModel, node.isComplete else {
             throw OpenCodeConfigError.nodeIncomplete
         }
 
-        // 备份即真相源：已有备份时原文以备份为准（重复激活/切换节点幂等，不把受管文件当原文）。
-        let pristine: [String: Any]
-        if hasBackup {
-            pristine = try readObject(atPath: backupPath) ?? [:]
-        } else if fileManager.fileExists(atPath: configPath) {
-            let current = try readConfigObjectIfExists() ?? [:]
-            // 防御：万一当前文件残留旧受管块，先剥离再作为原文备份。
-            let clean = stripManagedEntries(from: current)
-            try writeObject(clean, toPath: backupPath)
-            pristine = clean
-        } else {
-            pristine = [:]
-        }
-
-        // 防御性再剥离：备份理应是干净原文，但异常残留时也不会叠加多个受管块。
+        let pristine = try establishBackupAndLoadPristine()
         let root = injectManagedEntries(
-            into: mergedBase(pristine: stripManagedEntries(from: pristine), commonSettings: commonSettings),
+            into: mergedBase(pristine: pristine, commonSettings: commonSettings),
             node: node,
             defaultModel: defaultModel,
             baseURLOverride: baseURLOverride
         )
 
         try writeObject(root, toPath: configPath, restrictPermissions: true)
-        openCodeConfigLog.info("opencode.json managed provider injected (provider=\(node.managedProviderId, privacy: .public), models=\(node.models.count))")
+        openCodeConfigLog.info("opencode config managed provider injected (provider=\(node.managedProviderId, privacy: .public), models=\(node.models.count), jsonc=\(self.usesJSONC, privacy: .public))")
     }
 
     // MARK: - Global Unified Proxy Activation
@@ -159,23 +146,10 @@ final class OpenCodeConfigManager {
     /// - clientKey: 固定 client key（写入受管块 apiKey；代理据此鉴权）。
     /// - virtualModel: 固定虚拟模型名（CLI 永远发它，由代理改写为激活节点真实模型）。
     func activateGlobal(interface: OpenCodeProtocol, baseURL: String, clientKey: String, virtualModel: String) throws {
-        guard !usesJSONC else { throw OpenCodeConfigError.jsoncUnsupported }
         let model = virtualModel.nilIfBlank ?? "model"
 
         // 备份即真相源（与 per-node activate 同语义，幂等）。
-        let pristine: [String: Any]
-        if hasBackup {
-            pristine = try readObject(atPath: backupPath) ?? [:]
-        } else if fileManager.fileExists(atPath: configPath) {
-            let current = try readConfigObjectIfExists() ?? [:]
-            let clean = stripManagedEntries(from: current)
-            try writeObject(clean, toPath: backupPath)
-            pristine = clean
-        } else {
-            pristine = [:]
-        }
-
-        var root = stripManagedEntries(from: pristine)
+        var root = try establishBackupAndLoadPristine()
         if root["$schema"] == nil {
             root["$schema"] = "https://opencode.ai/config.json"
         }
@@ -190,7 +164,26 @@ final class OpenCodeConfigManager {
         root["model"] = "\(Self.globalProviderId)/\(model)"
 
         try writeObject(root, toPath: configPath, restrictPermissions: true)
-        openCodeConfigLog.info("opencode.json global proxy provider injected (interface=\(interface.rawValue, privacy: .public), model=\(model, privacy: .public))")
+        openCodeConfigLog.info("opencode config global proxy provider injected (interface=\(interface.rawValue, privacy: .public), model=\(model, privacy: .public), jsonc=\(self.usesJSONC, privacy: .public))")
+    }
+
+    /// 首次接管时建立「备份即真相源」并返回干净原文（已剥离受管块）。
+    /// - 已有备份：以备份为准（重复激活/切换节点幂等，不把受管文件当原文）。
+    /// - 首次接管且无残留受管块：逐字复制原文为备份，保真保留注释/格式（opencode.jsonc 还原必需）。
+    /// - 首次接管但残留旧受管块（异常）：剥离后写回作备份（此罕见路径不保真注释，可接受）。
+    private func establishBackupAndLoadPristine() throws -> [String: Any] {
+        if hasBackup {
+            return stripManagedEntries(from: try readObject(atPath: backupPath) ?? [:])
+        }
+        guard fileManager.fileExists(atPath: configPath) else { return [:] }
+        let current = try readObject(atPath: configPath) ?? [:]
+        let clean = stripManagedEntries(from: current)
+        if managedKeysPresent(in: current) {
+            try writeObject(clean, toPath: backupPath)
+        } else {
+            try copyFileVerbatim(from: configPath, to: backupPath)
+        }
+        return clean
     }
 
     /// 用户原文 + 通用配置片段的深合并（通用片段优先，剥离其中可能误带的受管键）。
@@ -400,6 +393,19 @@ final class OpenCodeConfigManager {
         return result
     }
 
+    /// 配置是否已含本应用注入的受管条目（受管 provider 键或指向它的顶层 model）。
+    private func managedKeysPresent(in root: [String: Any]) -> Bool {
+        if let provider = root["provider"] as? [String: Any],
+           provider.keys.contains(where: Self.isManagedProviderKey) {
+            return true
+        }
+        if let model = root["model"] as? String,
+           let modelProvider = model.split(separator: "/", maxSplits: 1).first {
+            return Self.isManagedProviderKey(String(modelProvider))
+        }
+        return false
+    }
+
     // MARK: - File IO
 
     /// 读取 opencode.json 为字典；文件不存在返回 nil，存在但非合法 JSON 对象时抛错。
@@ -412,10 +418,29 @@ final class OpenCodeConfigManager {
         guard let data = fileManager.contents(atPath: path) else {
             throw OpenCodeConfigError.invalidJSON
         }
-        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+        if let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            return root
+        }
+        // JSONC 回退：去注释/尾随逗号后再解析（opencode.jsonc 及其逐字备份走这里）。
+        let sanitized = JSONCSanitizer.sanitize(String(decoding: data, as: UTF8.self))
+        guard let sanitizedData = sanitized.data(using: .utf8),
+              let root = (try? JSONSerialization.jsonObject(with: sanitizedData)) as? [String: Any] else {
             throw OpenCodeConfigError.invalidJSON
         }
         return root
+    }
+
+    /// 逐字复制文件（保真保留注释/格式），用于把 opencode.jsonc 原文备份为「真相源」。
+    private func copyFileVerbatim(from source: String, to destination: String) throws {
+        let dir = (destination as NSString).deletingLastPathComponent
+        do {
+            try fileManager.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            let data = try Data(contentsOf: URL(fileURLWithPath: source))
+            try data.write(to: URL(fileURLWithPath: destination), options: .atomic)
+        } catch {
+            openCodeConfigLog.error("Failed to back up \((source as NSString).lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            throw OpenCodeConfigError.failedToWriteFile
+        }
     }
 
     private func writeObject(_ object: [String: Any], toPath path: String, restrictPermissions: Bool = false) throws {
