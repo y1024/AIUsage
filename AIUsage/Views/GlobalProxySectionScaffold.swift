@@ -27,17 +27,18 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
         VStack(alignment: .leading, spacing: 12) {
             header
             statusLine
-            if hasNodes {
-                if isEnabled {
-                    runningSummaryBlock
-                } else {
-                    configBlock
-                }
+            if isEnabled {
+                runningSummaryBlock
             } else {
-                Text(emptyHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                // 停用态始终显示配置区（含接口选择器）：即使当前接口下没有节点，也必须能切换接口，
+                // 否则会卡死在「无节点接口」上再也切不回去。无节点时在配置区上方给出提示。
+                if !hasNodes {
+                    Text(emptyHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                configBlock
             }
             if let errorText {
                 Text(errorText)
@@ -85,7 +86,8 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
             Toggle("", isOn: toggle)
                 .labelsHidden()
                 .toggleStyle(ProxyActivationToggleStyle(brandColor: brand, isBusy: isBusy))
-                .disabled(!hasNodes || isBusy)
+                // 仅在「无节点且当前未启用」时禁止开启；已启用时永远允许关闭，避免卡死无法停用。
+                .disabled((!hasNodes && !isEnabled) || isBusy)
         }
     }
 
