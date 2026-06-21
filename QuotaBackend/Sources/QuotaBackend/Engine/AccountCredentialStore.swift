@@ -34,7 +34,8 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
     // Ad-hoc signed builds can't satisfy the Data Protection Keychain's
     // entitlement requirement, so DP writes always fail with -34018. Cache that
-    // state to avoid repeat warnings. All access goes through `lock`.
+    // state to avoid repeat warnings. All access goes through `lock` (except the
+    // one-time probe in `init`, which runs before the singleton is observable).
     private var dpKeychainUnavailable = false
     private func markDPKeychainUnavailableUnsafe(status: OSStatus) {
         guard !dpKeychainUnavailable else { return }
@@ -42,7 +43,29 @@ public final class AccountCredentialStore: @unchecked Sendable {
         credentialLog.info("Data Protection Keychain unavailable (OSStatus \(status)); using legacy keychain. Expected for ad-hoc signed builds.")
     }
 
-    private init() {}
+    private init() {
+        // Decide up front whether this build can use the Data Protection Keychain.
+        // DP access from a non-sandboxed macOS app requires a real
+        // `keychain-access-groups` entitlement embedded in the signature; ad-hoc /
+        // self-signed builds don't have it, so DP writes fail with -34018. Probing
+        // the live signature (instead of persisting a flag) keeps this in lockstep
+        // with the actual build: a future signed build that embeds the entitlement
+        // re-enables DP on its next launch with no stale state to clear.
+        if !Self.hasDataProtectionKeychainEntitlement() {
+            dpKeychainUnavailable = true
+        }
+    }
+
+    /// True when the running binary's signature embeds a non-empty
+    /// `keychain-access-groups` entitlement — the prerequisite for using the Data
+    /// Protection Keychain from a non-sandboxed macOS app.
+    private static func hasDataProtectionKeychainEntitlement() -> Bool {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil) else {
+            return false
+        }
+        return (value as? [String])?.isEmpty == false
+    }
 
     private struct CredentialIndex: Codable {
         let storageKeys: [String]
@@ -231,13 +254,23 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
         guard !migratedVault.isEmpty else { return migratedVault }
 
-        if !dpKeychainUnavailable {
-            migrateVaultToDataProtectionKeychainUnsafe()
+        // Persist the consolidated vault BEFORE removing any source item. The write
+        // targets the Data Protection Keychain when its entitlement is present and
+        // otherwise falls back to the legacy keychain, so a missing entitlement can
+        // never strand the only persisted copy (the previous code attempted a
+        // DP-only write and then deleted the per-credential items unconditionally —
+        // on ad-hoc/self-signed builds that meant losing every credential after the
+        // next launch). Deletes run strictly as post-success cleanup; if the write
+        // fails we keep the source items so a later launch can retry the migration.
+        do {
+            try saveCredentialVaultUnsafe(migratedVault)
+            for key in migratedVault.keys {
+                deleteCredentialStorageKeyUnsafe(key)
+            }
+            deleteLegacyCredentialIndexUnsafe()
+        } catch {
+            credentialLog.error("Credential migration deferred (vault write failed): \(error.localizedDescription, privacy: .public)")
         }
-        for key in migratedVault.keys {
-            deleteCredentialStorageKeyUnsafe(key)
-        }
-        deleteLegacyCredentialIndexUnsafe()
         return migratedVault
     }
 

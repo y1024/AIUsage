@@ -126,6 +126,9 @@ jobs:
         env:
           SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
           REQUIRE_SPARKLE_SIGNING: "1"
+          # Tag builds must be stable-certificate signed (issue #35); fail loudly
+          # rather than shipping an ad-hoc release that re-prompts users.
+          REQUIRE_STABLE_SIGNING: ${{ startsWith(github.ref, 'refs/tags/') && '1' || '0' }}
         run: |
           SPARKLE_TOOL="$(find build/DerivedData/SourcePackages/artifacts -name sign_update -path '*/bin/sign_update' | head -1)"
           export SPARKLE_SIGN_TOOL="${SPARKLE_TOOL}"

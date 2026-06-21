@@ -12,6 +12,12 @@ OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist}"
 INFO_PLIST_PATH="${INFO_PLIST_PATH:-$ROOT_DIR/AIUsage/Info.plist}"
 VERSION="${1:-${VERSION:-}}"
 REQUIRE_SPARKLE_SIGNING="${REQUIRE_SPARKLE_SIGNING:-0}"
+# When set (release/tag builds), a missing stable signing identity is a hard
+# error instead of silently falling back to ad-hoc. Ad-hoc signatures change
+# fingerprint every build, which voids the user's Keychain "Always Allow" grant
+# and re-prompts them on every update (issue #35). Local dev builds leave this
+# unset and may still ad-hoc sign.
+REQUIRE_STABLE_SIGNING="${REQUIRE_STABLE_SIGNING:-0}"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aiusage-release.XXXXXX")"
 
 cleanup() {
@@ -46,6 +52,18 @@ strip_bundle_detritus() {
   xattr -lr "$target" 2>/dev/null | rg "$attrs_pattern" >&2 || true
   return 1
 }
+
+# Fail fast before the (slow) build when a release/tag build lacks the stable
+# signing identity, so CI surfaces the misconfiguration immediately instead of
+# after a full xcodebuild + staging pass.
+if [[ "$REQUIRE_STABLE_SIGNING" == "1" && -z "${MACOS_SIGNING_IDENTITY:-}" ]]; then
+  echo "ERROR: REQUIRE_STABLE_SIGNING=1 but no MACOS_SIGNING_IDENTITY is set." >&2
+  echo "Release/tag builds must use the stable self-signed certificate so the" >&2
+  echo "Keychain 'Always Allow' grant survives updates (issue #35). Provide the" >&2
+  echo "MACOS_CERT_P12_BASE64 / MACOS_CERT_PASSWORD secrets, or run a local dev" >&2
+  echo "build without REQUIRE_STABLE_SIGNING to allow ad-hoc signing." >&2
+  exit 1
+fi
 
 echo "Building ${APP_NAME} ${VERSION}..."
 
