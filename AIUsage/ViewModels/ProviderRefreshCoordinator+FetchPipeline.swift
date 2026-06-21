@@ -16,9 +16,12 @@ extension ProviderRefreshCoordinator {
               result.summary != nil else {
             return .failure()
         }
-        // convert + localize 在后台执行器完成（nonisolated @concurrent），主线程只拿回结果。
+        // convert + localize 在后台执行器完成（Task.detached），主线程只拿回结果。
         let language = self.language
-        guard let converted = await localizedProviderResults(from: [result], language: language).first?.provider else {
+        let convertedBatch = await Task.detached { [self] in
+            localizedProviderResults(from: [result], language: language)
+        }.value
+        guard let converted = convertedBatch.first?.provider else {
             return .failure()
         }
         await accountStore.reconcileAccountRegistry(with: [converted])
@@ -117,8 +120,10 @@ extension ProviderRefreshCoordinator {
         let language = self.language
 
         if let results = await engine.fetchMultiAccountProvider(id: providerId) {
-            // convert + localize 在后台执行器完成（nonisolated async），主线程只拿回结果。
-            let convertedResults = await localizedProviderResults(from: results, language: language)
+            // convert + localize 在后台执行器完成（Task.detached），主线程只拿回结果。
+            let convertedResults = await Task.detached { [self] in
+                localizedProviderResults(from: results, language: language)
+            }.value
             let stabilizedResults = stabilizedBulkRefreshProviders(
                 convertedResults.map(\.provider),
                 preservingExistingFor: providerId
@@ -135,7 +140,9 @@ extension ProviderRefreshCoordinator {
             )
         } else if let result = await engine.fetchSingle(id: providerId),
                   result.summary != nil {
-            let convertedResults = await localizedProviderResults(from: [result], language: language)
+            let convertedResults = await Task.detached { [self] in
+                localizedProviderResults(from: [result], language: language)
+            }.value
             guard let converted = convertedResults.first?.provider else { return .failure() }
             await accountStore.reconcileAccountRegistry(with: [converted])
             replaceProviderEntries(for: providerId, with: visibleProviders(from: [converted]))
@@ -156,10 +163,10 @@ extension ProviderRefreshCoordinator {
             let results = try await APIService.shared.fetchProviderResults(providerId)
             // 主线程仅重组为 Sendable 元组（无正则），本地化在后台执行器完成。
             let language = self.language
-            let localizedProviders = await localizedProviderList(
-                results.map { (provider: $0.summary, ok: $0.ok) },
-                language: language
-            )
+            let remoteItems = results.map { (provider: $0.summary, ok: $0.ok) }
+            let localizedProviders = await Task.detached { [self] in
+                localizedProviderList(remoteItems, language: language)
+            }.value
             await accountStore.reconcileAccountRegistry(with: localizedProviders.map(\.provider))
             replaceProviderEntries(
                 for: providerId,
@@ -190,7 +197,10 @@ extension ProviderRefreshCoordinator {
 
         let snapshot = await engine.fetchAll(ids: selectedProviderIDList())
         // 整批 convert + localize（含 overview）在后台执行器完成，主线程只做赋值与 UI 协调。
-        let batch = await localizedDashboard(from: snapshot, language: language)
+        let language = self.language
+        let batch = await Task.detached { [self] in
+            localizedDashboard(from: snapshot, language: language)
+        }.value
         let localizedProviders = batch.providers
         let stabilizedProviders = stabilizedBulkRefreshProviders(localizedProviders.map(\.provider))
         await accountStore.reconcileAccountRegistry(with: stabilizedProviders)
@@ -211,11 +221,11 @@ extension ProviderRefreshCoordinator {
             let dashboard = try await APIService.shared.fetchDashboard(providerIds: selectedProviderIDList())
             // 主线程仅重组为 Sendable 元组（无正则）；providers + overview 本地化在后台执行器完成。
             let language = self.language
-            let batch = await localizedRemoteDashboard(
-                dashboard.providers.map { (provider: $0.summary, ok: $0.ok) },
-                overview: dashboard.overview,
-                language: language
-            )
+            let remoteItems = dashboard.providers.map { (provider: $0.summary, ok: $0.ok) }
+            let remoteOverview = dashboard.overview
+            let batch = await Task.detached { [self] in
+                localizedRemoteDashboard(remoteItems, overview: remoteOverview, language: language)
+            }.value
             let localizedProviders = batch.providers
             let stabilizedProviders = stabilizedBulkRefreshProviders(localizedProviders.map(\.provider))
             await accountStore.reconcileAccountRegistry(with: stabilizedProviders)

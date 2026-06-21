@@ -236,29 +236,28 @@ extension ProviderRefreshCoordinator {
     }
 
     // MARK: - Off-main batch convert + localize (issue #28 Fix B)
-    // 本工程启用了 SWIFT_APPROACHABLE_CONCURRENCY（含 NonisolatedNonsendingByDefault），
-    // 此时普通 `nonisolated async` 会跑在调用方执行器（从主线程 await 即留在主线程）。
-    // 必须显式用 `@concurrent` 强制切到全局并发执行器，才能把正则密集型的
-    // 转换 + 本地化批处理真正移出主线程，消除刷新期间的滑动卡顿。
-    // 入参 ProviderResult/DashboardSnapshot 与产物 ProviderData/DashboardOverview 均为 Sendable，
-    // 可安全跨线程回传；主线程只做最后的赋值与 UI 协调。
+    // 这些是纯函数（nonisolated 同步），把正则密集型的转换 + 本地化集中成一批；
+    // 调用方在 `Task.detached { ... }.value` 里执行它们，确保整批跑在全局执行器（后台线程）。
+    //
+    // 为什么用 Task.detached 而不是 @concurrent：CI 用 Xcode 16.4（Swift 6.0），不识别 `@concurrent`
+    // （Swift 6.2 才有）；本地用 Xcode 26（Swift 6.2，启用了 NonisolatedNonsendingByDefault，此时
+    // 普通 `nonisolated async` 会留在调用方主线程）。Task.detached 在两套工具链下都编译且都真正切后台，
+    // 是唯一跨版本一致的写法。入参/产物均为 Sendable，可安全跨线程回传；主线程只做赋值与 UI 协调。
 
-    @concurrent
     nonisolated func localizedProviderResults(
         from results: [QuotaBackend.ProviderResult],
         language: String
-    ) async -> [(provider: ProviderData, ok: Bool)] {
+    ) -> [(provider: ProviderData, ok: Bool)] {
         results.compactMap { result in
             guard let summary = result.summary else { return nil }
             return (localizeProviderData(convertSummary(summary), language: language), result.ok)
         }
     }
 
-    @concurrent
     nonisolated func localizedDashboard(
         from snapshot: QuotaBackend.DashboardSnapshot,
         language: String
-    ) async -> (providers: [(provider: ProviderData, ok: Bool)], overview: DashboardOverview) {
+    ) -> (providers: [(provider: ProviderData, ok: Bool)], overview: DashboardOverview) {
         let providers = snapshot.providers.compactMap { result -> (provider: ProviderData, ok: Bool)? in
             guard let summary = result.summary else { return nil }
             return (localizeProviderData(convertSummary(summary), language: language), result.ok)
@@ -267,23 +266,20 @@ extension ProviderRefreshCoordinator {
         return (providers, overview)
     }
 
-    // 远程模式：APIService 返回的已是 ProviderData / DashboardOverview（无需 convertSummary），
-    // 仅做本地化。同样用 @concurrent 切到后台执行器，主线程只拿结果。
+    // 远程模式：APIService 返回的已是 ProviderData / DashboardOverview（无需 convertSummary），仅做本地化。
 
-    @concurrent
     nonisolated func localizedProviderList(
         _ items: [(provider: ProviderData, ok: Bool)],
         language: String
-    ) async -> [(provider: ProviderData, ok: Bool)] {
+    ) -> [(provider: ProviderData, ok: Bool)] {
         items.map { (localizeProviderData($0.provider, language: language), $0.ok) }
     }
 
-    @concurrent
     nonisolated func localizedRemoteDashboard(
         _ items: [(provider: ProviderData, ok: Bool)],
         overview: DashboardOverview,
         language: String
-    ) async -> (providers: [(provider: ProviderData, ok: Bool)], overview: DashboardOverview) {
+    ) -> (providers: [(provider: ProviderData, ok: Bool)], overview: DashboardOverview) {
         let providers = items.map { (provider: localizeProviderData($0.provider, language: language), ok: $0.ok) }
         return (providers, localizeOverview(overview, language: language))
     }
