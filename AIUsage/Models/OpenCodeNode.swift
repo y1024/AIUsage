@@ -158,7 +158,7 @@ enum OpenCodeProtocol: String, Codable, CaseIterable {
         }
     }
 
-    /// 卡片徽章用短名（与 Claude/Codex 页「OpenAI Proxy / Anthropic Direct」措辞对齐）。
+    /// 卡片徽章用短名（与 Claude/Codex 页「接口类型 · 直连/代理」措辞对齐）。
     var badgeName: String {
         switch self {
         case .openAICompatible: return "OpenAI"

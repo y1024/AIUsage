@@ -225,9 +225,10 @@ struct OpenCodeNodeCard: View, Equatable {
     // MARK: - Protocol Badge
 
     private var protocolBadge: some View {
-        let label = node.proxyEnabled
-            ? "\(node.protocolType.badgeName) Proxy"
-            : "\(node.protocolType.badgeName) Direct"
+        let mode = node.proxyEnabled
+            ? AppSettings.shared.t("Proxy", "代理")
+            : AppSettings.shared.t("Direct", "直连")
+        let label = "\(node.protocolType.badgeName) · \(mode)"
         let icon = node.proxyEnabled ? "bolt.shield.fill" : "bolt.horizontal.fill"
 
         return HStack(spacing: 3) {

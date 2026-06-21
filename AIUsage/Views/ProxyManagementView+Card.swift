@@ -474,24 +474,21 @@ struct ConfigurationCardView: View, Equatable {
     // MARK: - Subviews
 
     private var nodeTypeBadge: some View {
-        let (label, icon, color): (String, String, Color) = {
+        let (icon, color): (String, Color) = {
             switch config.nodeType {
             case .anthropicDirect:
-                if config.usePassthroughProxy {
-                    return ("Anthropic Proxy", "bolt.shield.fill", Self.anthropicBrand)
-                }
-                return ("Anthropic Direct", "bolt.horizontal.fill", Self.anthropicBrand)
+                return (config.usePassthroughProxy ? "bolt.shield.fill" : "bolt.horizontal.fill", Self.anthropicBrand)
             case .openaiProxy:
-                return ("OpenAI Proxy", "arrow.triangle.swap", Self.openAIBrand)
+                return ("arrow.triangle.swap", Self.openAIBrand)
             case .codexProxy:
-                return ("Codex Proxy", "terminal.fill", Self.codexBrand)
+                return ("terminal.fill", Self.codexBrand)
             }
         }()
 
         return HStack(spacing: 3) {
             Image(systemName: icon)
                 .font(.system(size: 7, weight: .bold))
-            Text(label)
+            Text(config.nodeBadgeLabel)
         }
         .font(.system(size: 9, weight: .bold))
         .foregroundStyle(color)
@@ -533,7 +530,7 @@ struct ConfigurationCardView: View, Equatable {
                 }
             case .openaiProxy:
                 detailItem(label: L("Upstream", "上游"), value: config.normalizedUpstreamBaseURL)
-                detailItem(label: L("API Mode", "接口模式"), value: config.openAIUpstreamAPI == .chatCompletions ? "Chat Completions" : "Responses")
+                detailItem(label: L("Upstream API", "上游接口"), value: config.openAIUpstreamAPI == .chatCompletions ? "Chat Completions" : "Responses")
                 detailItem(
                     label: L("Model Mapping", "模型映射"),
                     value: "Opus\u{2192}\(config.modelMapping.bigModel.name), Sonnet\u{2192}\(config.modelMapping.middleModel.name), Haiku\u{2192}\(config.modelMapping.smallModel.name)"
@@ -545,7 +542,7 @@ struct ConfigurationCardView: View, Equatable {
                 detailItem(label: L("LAN Access", "局域网访问"), value: config.allowLAN ? L("Enabled", "已启用") : L("Disabled", "已禁用"))
             case .codexProxy:
                 detailItem(label: L("Upstream", "上游"), value: config.normalizedUpstreamBaseURL)
-                detailItem(label: L("API Mode", "接口模式"), value: "Responses")
+                detailItem(label: L("Upstream API", "上游接口"), value: "Responses")
                 if libraryModels.count <= 1 {
                     detailItem(label: L("Model", "模型"), value: config.codexModel.isEmpty ? "—" : config.codexModel)
                 }

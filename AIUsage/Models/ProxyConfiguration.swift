@@ -11,6 +11,34 @@ enum NodeType: String, Codable, CaseIterable {
 
     /// Codex 节点：把 OpenAI 兼容上游接入 Codex（写 ~/.codex/config.toml，本地起 QuotaServer）。
     var isCodex: Bool { self == .codexProxy }
+
+    /// 接口类型显示名：按上游协议族命名，统一去掉 Direct/Proxy 字样
+    /// （直连/代理的区别由「透明代理」开关与说明文字体现，不再混进名字）。
+    var interfaceTypeName: String {
+        switch self {
+        case .anthropicDirect: return "Anthropic"
+        case .openaiProxy: return AppSettings.shared.t("OpenAI Compatible", "OpenAI 兼容")
+        case .codexProxy: return "Codex"
+        }
+    }
+
+    /// 列表卡片徽章里的协议短名（比接口类型名更紧凑）。
+    var badgeProtocolName: String {
+        switch self {
+        case .anthropicDirect: return "Anthropic"
+        case .openaiProxy: return "OpenAI"
+        case .codexProxy: return "Codex"
+        }
+    }
+
+    /// 接口类型图标（编辑器卡片 / 列表徽章共用）。
+    var iconName: String {
+        switch self {
+        case .anthropicDirect: return "bolt.horizontal.fill"
+        case .openaiProxy: return "arrow.triangle.swap"
+        case .codexProxy: return "terminal.fill"
+        }
+    }
 }
 
 // MARK: - Node Family
@@ -317,6 +345,16 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         case .openaiProxy, .codexProxy:
             return "http://\(host):\(port)"
         }
+    }
+
+    /// 列表卡片徽章文案：协议短名 + 工作方式（直连/代理），措辞统一。
+    /// 仅 Anthropic 直连（未开透明代理）显示「直连」，其余皆为「代理」。
+    var nodeBadgeLabel: String {
+        let isDirect = nodeType == .anthropicDirect && !usePassthroughProxy
+        let mode = isDirect
+            ? AppSettings.shared.t("Direct", "直连")
+            : AppSettings.shared.t("Proxy", "代理")
+        return "\(nodeType.badgeProtocolName) · \(mode)"
     }
 
     var effectiveHTTPSPort: Int { httpsPort ?? (port + 1) }

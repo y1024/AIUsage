@@ -237,8 +237,8 @@ struct ProxyManagementView: View {
             Text(family.isCodex
                  ? L("Add a Codex proxy node to route Codex through an OpenAI-compatible upstream.",
                      "添加 Codex 代理节点，把 Codex 接入 OpenAI 兼容上游。")
-                 : L("Add Anthropic Direct or OpenAI Proxy nodes to manage Claude Code endpoints.",
-                     "添加 Anthropic 直连或 OpenAI 代理节点来管理 Claude Code 端点。"))
+                 : L("Add an Anthropic or OpenAI-compatible node to manage Claude Code endpoints.",
+                     "添加 Anthropic 或 OpenAI 兼容节点来管理 Claude Code 端点。"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
