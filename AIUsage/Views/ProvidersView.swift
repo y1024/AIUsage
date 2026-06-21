@@ -160,13 +160,13 @@ struct ProvidersView: View {
             .foregroundStyle(.secondary)
             .labelStyle(.titleAndIcon)
 
-            Picker("", selection: $selectedCategory) {
-                Text(L("Accounts", "账号")).tag(ProviderListCategory.accounts)
-                Text(L("API Providers", "API 提供商")).tag(ProviderListCategory.apiProviders)
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 172)
+            CapsuleSegmentedPicker(
+                options: [
+                    CapsuleSegmentOption(ProviderListCategory.accounts, title: L("Accounts", "账号")),
+                    CapsuleSegmentOption(ProviderListCategory.apiProviders, title: L("API Providers", "API 提供商"))
+                ],
+                selection: $selectedCategory
+            )
         }
         .padding(.leading, 10)
         .padding(.trailing, 6)
