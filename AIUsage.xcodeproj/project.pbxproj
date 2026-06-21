@@ -125,6 +125,7 @@
 		C1GC00052FA0000300B26789 /* LocalSettingsEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1GC00042FA0000300B26789 /* LocalSettingsEditorView.swift */; };
 		C1MB00022FB0000400B26789 /* MenuBarView+TrackSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */; };
 		C1MB00A22FB0000400B26789 /* MenuBarTrackPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00A12FB0000400B26789 /* MenuBarTrackPanel.swift */; };
+		C1PE00022FB0000500B26789 /* ProxyEditorControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PE00012FB0000500B26789 /* ProxyEditorControls.swift */; };
 		C1MB00042FB0000400B26789 /* MenuBarView+CostTracking.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00032FB0000400B26789 /* MenuBarView+CostTracking.swift */; };
 		C1MB00062FB0000400B26789 /* MenuBarAccountRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */; };
 		C1MB00082FB0000400B26789 /* MenuBarRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00072FB0000400B26789 /* MenuBarRows.swift */; };
@@ -289,6 +290,7 @@
 		C1GC00042FA0000300B26789 /* LocalSettingsEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalSettingsEditorView.swift; sourceTree = "<group>"; };
 		C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MenuBarView+TrackSwitcher.swift"; sourceTree = "<group>"; };
 		C1MB00A12FB0000400B26789 /* MenuBarTrackPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarTrackPanel.swift; sourceTree = "<group>"; };
+		C1PE00012FB0000500B26789 /* ProxyEditorControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyEditorControls.swift; sourceTree = "<group>"; };
 		C1MB00032FB0000400B26789 /* MenuBarView+CostTracking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MenuBarView+CostTracking.swift"; sourceTree = "<group>"; };
 		C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarAccountRow.swift; sourceTree = "<group>"; };
 		C1MB00072FB0000400B26789 /* MenuBarRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarRows.swift; sourceTree = "<group>"; };
@@ -491,6 +493,7 @@
 				5EFAD7482F87AC7100A15674 /* MenuBarView.swift */,
 				C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */,
 				C1MB00A12FB0000400B26789 /* MenuBarTrackPanel.swift */,
+				C1PE00012FB0000500B26789 /* ProxyEditorControls.swift */,
 				C1MB00032FB0000400B26789 /* MenuBarView+CostTracking.swift */,
 				C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */,
 				C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */,
@@ -727,6 +730,7 @@
 				5EFAD77B2F87AFE700A15674 /* MenuBarView.swift in Sources */,
 				C1MB00022FB0000400B26789 /* MenuBarView+TrackSwitcher.swift in Sources */,
 				C1MB00A22FB0000400B26789 /* MenuBarTrackPanel.swift in Sources */,
+				C1PE00022FB0000500B26789 /* ProxyEditorControls.swift in Sources */,
 				C1MB00042FB0000400B26789 /* MenuBarView+CostTracking.swift in Sources */,
 				C1OE00022FB0002000B26789 /* OpenCodeNode.swift in Sources */,
 				C1OE00042FB0002000B26789 /* OpenCodeConfigManager.swift in Sources */,

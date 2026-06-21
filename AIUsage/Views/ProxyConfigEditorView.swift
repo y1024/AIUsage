@@ -211,27 +211,31 @@ struct ProxyConfigEditorView: View {
 
     private var nodeTypeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(L("Node Type", "节点类型"))
+            Text(L("Interface Type", "接口类型"))
                 .font(.headline.weight(.bold))
 
-            Picker("", selection: $profile.metadata.nodeType) {
-                Label {
-                    Text("Anthropic Direct")
-                } icon: {
-                    Image(systemName: "bolt.horizontal.fill")
-                }
-                .tag(NodeType.anthropicDirect)
-
-                Label {
-                    Text("OpenAI Proxy")
-                } icon: {
-                    Image(systemName: "arrow.triangle.swap")
-                }
-                .tag(NodeType.openaiProxy)
-            }
-            .pickerStyle(.segmented)
-            .onChange(of: profile.metadata.nodeType) { _, newType in
-                if isNew {
+            SelectableCardPicker(
+                options: [
+                    SelectableCardOption(
+                        NodeType.anthropicDirect,
+                        title: NodeType.anthropicDirect.interfaceTypeName,
+                        subtitle: L("Connect to Anthropic or a compatible API.",
+                                    "连接 Anthropic 或兼容 API。"),
+                        systemImage: NodeType.anthropicDirect.iconName,
+                        tint: ProxyBrand.anthropic
+                    ),
+                    SelectableCardOption(
+                        NodeType.openaiProxy,
+                        title: NodeType.openaiProxy.interfaceTypeName,
+                        subtitle: L("Translate Claude API to OpenAI-compatible via a local proxy.",
+                                    "经本地代理把 Claude API 转为 OpenAI 兼容接口。"),
+                        systemImage: NodeType.openaiProxy.iconName,
+                        tint: ProxyBrand.openAI
+                    )
+                ],
+                selection: $profile.metadata.nodeType,
+                onChange: { newType in
+                    guard isNew else { return }
                     switch newType {
                     case .anthropicDirect:
                         profile.metadata.proxy.modelMapping = .anthropicDefault
@@ -245,15 +249,7 @@ struct ProxyConfigEditorView: View {
                     }
                     profile.syncEnvFromProxy()
                 }
-            }
-
-            Text(profile.metadata.nodeType == .anthropicDirect
-                 ? L("Connect directly to Anthropic or compatible API. No proxy process needed.",
-                     "直接连接 Anthropic 或兼容 API，无需代理进程。")
-                 : L("Translate Claude API to OpenAI-compatible API via local proxy.",
-                     "通过本地代理将 Claude API 转换为 OpenAI 兼容 API。"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            )
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
@@ -273,7 +269,7 @@ struct ProxyConfigEditorView: View {
                 TextField(
                     profile.metadata.nodeType == .anthropicDirect
                         ? L("e.g., Anthropic Official", "例如：Anthropic 官方")
-                        : L("e.g., OpenAI Proxy", "例如：OpenAI 代理"),
+                        : L("e.g., OpenAI Compatible", "例如：OpenAI 兼容"),
                     text: $profile.metadata.name
                 )
                 .textFieldStyle(.roundedBorder)
@@ -443,11 +439,14 @@ struct ProxyConfigEditorView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(L("Upstream API", "上游接口")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Picker("", selection: $profile.metadata.proxy.openAIUpstreamAPI) {
-                    Text("Chat Completions").tag(OpenAIUpstreamAPI.chatCompletions)
-                    Text("Responses").tag(OpenAIUpstreamAPI.responses)
-                }
-                .pickerStyle(.segmented)
+                CapsuleSegmentedPicker(
+                    options: [
+                        CapsuleSegmentOption(OpenAIUpstreamAPI.chatCompletions, title: "Chat Completions"),
+                        CapsuleSegmentOption(OpenAIUpstreamAPI.responses, title: "Responses")
+                    ],
+                    selection: $profile.metadata.proxy.openAIUpstreamAPI,
+                    tint: ProxyBrand.openAI
+                )
                 Text(L(
                     "Responses is recommended for new OpenAI integrations. Keep Chat Completions for older compatible providers that only implement /v1/chat/completions.",
                     "官方新的 OpenAI 集成更推荐 Responses；如果你的兼容服务仍只实现 /v1/chat/completions，请继续选择 Chat Completions。"

@@ -340,17 +340,20 @@ struct OpenCodeNodeEditorView: View {
             TextField(L("e.g. DeepSeek Official", "如：DeepSeek 官方"), text: $node.name)
                 .textFieldStyle(.roundedBorder)
 
-            fieldLabel(L("Protocol", "上游协议"), required: false)
-            Picker("", selection: $node.protocolType) {
-                ForEach(OpenCodeProtocol.allCases, id: \.self) { proto in
-                    Text(proto.displayName).tag(proto)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .onChange(of: node.protocolType) { _, _ in
-                connectivity = .idle
-            }
+            fieldLabel(L("Interface Type", "接口类型"), required: false)
+            SelectableCardPicker(
+                options: OpenCodeProtocol.allCases.map { proto in
+                    SelectableCardOption(
+                        proto,
+                        title: proto.displayName,
+                        subtitle: proto.requestPath,
+                        systemImage: Self.protocolIcon(proto),
+                        tint: Self.protocolTint(proto)
+                    )
+                },
+                selection: $node.protocolType,
+                onChange: { _ in connectivity = .idle }
+            )
 
             fieldLabel(L("Base URL", "Base URL"), required: true)
             TextField(baseURLPlaceholder, text: $node.baseURL)
@@ -375,6 +378,24 @@ struct OpenCodeNodeEditorView: View {
         case .openAICompatible: return "https://api.example.com/v1"
         case .anthropic: return "https://api.anthropic.com/v1"
         case .openAIResponses: return "https://api.openai.com/v1"
+        }
+    }
+
+    /// 接口类型卡片图标（与 Claude 编辑器同一套视觉语言）。
+    private static func protocolIcon(_ proto: OpenCodeProtocol) -> String {
+        switch proto {
+        case .openAICompatible: return "arrow.triangle.swap"
+        case .anthropic: return "bolt.horizontal.fill"
+        case .openAIResponses: return "arrow.up.forward.app.fill"
+        }
+    }
+
+    /// 接口类型卡片品牌色。
+    private static func protocolTint(_ proto: OpenCodeProtocol) -> Color {
+        switch proto {
+        case .openAICompatible: return ProxyBrand.openAI
+        case .anthropic: return ProxyBrand.anthropic
+        case .openAIResponses: return ProxyBrand.codex
         }
     }
 
