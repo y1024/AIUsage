@@ -510,17 +510,29 @@ public final class AccountCredentialStore: @unchecked Sendable {
         multiWorkspaceProviders.contains(providerId.lowercased())
     }
 
+    /// 规则#9：`resolvingSymlinksInPath()` 每次都做 lstat/realpath（文件系统往返）。
+    /// 该归一化在账号匹配的 O(n²) 循环里被反复调用，是数据刷新期间主线程的头号文件系统热点
+    /// （见 issue #28 Instruments profile）。auth 路径在一次会话内稳定、同路径恒等结果，故缓存复用。
+    /// NSCache 线程安全，可跨 actor/线程共享；缓存条目数受唯一路径数约束（极小）。
+    private static let normalizedAuthPathCache = NSCache<NSString, NSString>()
+
     /// Normalize an auth-file path for identity comparison.
     /// - Expands `~`, removes `//` / `.` / `..`, resolves symlinks so two credentials
     ///   pointing at the same underlying file dedupe.
     /// - Lowercased because macOS default FS (APFS) is case-insensitive; case-sensitive
     ///   volumes accept a false positive here but that is preferable to a missed merge.
     public static func normalizedAuthFilePath(_ rawPath: String) -> String {
+        let key = rawPath as NSString
+        if let cached = normalizedAuthPathCache.object(forKey: key) {
+            return cached as String
+        }
         let expanded = NSString(string: rawPath).expandingTildeInPath
         let url = URL(fileURLWithPath: expanded)
             .resolvingSymlinksInPath()
             .standardizedFileURL
-        return url.path.precomposedStringWithCanonicalMapping.lowercased()
+        let normalized = url.path.precomposedStringWithCanonicalMapping.lowercased()
+        normalizedAuthPathCache.setObject(normalized as NSString, forKey: key)
+        return normalized
     }
 
     private func credentialIdentityKey(_ credential: AccountCredential) -> String {

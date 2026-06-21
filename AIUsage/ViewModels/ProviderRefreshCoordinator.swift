@@ -234,7 +234,7 @@ final class ProviderRefreshCoordinator: ObservableObject {
             overview = localizeOverview(convertOverview(UsageNormalizer.createDashboardOverview(
                 summaries: [],
                 generatedAt: SharedFormatters.iso8601String(from: Date())
-            )))
+            )), language: language)
             isLoading = false
             hasCompletedInitialLoad = true
             return .emptySuccess()
@@ -293,7 +293,7 @@ final class ProviderRefreshCoordinator: ObservableObject {
             summary.accountLabel = accountLabel
         }
 
-        let providerData = localizeProviderData(convertSummary(summary))
+        let providerData = localizeProviderData(convertSummary(summary), language: language)
 
         // 用户首次连接时，旧的「未连接」占位（`not_logged_in` / `missing_token`）必须随凭证写入立刻清掉。
         // 否则 fetchSingleProvider 完成前 UI 会渲染「占位 ghost + 真卡片」两张，连接成功后看到「多出一张空卡」。

@@ -6,7 +6,8 @@ import UserNotifications
 extension ProviderRefreshCoordinator {
     // MARK: - QuotaBackend → ProviderData conversion
 
-    func convertSummary(_ s: QuotaBackend.ProviderSummary) -> ProviderData {
+    // nonisolated（模块默认 MainActor 隔离）：纯结构映射，可在后台批处理里调用以避免阻塞主线程（issue #28）。
+    nonisolated func convertSummary(_ s: QuotaBackend.ProviderSummary) -> ProviderData {
         func convertTimelinePoint(_ point: QuotaBackend.CostTimelinePoint) -> CostTimelinePoint {
             CostTimelinePoint(
                 bucket: point.bucket,
@@ -84,7 +85,7 @@ extension ProviderRefreshCoordinator {
         )
     }
 
-    func convertOverview(_ o: QuotaBackend.DashboardOverview) -> DashboardOverview {
+    nonisolated func convertOverview(_ o: QuotaBackend.DashboardOverview) -> DashboardOverview {
         DashboardOverview(
             generatedAt: o.generatedAt,
             activeProviders: o.activeProviders,
@@ -100,9 +101,11 @@ extension ProviderRefreshCoordinator {
         )
     }
 
-    var language: String { settings.language }
+    @MainActor var language: String { settings.language }
 
-    func localizeProviderData(_ provider: ProviderData) -> ProviderData {
+    // nonisolated + 显式 language：本地化是正则密集型纯变换，挪出主线程批处理（issue #28）。
+    // 模块默认 MainActor 隔离，故 nonisolated 上下文不能读 settings.language，语言一律由调用方在主线程取值后传入。
+    nonisolated func localizeProviderData(_ provider: ProviderData, language: String) -> ProviderData {
         guard language == "zh" else { return provider }
 
         return ProviderData(
@@ -111,62 +114,62 @@ extension ProviderRefreshCoordinator {
             accountId: provider.accountId,
             name: provider.name,
             label: provider.label,
-            description: localizedDynamicText(provider.description),
+            description: localizedDynamicText(provider.description, language),
             category: provider.category,
             channel: provider.channel,
             status: provider.status,
             statusLabel: provider.statusLabel,
             theme: provider.theme,
-            sourceLabel: localizedDynamicText(provider.sourceLabel),
+            sourceLabel: localizedDynamicText(provider.sourceLabel, language),
             sourceType: provider.sourceType,
             fetchedAt: provider.fetchedAt,
             accountLabel: provider.accountLabel,
             membershipLabel: provider.membershipLabel,
             workspaceLabel: provider.workspaceLabel,
             headline: Headline(
-                eyebrow: localizedDynamicText(provider.headline.eyebrow),
-                primary: localizedDynamicText(provider.headline.primary),
-                secondary: localizedDynamicText(provider.headline.secondary),
-                supporting: provider.headline.supporting.map(localizedDynamicText)
+                eyebrow: localizedDynamicText(provider.headline.eyebrow, language),
+                primary: localizedDynamicText(provider.headline.primary, language),
+                secondary: localizedDynamicText(provider.headline.secondary, language),
+                supporting: provider.headline.supporting.map { localizedDynamicText($0, language) }
             ),
             metrics: provider.metrics.map {
                 Metric(
-                    label: localizedDynamicText($0.label),
-                    value: localizedDynamicText($0.value),
-                    note: $0.note.map(localizedDynamicText)
+                    label: localizedDynamicText($0.label, language),
+                    value: localizedDynamicText($0.value, language),
+                    note: $0.note.map { localizedDynamicText($0, language) }
                 )
             },
             windows: provider.windows.map {
                 QuotaWindow(
-                    label: localizedDynamicText($0.label),
+                    label: localizedDynamicText($0.label, language),
                     remainingPercent: $0.remainingPercent,
                     usedPercent: $0.usedPercent,
-                    value: localizedDynamicText($0.value),
-                    note: localizedDynamicText($0.note),
+                    value: localizedDynamicText($0.value, language),
+                    note: localizedDynamicText($0.note, language),
                     resetAt: $0.resetAt
                 )
             },
             remainingPercent: provider.remainingPercent,
             nextResetAt: provider.nextResetAt,
             nextResetLabel: provider.nextResetLabel,
-            spotlight: provider.spotlight.map(localizedDynamicText),
+            spotlight: provider.spotlight.map { localizedDynamicText($0, language) },
             models: provider.models?.map {
                 ModelInfo(
                     label: $0.label,
-                    value: localizedDynamicText($0.value),
-                    note: $0.note.map(localizedDynamicText)
+                    value: localizedDynamicText($0.value, language),
+                    note: $0.note.map { localizedDynamicText($0, language) }
                 )
             },
             costSummary: provider.costSummary.map { summary in
                 CostSummary(
-                    today: summary.today.map(localizedCostPeriod),
-                    week: summary.week.map(localizedCostPeriod),
-                    month: summary.month.map(localizedCostPeriod),
-                    overall: summary.overall.map(localizedCostPeriod),
+                    today: summary.today.map { localizedCostPeriod($0, language: language) },
+                    week: summary.week.map { localizedCostPeriod($0, language: language) },
+                    month: summary.month.map { localizedCostPeriod($0, language: language) },
+                    overall: summary.overall.map { localizedCostPeriod($0, language: language) },
                     timeline: summary.timeline.map { timeline in
                         CostTimeline(
-                            hourly: timeline.hourly.map(localizedTimelinePoint),
-                            daily: timeline.daily.map(localizedTimelinePoint)
+                            hourly: timeline.hourly.map { localizedTimelinePoint($0, language: language) },
+                            daily: timeline.daily.map { localizedTimelinePoint($0, language: language) }
                         )
                     },
                     modelBreakdown: summary.modelBreakdown,
@@ -181,18 +184,18 @@ extension ProviderRefreshCoordinator {
         )
     }
 
-    func localizedCostPeriod(_ period: CostPeriod) -> CostPeriod {
+    nonisolated func localizedCostPeriod(_ period: CostPeriod, language: String) -> CostPeriod {
         CostPeriod(
             usd: period.usd,
             tokens: period.tokens,
-            rangeLabel: period.rangeLabel.map(localizedDynamicText)
+            rangeLabel: period.rangeLabel.map { localizedDynamicText($0, language) }
         )
     }
 
-    func localizedTimelinePoint(_ point: CostTimelinePoint) -> CostTimelinePoint {
+    nonisolated func localizedTimelinePoint(_ point: CostTimelinePoint, language: String) -> CostTimelinePoint {
         CostTimelinePoint(
             bucket: point.bucket,
-            label: localizedDynamicText(point.label),
+            label: localizedDynamicText(point.label, language),
             usd: point.usd,
             tokens: point.tokens,
             inputTokens: point.inputTokens,
@@ -202,7 +205,7 @@ extension ProviderRefreshCoordinator {
         )
     }
 
-    func localizeOverview(_ overview: DashboardOverview) -> DashboardOverview {
+    nonisolated func localizeOverview(_ overview: DashboardOverview, language: String) -> DashboardOverview {
         guard language == "zh" else { return overview }
 
         return DashboardOverview(
@@ -215,9 +218,9 @@ extension ProviderRefreshCoordinator {
             localWeekTokens: overview.localWeekTokens,
             stats: overview.stats.map {
                 OverviewStat(
-                    label: localizedDynamicText($0.label),
-                    value: localizedDynamicText($0.value),
-                    note: localizedDynamicText($0.note)
+                    label: localizedDynamicText($0.label, language),
+                    value: localizedDynamicText($0.value, language),
+                    note: localizedDynamicText($0.note, language)
                 )
             },
             alerts: overview.alerts.map {
@@ -225,17 +228,48 @@ extension ProviderRefreshCoordinator {
                     id: $0.id,
                     tone: $0.tone,
                     providerId: $0.providerId,
-                    title: localizedDynamicText($0.title),
-                    body: localizedDynamicText($0.body)
+                    title: localizedDynamicText($0.title, language),
+                    body: localizedDynamicText($0.body, language)
                 )
             }
         )
     }
 
-    func localizedDynamicText(_ text: String) -> String {
-        guard language == "zh", !text.isEmpty else { return text }
+    // MARK: - Off-main batch convert + localize (issue #28 Fix B)
+    // 本工程启用了 SWIFT_APPROACHABLE_CONCURRENCY（含 NonisolatedNonsendingByDefault），
+    // 此时普通 `nonisolated async` 会跑在调用方执行器（从主线程 await 即留在主线程）。
+    // 必须显式用 `@concurrent` 强制切到全局并发执行器，才能把正则密集型的
+    // 转换 + 本地化批处理真正移出主线程，消除刷新期间的滑动卡顿。
+    // 入参 ProviderResult/DashboardSnapshot 与产物 ProviderData/DashboardOverview 均为 Sendable，
+    // 可安全跨线程回传；主线程只做最后的赋值与 UI 协调。
 
-        let exact: [String: String] = [
+    @concurrent
+    nonisolated func localizedProviderResults(
+        from results: [QuotaBackend.ProviderResult],
+        language: String
+    ) async -> [(provider: ProviderData, ok: Bool)] {
+        results.compactMap { result in
+            guard let summary = result.summary else { return nil }
+            return (localizeProviderData(convertSummary(summary), language: language), result.ok)
+        }
+    }
+
+    @concurrent
+    nonisolated func localizedDashboard(
+        from snapshot: QuotaBackend.DashboardSnapshot,
+        language: String
+    ) async -> (providers: [(provider: ProviderData, ok: Bool)], overview: DashboardOverview) {
+        let providers = snapshot.providers.compactMap { result -> (provider: ProviderData, ok: Bool)? in
+            guard let summary = result.summary else { return nil }
+            return (localizeProviderData(convertSummary(summary), language: language), result.ok)
+        }
+        let overview = localizeOverview(convertOverview(snapshot.overview), language: language)
+        return (providers, overview)
+    }
+
+    // 规则#9：高成本对象（130+ 项字典、正则编译）只建一次复用，不在每次本地化里重建/重编译。
+    // 这是数据刷新期间主线程的头号 CPU 热点（见 issue #28 Instruments profile）。
+    private static let exactTranslations: [String: String] = [
             "Connected Sources": "监控服务",
             "Attention Queue": "状态提醒",
             "Tracked Local Cost": "费用追踪",
@@ -372,10 +406,11 @@ extension ProviderRefreshCoordinator {
             "Business": "商业",
             "Enterprise": "企业",
             "Edu": "教育"
-        ]
-        if let mapped = exact[text] {
-            return mapped
-        }
+    ]
+
+    nonisolated func localizedDynamicText(_ text: String, _ language: String) -> String {
+        guard language == "zh", !text.isEmpty else { return text }
+        if let mapped = Self.exactTranslations[text] { return mapped }
 
         var result = text
         result = replacingRegex(#"^Plan · (.+)$"#, in: result, template: "计划 · $1")
@@ -421,8 +456,20 @@ extension ProviderRefreshCoordinator {
         return result
     }
 
-    func replacingRegex(_ pattern: String, in text: String, template: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+    /// 模式恒为编译期字面量，编译一次即缓存复用（规则#9）。NSCache 线程安全，
+    /// NSRegularExpression 不可变且线程安全，可跨刷新/线程共享。
+    private static let regexCache = NSCache<NSString, NSRegularExpression>()
+
+    nonisolated func replacingRegex(_ pattern: String, in text: String, template: String) -> String {
+        let regex: NSRegularExpression
+        if let cached = Self.regexCache.object(forKey: pattern as NSString) {
+            regex = cached
+        } else if let compiled = try? NSRegularExpression(pattern: pattern) {
+            Self.regexCache.setObject(compiled, forKey: pattern as NSString)
+            regex = compiled
+        } else {
+            return text
+        }
         let range = NSRange(text.startIndex..., in: text)
         return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
     }

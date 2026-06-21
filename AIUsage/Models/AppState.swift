@@ -91,7 +91,9 @@ class AppState: ObservableObject {
     @Published var selectedProviderId: String?
     @Published var selectedSection: AppSection = .dashboard
     @Published var providerPickerMode: ProviderPickerMode?
-    @Published var selectedProviderIds: Set<String> = AppState.initialState.selectedProviderIds
+    @Published var selectedProviderIds: Set<String> = AppState.initialState.selectedProviderIds {
+        didSet { providerGroupsCacheDirty = true }
+    }
 
     @Published var readAlertIds: Set<String> = {
         let arr = UserDefaults.standard.stringArray(forKey: DefaultsKey.readAlertIds) ?? []
@@ -118,6 +120,14 @@ class AppState: ObservableObject {
     private var didRunStartupFlow = false
     private var mainWindowPresenter: ((AppSection) -> Void)?
 
+    // MARK: - providerAccountGroups memoization (issue #28)
+    // `providerAccountGroups` 是 O(账号×live) 的账号匹配+排序，原先每个视图 body 一读就全量重算，
+    // 是数据刷新撞上滑动时主线程的头号热点。改为「失效式记忆化」：任一输入源
+    // （selectedProviderIds / accountStore / settings / refreshCoordinator / activationManager）
+    // 变更即置脏，读取命中缓存直接返回。internal 以便同模块的 AppState+ProviderGrouping 扩展读写。
+    var cachedProviderAccountGroups: [ProviderAccountGroup]?
+    var providerGroupsCacheDirty = true
+
     private init() {
         settings.onRemoteSettingsChanged = { url in
             APIService.shared.updateBaseURL(url)
@@ -141,9 +151,11 @@ class AppState: ObservableObject {
         activationManager.detectActiveCodexAccount()
         activationManager.detectActiveGeminiAccount()
 
+        // 任一上游源变更都可能改变 providerAccountGroups 的输入，先置脏再转发 objectWillChange。
         activationManager.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
+                self?.providerGroupsCacheDirty = true
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
@@ -151,6 +163,7 @@ class AppState: ObservableObject {
         accountStore.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
+                self?.providerGroupsCacheDirty = true
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
@@ -158,6 +171,7 @@ class AppState: ObservableObject {
         settings.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
+                self?.providerGroupsCacheDirty = true
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
@@ -165,6 +179,7 @@ class AppState: ObservableObject {
         refreshCoordinator.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
+                self?.providerGroupsCacheDirty = true
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)

@@ -16,7 +16,7 @@ extension ProviderRefreshCoordinator {
               let summary = result.summary else {
             return .failure()
         }
-        let converted = localizeProviderData(convertSummary(summary))
+        let converted = localizeProviderData(convertSummary(summary), language: language)
         await accountStore.reconcileAccountRegistry(with: [converted])
 
         if let index = providers.firstIndex(where: { $0.id == converted.id }) {
@@ -110,12 +110,11 @@ extension ProviderRefreshCoordinator {
     func fetchSingleProviderLocal(_ providerId: String) async -> ProviderRefreshResult {
         let refreshedAt = Date()
         await syncUnifiedManagedAccounts(for: [providerId])
+        let language = self.language
 
         if let results = await engine.fetchMultiAccountProvider(id: providerId) {
-            let convertedResults = results.compactMap { result -> (provider: ProviderData, ok: Bool)? in
-                guard let summary = result.summary else { return nil }
-                return (localizeProviderData(convertSummary(summary)), result.ok)
-            }
+            // convert + localize 在后台执行器完成（nonisolated async），主线程只拿回结果。
+            let convertedResults = await localizedProviderResults(from: results, language: language)
             let stabilizedResults = stabilizedBulkRefreshProviders(
                 convertedResults.map(\.provider),
                 preservingExistingFor: providerId
@@ -131,8 +130,9 @@ extension ProviderRefreshCoordinator {
                 at: refreshedAt
             )
         } else if let result = await engine.fetchSingle(id: providerId),
-                  let summary = result.summary {
-            let converted = localizeProviderData(convertSummary(summary))
+                  result.summary != nil {
+            let convertedResults = await localizedProviderResults(from: [result], language: language)
+            guard let converted = convertedResults.first?.provider else { return .failure() }
             await accountStore.reconcileAccountRegistry(with: [converted])
             replaceProviderEntries(for: providerId, with: visibleProviders(from: [converted]))
             return .classified(
@@ -151,7 +151,7 @@ extension ProviderRefreshCoordinator {
         do {
             let results = try await APIService.shared.fetchProviderResults(providerId)
             let localizedProviders = results.map { result in
-                (provider: localizeProviderData(result.summary), ok: result.ok)
+                (provider: localizeProviderData(result.summary, language: language), ok: result.ok)
             }
             await accountStore.reconcileAccountRegistry(with: localizedProviders.map(\.provider))
             replaceProviderEntries(
@@ -182,14 +182,13 @@ extension ProviderRefreshCoordinator {
         await syncUnifiedManagedAccounts(for: selectedProviderIDList())
 
         let snapshot = await engine.fetchAll(ids: selectedProviderIDList())
-        let localizedProviders = snapshot.providers.compactMap { result -> (provider: ProviderData, ok: Bool)? in
-            guard let summary = result.summary else { return nil }
-            return (localizeProviderData(convertSummary(summary)), result.ok)
-        }
+        // 整批 convert + localize（含 overview）在后台执行器完成，主线程只做赋值与 UI 协调。
+        let batch = await localizedDashboard(from: snapshot, language: language)
+        let localizedProviders = batch.providers
         let stabilizedProviders = stabilizedBulkRefreshProviders(localizedProviders.map(\.provider))
         await accountStore.reconcileAccountRegistry(with: stabilizedProviders)
         providers = visibleProviders(from: stabilizedProviders)
-        overview = localizeOverview(convertOverview(snapshot.overview))
+        overview = batch.overview
         return .classified(
             totalResults: snapshot.providers.count,
             refreshedProviders: localizedProviders.filter(\.ok).map(\.provider),
@@ -204,12 +203,12 @@ extension ProviderRefreshCoordinator {
         do {
             let dashboard = try await APIService.shared.fetchDashboard(providerIds: selectedProviderIDList())
             let localizedProviders = dashboard.providers.map { wrapper in
-                (provider: localizeProviderData(wrapper.summary), ok: wrapper.ok)
+                (provider: localizeProviderData(wrapper.summary, language: language), ok: wrapper.ok)
             }
             let stabilizedProviders = stabilizedBulkRefreshProviders(localizedProviders.map(\.provider))
             await accountStore.reconcileAccountRegistry(with: stabilizedProviders)
             providers = visibleProviders(from: stabilizedProviders)
-            overview = localizeOverview(dashboard.overview)
+            overview = localizeOverview(dashboard.overview, language: language)
             return .classified(
                 totalResults: dashboard.providers.count,
                 refreshedProviders: localizedProviders.filter(\.ok).map(\.provider),

@@ -8,7 +8,21 @@ import QuotaBackend
 
 extension AppState {
 
+    /// 记忆化入口（issue #28）：命中未失效缓存直接返回，否则重算并缓存。
+    /// 失效由各输入源的 objectWillChange / selectedProviderIds.didSet 置 `providerGroupsCacheDirty`。
+    /// AppState 为引用类型，getter 内写缓存无需 mutating；缓存字段非 @Published，写入不触发渲染回环。
+    /// 全程主线程访问（视图 body 读取 + 上游 sink 在 RunLoop.main 置脏）。
     var providerAccountGroups: [ProviderAccountGroup] {
+        if !providerGroupsCacheDirty, let cached = cachedProviderAccountGroups {
+            return cached
+        }
+        let groups = computeProviderAccountGroups()
+        cachedProviderAccountGroups = groups
+        providerGroupsCacheDirty = false
+        return groups
+    }
+
+    private func computeProviderAccountGroups() -> [ProviderAccountGroup] {
         let liveProvidersById = Dictionary(grouping: providers, by: \.baseProviderId)
 
         return providerCatalog

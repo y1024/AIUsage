@@ -18,7 +18,7 @@ AIUsage/
 │   └── NodeProfile.swift         # File-based node profile (_metadata + full settings.json)
 ├── Services/
 │   ├── APIService.swift          # HTTP client for remote QuotaServer
-│   ├── SecureAccountVault.swift  # Keychain read/write for account metadata
+│   ├── SecureAccountVault.swift  # Account registry; folded into AccountCredentialStore's single keychain item (one-time migration)
 │   ├── SystemProxyDetector.swift # Detects macOS system proxy (Codex no_proxy fix)
 │   ├── CodexNoProxyFixer.swift   # Writes/removes managed no_proxy block in ~/.codex/.env
 │   ├── ProviderAuthManager.swift # Auth flow orchestration (slim router)
@@ -42,12 +42,16 @@ AIUsage/
 │   ├── NodeProfileStore.swift            # File-based profile CRUD (~/.config/aiusage/profiles/)
 │   └── ClaudeSettingsManager.swift       # ~/.claude/settings.json full write + backup/restore
 └── Views/
-    ├── ContentView.swift           # NavigationSplitView shell
+    ├── ContentView.swift           # NavigationSplitView shell; routes AppSection → detail view
+    ├── SidebarNavigation.swift     # Single source of truth for sidebar nav items (drives ContentView list + Settings visibility toggles)
     ├── DashboardView.swift         # Main dashboard
     ├── ProviderCard.swift          # Rich quota card UI
+    ├── ProvidersView.swift         # Subscriptions (.accounts) + API Providers (.apiProviders) — split of legacy "Providers"
+    ├── CallAnalyticsView.swift     # "Call Analytics" entry (proxy request inspection)
     ├── StatsHubView.swift          # "Usage Stats" entry (thin wrapper over ProxyStatsView)
     ├── ProxyManagementView.swift   # Proxy node list (family-filtered: .claude / .codex) + gesture drag-to-reorder
     ├── CodexProxyManagementView.swift # Codex proxy menu (wraps ProxyManagementView(family: .codex))
+    ├── OpenCodeManagementView.swift # OpenCode proxy menu (node list + opencode.json[c] takeover; JSONC via JSONCSanitizer)
     ├── CodexProxyEditorView.swift  # Codex node editor (single model)
     ├── SystemProxyWarningBanner.swift # System-proxy notice in Codex menu
     ├── ProxyStatsView.swift        # Proxy usage statistics (family-aware)
@@ -151,15 +155,50 @@ sequenceDiagram
     AS-->>UI: SwiftUI re-render
 ```
 
+## Main Navigation & Sidebar (v0.11+)
+
+The main window is a `NavigationSplitView` (`ContentView`) whose sidebar is driven by a single
+source of truth — `SidebarNavigation` (`Views/SidebarNavigation.swift`). That same model also feeds
+the **Settings → General** sidebar-visibility toggles, so item titles/icons/order never drift between
+the two places.
+
+**`AppSection`** (`Models/AppSettings.swift`) is the selected-section enum. The legacy single
+`providers` entry was split into two sections in v0.11; its old rawValue (`"providers"`) is retained
+**only** for migrating persisted state (hidden flags etc.) and is no longer a valid section.
+
+| Section (`AppSection`) | Sidebar title (EN / 中文) | Detail view | Pinned? |
+|------------------------|---------------------------|-------------|---------|
+| `.dashboard`            | Dashboard / 仪表盘          | `DashboardView` | ✅ always |
+| `.providerAccounts`     | Subscriptions / 订阅账号     | `ProvidersView(category: .accounts)` | hideable |
+| `.apiProviders`         | API Providers / API 提供商   | `ProvidersView(category: .apiProviders)` | hideable |
+| `.codexProxyManagement` | Codex Proxy / Codex 代理     | `CodexProxyManagementView` | hideable |
+| `.opencodeManagement`   | OpenCode Proxy / OpenCode 代理 | `OpenCodeManagementView` | hideable |
+| `.proxyManagement`      | Claude Code Proxy / Claude Code 代理 | `ProxyManagementView` | hideable |
+| `.costTracking`         | Usage Stats / 用量统计       | `StatsHubView` | hideable |
+| `.callAnalytics`        | Call Analytics / 调用分析    | `CallAnalyticsView` | hideable |
+| `.inbox`                | Inbox / 消息                | `InboxView` (unread badge) | hideable |
+| `.settings`             | Settings / 设置             | `SettingsView` | ✅ always |
+
+- **Grouping**: `SidebarNavigation.primary` (dashboard → call analytics) renders above a divider;
+  `SidebarNavigation.secondary` (inbox + settings) below it.
+- **Three independent proxy entries**: Claude Code / Codex / OpenCode each get their own sidebar item
+  (brand icon), matching the three independent proxy tracks (see Proxy Subsystem).
+- **User-hideable visibility**: every item except Dashboard and Settings (`isHideable == false`) can be
+  hidden via right-click → Hide or Settings → General. Hidden sections live in
+  `AppSettings.hiddenSidebarSections` (UserDefaults). Hiding the current section falls back to Dashboard.
+- The macOS **menu-bar** surface (`MenuBarView`, status item) is a separate entry point that reuses the
+  same `AppState` data and can deep-link back into these sections via `AppState.presentMainWindow(section:)`.
+
 ## Proxy Subsystem
 
 详细架构文档见 [PROXY_ARCHITECTURE.md](PROXY_ARCHITECTURE.md)。
 Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_AND_BILLING.md](USAGE_AND_BILLING.md)。
 
-两条相互独立、可同时激活的代理轨道（`ProxyViewModel` 用 `activatedConfigId` / `activatedCodexConfigId` 分别跟踪，互斥仅限同家族 `ProxyNodeFamily`）：
+三条相互独立、可同时激活的代理面（各有独立的侧边栏入口与激活状态）：
 
-- **Claude Code 轨道**（`.anthropicDirect` / `.openaiProxy`）：写 `~/.claude/settings.json`。
-- **Codex 轨道**（`.codexProxy`）：写 `~/.codex/config.toml`（`CodexConfigManager` 外科式合并），详见 PROXY_ARCHITECTURE.md「Codex 代理」章。
+- **Claude Code 轨道**（`.anthropicDirect` / `.openaiProxy`）：写 `~/.claude/settings.json`。由 `ProxyViewModel` 用 `activatedConfigId` 跟踪。
+- **Codex 轨道**（`.codexProxy`）：写 `~/.codex/config.toml`（`CodexConfigManager` 外科式合并），详见 PROXY_ARCHITECTURE.md「Codex 代理」章。由 `ProxyViewModel` 用 `activatedCodexConfigId` 跟踪。Claude/Codex 互斥仅限同家族 `ProxyNodeFamily`。
+- **OpenCode 轨道**：由 `OpenCodeNodeStore` + `OpenCodeConfigManager` 独立管理（不经 `ProxyViewModel`），接管 `~/.config/opencode/opencode.json[c]`；支持 JSONC（注释/尾随逗号经 `JSONCSanitizer` 容错解析，原文由逐字备份保真还原）。
 
 **Process lifecycle** (managed by `ProxyViewModel` + `ProxyRuntimeService`):
 
@@ -186,9 +225,8 @@ Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_A
 
 | Location | Content |
 |----------|---------|
-| **UserDefaults** | App preferences, selected providers, stats |
-| **Keychain** (`SecureAccountVault`) | Account registry metadata (emails, notes, IDs) |
-| **Keychain** (`AccountCredentialStore`) | Provider credentials (cookies, tokens, API keys) |
+| **UserDefaults** | App preferences, selected providers, hidden sidebar sections, stats |
+| **Keychain** (single item, owned by `AccountCredentialStore`) | Provider credentials (cookies, tokens, API keys) **plus** the account registry metadata (emails, notes, IDs) folded in as an auxiliary blob. Consolidated into one item in v0.12.1 so the app shows at most one "Always Allow" prompt; `SecureAccountVault` migrates its old standalone item once on first access. |
 | `~/.config/aiusage/profiles/*.json` | Node profile files (`_metadata` + full `settings.json` content) |
 | `~/.claude/settings.json` | Claude Code configuration (full replacement on activation) |
 | `~/.claude/settings.backup.json` | Backup of `settings.json` before activation |
@@ -197,6 +235,8 @@ Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_A
 | `~/.config/aiusage/usage-archive/proxy-usage-codex-v1.json` | Codex proxy daily usage archive; same frozen-cost semantics |
 | `~/.codex/config.toml` | Codex configuration; managed `model_provider=aiusage-proxy` block injected on activation (chmod 0600) |
 | `~/.codex/config.toml.aiusage.bak` | Backup of `config.toml` before injection (backup-as-source-of-truth; removed on restore) |
+| `~/.config/opencode/opencode.json` 或 `opencode.jsonc` | OpenCode configuration; managed provider entries injected on activation. `$XDG_CONFIG_HOME` 优先；存在 `.jsonc` 时优先接管 `.jsonc`（JSONC 经 `JSONCSanitizer` 容错解析） |
+| `~/.config/opencode/opencode.json[c].aiusage.bak` | Backup of the OpenCode config before takeover (verbatim copy preserves comments/formatting; restored on deactivation) |
 | `~/.codex/.env` | Managed `no_proxy` block (loopback only) written when a system proxy is detected; removed on deactivation |
 | `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/**/*.jsonl` | Codex non-proxy session logs (read-only token source for CodexCostProvider; overridable via `$CODEX_HOME`) |
 | `~/Library/Caches/AIUsage/codex-cost-file-cache-v*.json` | CodexCostFileScanCache — per-file scan results, keyed on size + mtime so reopened sessions skip re-parsing |
@@ -261,7 +301,7 @@ The `SettingsView` uses a **sidebar navigation + content area** two-column layou
 
 | Category | Content |
 |----------|---------|
-| **General** | Language, theme, display currency, launch at login, hide dock icon |
+| **General** | Language, theme, display currency, launch at login, hide dock icon, minimize to tray on close (#39), keep running in background, sidebar item visibility toggles |
 | **Data & Refresh** | Backend mode (local/remote), remote server config, provider/CC auto-refresh intervals |
 | **Menu Bar** | Quota account pinning, cost source pinning + per-source config |
 | **Card Appearance** | Quota card style (bar/ring/segments), progress meaning (remaining/used), preview |
