@@ -15,18 +15,15 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.12.4</string>
+	<string>0.12.5</string>
 	<key>CFBundleVersion</key>
-	<string>0.12.4</string>
+	<string>0.12.5</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSUIElement</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- 仅声明 NSAllowsArbitraryLoads：用户自填的上游可能是任意 http(s) 端点（自建/本地代理）。
-		     注意 macOS 10.12+ 上若同时声明 NSAllowsLocalNetworking 等细粒度 key，会反而让
-		     NSAllowsArbitraryLoads 被忽略并按 NO 处理，导致远程 http 被 ATS 拦截。 -->
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>

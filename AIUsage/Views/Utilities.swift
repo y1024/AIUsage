@@ -354,3 +354,35 @@ func preferredAccountIdentityLabel(_ candidates: [String?], excluding excluded: 
 func accountIdentityIcon(for _: String?) -> String {
     "person.crop.circle"
 }
+
+// MARK: - Quota Reset Formatting
+// 配额窗口（5h / 周 / 月度等）刷新倒计时的统一格式化与紧急度染色。
+// 数据来源: QuotaWindow.resetAt（ISO8601 字符串）。卡片视图与菜单栏共用，避免重复实现。
+
+enum QuotaResetFormatter {
+    /// 解析 resetAt（ISO8601），返回距 `now` 的剩余秒数（clamp >= 0）；无法解析返回 nil。
+    static func remainingSeconds(resetAt: String?, now: Date = Date()) -> Int? {
+        guard let resetAt, let date = SharedFormatters.parseISO8601(resetAt) else { return nil }
+        return max(0, Int(date.timeIntervalSince(now)))
+    }
+
+    /// 紧凑倒计时文本：`2d 3h` / `3h 20m` / `15m` / 即将刷新。无 resetAt 时返回 nil。
+    static func compactText(resetAt: String?, language: String, now: Date = Date()) -> String? {
+        guard let remaining = remainingSeconds(resetAt: resetAt, now: now) else { return nil }
+        if remaining == 0 { return language == "zh" ? "即将刷新" : "soon" }
+        let days = remaining / 86_400
+        let hours = (remaining % 86_400) / 3_600
+        let minutes = (remaining % 3_600) / 60
+        if days > 0 { return "\(days)d \(hours)h" }
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return "\(max(1, minutes))m"
+    }
+
+    /// 紧急度染色：<1h 红、<6h 橙，其余返回 `fallback`（默认次要色）。
+    static func highlightColor(resetAt: String?, fallback: Color = .secondary, now: Date = Date()) -> Color {
+        guard let remaining = remainingSeconds(resetAt: resetAt, now: now) else { return fallback }
+        if remaining < 3_600 { return .red }
+        if remaining < 21_600 { return .orange }
+        return fallback
+    }
+}

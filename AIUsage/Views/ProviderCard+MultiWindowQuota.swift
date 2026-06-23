@@ -161,29 +161,11 @@ struct MultiWindowBarRow: View {
     }
 
     private var compactResetText: String? {
-        guard let resetAt = window.resetAt,
-              let date = parseISO8601(resetAt) else { return nil }
-        let remaining = max(0, Int(date.timeIntervalSinceNow))
-        if remaining == 0 { return appState.language == "zh" ? "即将刷新" : "soon" }
-        let days = remaining / 86_400
-        let hours = (remaining % 86_400) / 3_600
-        let minutes = (remaining % 3_600) / 60
-        if days > 0 { return "\(days)d \(hours)h" }
-        if hours > 0 { return "\(hours)h \(minutes)m" }
-        return "\(max(1, minutes))m"
+        QuotaResetFormatter.compactText(resetAt: window.resetAt, language: appState.language)
     }
 
     private var resetHighlightColor: Color {
-        guard let resetAt = window.resetAt,
-              let date = parseISO8601(resetAt) else { return .secondary }
-        let remaining = Int(date.timeIntervalSinceNow)
-        if remaining < 3_600 { return .red }
-        if remaining < 21_600 { return .orange }
-        return .secondary
-    }
-
-    private func parseISO8601(_ value: String) -> Date? {
-        SharedFormatters.parseISO8601(value)
+        QuotaResetFormatter.highlightColor(resetAt: window.resetAt)
     }
 }
 
@@ -270,29 +252,11 @@ struct MultiWindowRingItem: View {
     }
 
     private var compactResetText: String? {
-        guard let resetAt = window.resetAt,
-              let date = parseISO8601(resetAt) else { return nil }
-        let remaining = max(0, Int(date.timeIntervalSinceNow))
-        if remaining == 0 { return appState.language == "zh" ? "即将刷新" : "soon" }
-        let days = remaining / 86_400
-        let hours = (remaining % 86_400) / 3_600
-        let minutes = (remaining % 3_600) / 60
-        if days > 0 { return "\(days)d \(hours)h" }
-        if hours > 0 { return "\(hours)h \(minutes)m" }
-        return "\(max(1, minutes))m"
+        QuotaResetFormatter.compactText(resetAt: window.resetAt, language: appState.language)
     }
 
     private var resetHighlightColor: Color {
-        guard let resetAt = window.resetAt,
-              let date = parseISO8601(resetAt) else { return .secondary }
-        let remaining = Int(date.timeIntervalSinceNow)
-        if remaining < 3_600 { return .red }
-        if remaining < 21_600 { return .orange }
-        return .secondary
-    }
-
-    private func parseISO8601(_ value: String) -> Date? {
-        SharedFormatters.parseISO8601(value)
+        QuotaResetFormatter.highlightColor(resetAt: window.resetAt)
     }
 }
 
@@ -379,29 +343,11 @@ struct MultiWindowSegmentsRow: View {
     }
 
     private var compactResetText: String? {
-        guard let resetAt = window.resetAt,
-              let date = parseISO8601(resetAt) else { return nil }
-        let remaining = max(0, Int(date.timeIntervalSinceNow))
-        if remaining == 0 { return appState.language == "zh" ? "即将刷新" : "soon" }
-        let days = remaining / 86_400
-        let hours = (remaining % 86_400) / 3_600
-        let minutes = (remaining % 3_600) / 60
-        if days > 0 { return "\(days)d \(hours)h" }
-        if hours > 0 { return "\(hours)h \(minutes)m" }
-        return "\(max(1, minutes))m"
+        QuotaResetFormatter.compactText(resetAt: window.resetAt, language: appState.language)
     }
 
     private var resetHighlightColor: Color {
-        guard let resetAt = window.resetAt,
-              let date = parseISO8601(resetAt) else { return .secondary }
-        let remaining = Int(date.timeIntervalSinceNow)
-        if remaining < 3_600 { return .red }
-        if remaining < 21_600 { return .orange }
-        return .secondary
-    }
-
-    private func parseISO8601(_ value: String) -> Date? {
-        SharedFormatters.parseISO8601(value)
+        QuotaResetFormatter.highlightColor(resetAt: window.resetAt)
     }
 
     private func segmentView(at index: Int, height: CGFloat) -> some View {
