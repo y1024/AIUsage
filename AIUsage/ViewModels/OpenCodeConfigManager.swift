@@ -1,5 +1,6 @@
 import Foundation
 import os.log
+import QuotaBackend
 
 // MARK: - OpenCode Config Manager
 // 管理 ~/.config/opencode/opencode.json：注入受管的 provider["aiusage-<节点>"] 块
@@ -11,11 +12,13 @@ import os.log
 //
 // 数据来源/写入目标: $XDG_CONFIG_HOME/opencode/opencode.json（默认 ~/.config/opencode/）；
 //          存在 opencode.jsonc 时优先接管它（OpenCode 实际读取的文件）。
-// 工作方式: 结构化 JSON 读写。激活前把「干净原文逐字备份」到 <配置>.aiusage.bak
-//          （备份即真相源，重复激活幂等），还原即整文覆盖回原文。
-// JSONC: 接管 opencode.jsonc 时——逐字备份原文（注释保真）→ 去注释/尾随逗号解析（JSONCSanitizer）
-//        → 注入受管块后以无注释 JSON 写回（OpenCode 仍能解析）；停用时从备份完整还原（注释回来）。
-//        即接管期间注释临时不可见，停用后恢复。仅 JSON 解析彻底失败时拒绝接管。
+// 工作方式: 激活前把「干净原文逐字备份」到 <配置>.aiusage.bak（备份即真相源，重复激活幂等），
+//          还原即整文覆盖回原文。
+// JSONC: 接管 opencode.jsonc 时——逐字备份原文 → 以备份原文为基底，用 JSONCEditor 做「保注释的
+//        结构化文本注入」（仅注入/替换 provider[受管键]、顶层 model、$schema），输出仍是带注释的
+//        合法 JSONC（OpenCode 能解析）。即接管期间用户注释也始终保留（issue #42）。
+//        JSONCEditor 解析失败或写后自校验不过时，回退为无注释结构化写回（保证语义正确）。
+//        停用时从备份完整还原。
 // 安全: 写入的配置含 API Key，落盘后恢复 0600 权限。
 
 private let openCodeConfigLog = Logger(subsystem: "com.aiusage.desktop", category: "OpenCodeConfig")
@@ -129,7 +132,7 @@ final class OpenCodeConfigManager {
             baseURLOverride: baseURLOverride
         )
 
-        try writeObject(root, toPath: configPath, restrictPermissions: true)
+        try writeManagedRoot(root)
         openCodeConfigLog.info("opencode config managed provider injected (provider=\(node.managedProviderId, privacy: .public), models=\(node.models.count), jsonc=\(self.usesJSONC, privacy: .public))")
     }
 
@@ -163,7 +166,7 @@ final class OpenCodeConfigManager {
         root["provider"] = provider
         root["model"] = "\(Self.globalProviderId)/\(model)"
 
-        try writeObject(root, toPath: configPath, restrictPermissions: true)
+        try writeManagedRoot(root)
         openCodeConfigLog.info("opencode config global proxy provider injected (interface=\(interface.rawValue, privacy: .public), model=\(model, privacy: .public), jsonc=\(self.usesJSONC, privacy: .public))")
     }
 
@@ -439,6 +442,33 @@ final class OpenCodeConfigManager {
             try data.write(to: URL(fileURLWithPath: destination), options: .atomic)
         } catch {
             openCodeConfigLog.error("Failed to back up \((source as NSString).lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            throw OpenCodeConfigError.failedToWriteFile
+        }
+    }
+
+    /// 写入受管配置：opencode.jsonc 时以「逐字备份原文」为基底做保注释的结构化文本注入
+    /// （issue #42——接管期间也保留用户注释）；JSONCEditor 解析失败/自校验不过，或非 JSONC 文件时，
+    /// 回退为无注释结构化写回（语义恒正确）。
+    private func writeManagedRoot(_ root: [String: Any]) throws {
+        if usesJSONC,
+           let baseText = try? String(contentsOfFile: backupPath, encoding: .utf8),
+           let patched = JSONCEditor.merge(baseText: baseText, target: root) {
+            try writeText(patched, toPath: configPath, restrictPermissions: true)
+            return
+        }
+        try writeObject(root, toPath: configPath, restrictPermissions: true)
+    }
+
+    private func writeText(_ text: String, toPath path: String, restrictPermissions: Bool = false) throws {
+        let dir = (path as NSString).deletingLastPathComponent
+        do {
+            try fileManager.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: URL(fileURLWithPath: path), options: .atomic)
+            if restrictPermissions {
+                applyRestrictivePermissions(toPath: path)
+            }
+        } catch {
+            openCodeConfigLog.error("Failed to write \((path as NSString).lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
             throw OpenCodeConfigError.failedToWriteFile
         }
     }

@@ -154,28 +154,48 @@ struct LocalSettingsEditorView: View {
             return
         }
         do {
-            let obj = try JSONSerialization.jsonObject(with: data)
-            guard obj is [String: Any] else {
-                jsonError = L("Root must be a JSON object", "根节点必须是 JSON 对象")
-                return
+            if let strict = try? JSONSerialization.jsonObject(with: data) {
+                // 纯 JSON：沿用「美化 + 排序」写盘（如 ~/.claude/settings.json）。
+                guard strict is [String: Any] else {
+                    jsonError = L("Root must be a JSON object", "根节点必须是 JSON 对象")
+                    return
+                }
+                let prettyData = try JSONSerialization.data(
+                    withJSONObject: strict,
+                    options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+                )
+                try persist(prettyData)
+            } else {
+                // JSONC（含注释/尾随逗号，如 opencode.jsonc）：校验可解析后原样写回，保留注释与排版。
+                let sanitized = JSONCSanitizer.sanitize(jsonText)
+                guard let sanitizedData = sanitized.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: sanitizedData),
+                      obj is [String: Any] else {
+                    jsonError = L("Root must be a JSON object", "根节点必须是 JSON 对象")
+                    return
+                }
+                try persist(data)
             }
-            let prettyData = try JSONSerialization.data(
-                withJSONObject: obj,
-                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-            )
-            let path = filePath
-            let dir = (path as NSString).deletingLastPathComponent
-            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-            try prettyData.write(to: URL(fileURLWithPath: path), options: .atomic)
-            jsonError = nil
-            hasUnsavedChanges = false
-            withAnimation(.easeInOut(duration: 0.25)) { showSaveSuccess = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                withAnimation(.easeOut(duration: 0.3)) { showSaveSuccess = false }
-            }
-            localSettingsLog.info("\((path as NSString).lastPathComponent, privacy: .public) saved via local editor")
+            markSaved()
         } catch {
             jsonError = error.localizedDescription
+        }
+    }
+
+    private func persist(_ data: Data) throws {
+        let path = filePath
+        let dir = (path as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        localSettingsLog.info("\((path as NSString).lastPathComponent, privacy: .public) saved via local editor")
+    }
+
+    private func markSaved() {
+        jsonError = nil
+        hasUnsavedChanges = false
+        withAnimation(.easeInOut(duration: 0.25)) { showSaveSuccess = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation(.easeOut(duration: 0.3)) { showSaveSuccess = false }
         }
     }
 }
