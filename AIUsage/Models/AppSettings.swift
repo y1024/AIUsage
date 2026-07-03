@@ -15,6 +15,8 @@ enum AppSection: String, Hashable {
     case proxyManagement
     case codexProxyManagement
     case opencodeManagement
+    /// Claude Science 代理：免订阅启动 Science（隔离沙箱 + 本地虚拟登录），推理走第三方模型。
+    case scienceProxyManagement
     case inbox
     case settings
 

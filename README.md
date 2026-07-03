@@ -8,7 +8,7 @@
 
 <p align="center">
   Track quotas, costs, and accounts across 10+ AI providers.<br>
-  Built-in proxies for Claude Code, Codex and OpenCode — any OpenAI-compatible model.
+  Built-in proxies for Claude Code, Codex, OpenCode and Claude Science — any OpenAI-compatible model.
 </p>
 
 <p align="center">
@@ -60,6 +60,7 @@
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
 | **Codex Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
 | **OpenCode Proxy** | Switch OpenCode across upstreams via a managed `opencode.json` block — OpenAI-compatible, Anthropic and Responses protocols, per-node usage attribution, per-model pricing and optional request logging |
+| **Claude Science Proxy** | Launch local Claude Science without a Claude subscription and route its inference to any third-party model; local virtual login and an isolated sandbox, with optional adoption so the double-clicked desktop app is login-free too — never touching your real credentials |
 | **Global Proxy** | One fixed local endpoint per agent — hot-swap the active upstream node with zero CLI restart, per-node cost attribution, and automatic cross-track port arbitration |
 | **Unified API Providers** | Configure one upstream (Base URL, format, key, model library/pricing) once and distribute it to Codex / Claude / OpenCode at once; linked nodes inherit from the master and sync on change, with per-field local overrides |
 | **Call Analytics** | Count MCP / Skill / tool calls across Claude Code, Codex & OpenCode from local session logs — Top-N rankings, daily trend, and per-app zero-call ("zombie" skill/MCP) detection; read-only, zero instrumentation |
@@ -115,7 +116,7 @@ Download `.dmg` or `.zip` from the [Releases](https://github.com/sylearn/AIUsage
 
 ## Proxies
 
-AIUsage ships three independent proxies — for **Claude Code**, **Codex (Codex CLI)** and **OpenCode** — each with node management, usage logging and a unified switcher.
+AIUsage ships four independent proxies — for **Claude Code**, **Codex (Codex CLI)**, **OpenCode** and **Claude Science** — each with node management, usage logging and a unified switcher.
 
 ### Claude Code Proxy
 
@@ -154,6 +155,20 @@ Switch OpenCode between any number of upstreams without hand-editing `opencode.j
 | **cc-switch sync** | One-click import of OpenCode providers from local cc-switch (upstream / models / key / pricing), deterministic-id dedup, configurable cc-switch directory |
 
 **Quick start:** Open AIUsage → OpenCode Proxy → New Node → Configure models & pricing → Activate. `~/.config/opencode/opencode.json` is taken over automatically (requires OpenCode ≥ 1.2 for usage tracking).
+
+### Claude Science Proxy
+
+Launch a local [Claude Science](https://claude.com) instance without a Claude subscription, and route its inference to a third-party model of your choice through the local proxy — while keeping tool calls, Skills, MCP and code execution intact. For personal study and research only; use at your own risk.
+
+| Capability | What it does |
+|------------|-------------|
+| **Local virtual login** | Forges a self-made virtual OAuth credential in an isolated data-dir to pass the login gate — zero Anthropic contact, never touching your real `~/.claude-science` |
+| **Inference via third-party** | Points `ANTHROPIC_BASE_URL` at the reused local `QuotaServer`, strips inbound OAuth, injects your third-party key, and maps opus/sonnet/haiku tiers to the node's real models |
+| **Isolated sandbox** | Separate HOME / port (14410) / data-dir / keychain, zero impact on the real instance; one click opens the logged-in page in your browser |
+| **Adopt the real instance (optional)** | An 8765 reverse proxy plus a decoupled internal daemon (14411) makes the **double-clicked desktop app login-free too**; only the runtime `operon.lock` is rewritten, real credentials are never touched |
+| **Shared node pool** | Reuses the Claude-family nodes from the Claude Code proxy; hot-swap the upstream at runtime, transparent to Science |
+
+**Quick start:** Prepare an upstream node on the Claude Code proxy page first → Open AIUsage → Claude Science Proxy → pick a node → One-click start; your browser opens the logged-in Science automatically. See [docs/CLAUDE_SCIENCE_INTEGRATION.md](docs/CLAUDE_SCIENCE_INTEGRATION.md) for the technical design.
 
 ### Global Proxy
 

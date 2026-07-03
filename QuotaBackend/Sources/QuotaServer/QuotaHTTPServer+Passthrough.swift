@@ -82,6 +82,14 @@ extension QuotaHTTPServer {
                 httpLog.debug("Hoisted \(hoisted) system message(s) from messages[] to top-level system")
             }
 
+            // Claude Science 发的 `thinking.type` 是 "auto"，而 Anthropic 兼容上游
+            // （DeepSeek `/anthropic`、SuCloud 等）只认 enabled / disabled / adaptive，
+            // 收到 "auto" 直接 400。这里把非法值归一为 adaptive（语义最接近「模型自决」）。
+            if normalizeThinkingType(in: &json) {
+                bodyModified = true
+                httpLog.debug("Normalized thinking.type to a value the upstream accepts")
+            }
+
             if thinkingIsActive(in: json),
                let messages = json["messages"] as? [[String: Any]] {
                 let result = injectMissingThinkingBlocks(messages)
@@ -562,6 +570,22 @@ extension QuotaHTTPServer {
             return false
         }
         return type != "disabled"
+    }
+
+    /// Anthropic 兼容上游只接受 `thinking.type ∈ {enabled, disabled, adaptive}`。
+    /// Claude Science 会发 `"auto"`（或其它变体），直接透传会被上游判 400。
+    /// 这里把任何非法取值归一为 `adaptive`（语义 = 让模型自行决定是否思考）。
+    /// 返回是否发生了改写。
+    private func normalizeThinkingType(in json: inout [String: Any]) -> Bool {
+        guard var thinking = json["thinking"] as? [String: Any],
+              let type = thinking["type"] as? String else {
+            return false
+        }
+        let allowed: Set<String> = ["enabled", "disabled", "adaptive"]
+        guard !allowed.contains(type) else { return false }
+        thinking["type"] = "adaptive"
+        json["thinking"] = thinking
+        return true
     }
 
     /// DeepSeek (and compatible gateways like SuCloud) require every

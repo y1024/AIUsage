@@ -139,6 +139,9 @@ struct ContentView: View {
                 case .opencodeManagement:
                     OpenCodeManagementView()
                         .navigationTitle(L("OpenCode Proxy", "OpenCode 代理"))
+                case .scienceProxyManagement:
+                    ScienceProxyManagementView()
+                        .navigationTitle(L("Claude Science Proxy", "Claude Science 代理"))
                 case .inbox:
                     InboxView()
                         .navigationTitle(L("Inbox", "消息"))

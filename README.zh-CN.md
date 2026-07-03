@@ -8,7 +8,7 @@
 
 <p align="center">
   额度、费用、多账号、代理切换，尽在掌控。<br>
-  内置 Claude Code、Codex、OpenCode 三代理，接入任意 OpenAI 兼容模型。
+  内置 Claude Code、Codex、OpenCode、Claude Science 四代理，接入任意 OpenAI 兼容模型。
 </p>
 
 <p align="center">
@@ -60,6 +60,7 @@
 | **Claude Code 代理** | 用 Claude Code 跑 DeepSeek、GPT、Ollama 等任意 OpenAI 兼容模型；Anthropic 透传模式记录用量 |
 | **Codex 代理** | 把 Codex CLI 指向任意 OpenAI 兼容上游；订阅账号与 API 节点统一切换器，外科式合并 `config.toml` |
 | **OpenCode 代理** | 通过受管 `opencode.json` 块切换 OpenCode 上游——支持 OpenAI 兼容、Anthropic、Responses 三种协议，节点级用量归因、每模型定价、可选请求日志 |
+| **Claude Science 代理** | 免订阅启动本地 Claude Science，推理经代理走任意第三方模型；本地虚拟登录、独立沙箱，可选接管让双击桌面 app 也免登录，全程不碰真实凭证 |
 | **全局代理** | 每套代理一个固定本地入口——运行时热切换激活上游节点、CLI 零重启，按节点归因费用，跨轨端口自动仲裁 |
 | **统一 API 提供商** | 一份上游配置（Base URL、接口格式、Key、模型库/定价）配好一次，即可一键分发到 Codex / Claude / OpenCode；链接节点继承主配置并随其变更同步，支持逐字段局部覆盖 |
 | **调用分析** | 解析 Claude Code、Codex、OpenCode 的本地会话日志，统计 MCP / 技能 / 工具调用次数 —— Top-N 排行、每日趋势、按应用的零调用（「僵尸技能/MCP」）检测；只读、零埋点 |
@@ -115,7 +116,7 @@
 
 ## 代理
 
-AIUsage 内置三套相互独立的代理 —— 分别面向 **Claude Code**、**Codex（Codex CLI）** 与 **OpenCode**，各自支持节点管理、用量记录与统一切换器。
+AIUsage 内置四套相互独立的代理 —— 分别面向 **Claude Code**、**Codex（Codex CLI）**、**OpenCode** 与 **Claude Science**，各自支持节点管理、用量记录与统一切换器。
 
 ### Claude Code 代理
 
@@ -154,6 +155,20 @@ AIUsage 内置三套相互独立的代理 —— 分别面向 **Claude Code**、
 | **cc-switch 一键同步** | 从本地 cc-switch 一键导入 OpenCode 供应商（上游 / 模型 / Key / 定价），确定性 ID 去重，cc-switch 目录可配置 |
 
 **快速开始：** 打开 AIUsage → OpenCode 代理 → 新建节点 → 配置模型与定价 → 激活。`~/.config/opencode/opencode.json` 自动接管（用量统计需 OpenCode ≥ 1.2）。
+
+### Claude Science 代理
+
+免 Claude 订阅启动本地 [Claude Science](https://claude.com)，把它的推理经本地代理导向你自选的第三方模型，同时保留工具调用、Skill、MCP、代码执行等原生体验。仅供个人学习研究，使用者自负风险。
+
+| 能力 | 说明 |
+|------|------|
+| **本地虚拟登录** | 在独立 data-dir 写一份本地自造的虚拟 OAuth 凭证越过登录门，全程零 Anthropic 接触、不碰真实 `~/.claude-science` |
+| **推理走第三方** | 通过 `ANTHROPIC_BASE_URL` 把推理导向复用的本地 `QuotaServer`，剥离入站 OAuth、注入你的第三方 Key，按 opus/sonnet/haiku 档位映射到节点真实模型 |
+| **隔离沙箱** | 独立 HOME / 端口（14410）/ data-dir / 钥匙串，与真实实例零影响；浏览器一键打开已登录页 |
+| **接管真实实例（可选）** | 由 8765 反向代理 + 独立内部 daemon（14411）让**双击桌面 app 也免登录**；仅改写运行期 `operon.lock`，不触碰真实凭证 |
+| **复用节点池** | 与 Claude Code 代理共享 Claude 家族节点；运行时热切换上游，Science 无感 |
+
+**快速开始：** 先在 Claude Code 代理页备好一个上游节点 → 打开 AIUsage → Claude Science 代理 → 选择节点 → 一键开始，浏览器自动打开已登录的 Science。技术细节见 [docs/CLAUDE_SCIENCE_INTEGRATION.md](docs/CLAUDE_SCIENCE_INTEGRATION.md)。
 
 ### 全局代理
 

@@ -49,6 +49,7 @@ extension ProxyViewModel {
             await GlobalProxyManager.codex.restoreOnLaunch()
             await GlobalProxyManager.claude.restoreOnLaunch()
             await GlobalProxyManager.opencode.restoreOnLaunch()
+            await ScienceProxyManager.shared.restoreOnLaunch()
             await restoreActivatedNodeAsync()
             await restoreActivatedCodexNodeAsync()
             await restoreProxyOnlyNodes()

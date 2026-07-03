@@ -9,9 +9,11 @@
 /* Begin PBXBuildFile section */
 		16107C5456181DB224F92CB4 /* ProxyViewModel+UsageArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E3E7768D2A94C7B19550E40 /* ProxyViewModel+UsageArchive.swift */; };
 		1E871734213E6EFD191F8398 /* StatsDataAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D613C7828C6DACECB0171A7 /* StatsDataAdapter.swift */; };
+		1ED5CE49B33A74A1DF312F2A /* ScienceSandbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB3625A62FC18DD31DE20CB9 /* ScienceSandbox.swift */; };
 		209C10AAE060E83BB8399585 /* ProxyStatsView+Summary.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2D13F2156D366B8A69BC697 /* ProxyStatsView+Summary.swift */; };
 		3502209AABD60A3013084D55 /* UsageTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A12FE22E8E59EF630BA439 /* UsageTrack.swift */; };
-		A1AGNT012F92000000A15674 /* AgentVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGNT002F92000000A15674 /* AgentVisibility.swift */; };
+		3A1997F4B1B7ED7EF2E6A0F9 /* ScienceProxyManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87DC6FD8E42B87DB056A69CB /* ScienceProxyManagementView.swift */; };
+		5D72E0D8279FAF8A415EAFF2 /* ScienceProxyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82D41358A2C2078B7BFD2F91 /* ScienceProxyManager.swift */; };
 		5EF0C0D22F95000100A15674 /* ProviderCard+MultiWindowQuota.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF0C0D12F95000100A15674 /* ProviderCard+MultiWindowQuota.swift */; };
 		5EF0C0D42F95000100A15674 /* ProviderCard+QuotaIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF0C0D32F95000100A15674 /* ProviderCard+QuotaIndicator.swift */; };
 		5EF0C0D62F95000100A15674 /* ProviderCard+ResetCountdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF0C0D52F95000100A15674 /* ProviderCard+ResetCountdown.swift */; };
@@ -63,10 +65,15 @@
 		5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSNV002F99003300A15674 /* SidebarNavigation.swift */; };
 		5EFSSB012F99003400A15674 /* SettingsView+Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */; };
 		5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSTC002F99003200A15674 /* DashboardStateCards.swift */; };
+		7A3790A33E2F7B1157812AA1 /* ScienceRealAdopt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C8773DDEF6B585EC2A61FE2 /* ScienceRealAdopt.swift */; };
+		AB01SCAP01F92000000A15674 /* ScienceAuthProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01SCAP02F92000000A15674 /* ScienceAuthProxy.swift */; };
+		AB01SCAP03F92000000A15674 /* ScienceAuthProxy+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01SCAP04F92000000A15674 /* ScienceAuthProxy+Helpers.swift */; };
 		7EFAD0022F87AC7100A15674 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EFAD0012F87AC7100A15674 /* AppSettings.swift */; };
+		8307FB7ACC6E3DB155687D2A /* ScienceVirtualLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1605CC60CDCED105310339E /* ScienceVirtualLogin.swift */; };
 		A1ACCS022F92000000A15674 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1ACCS012F92000000A15674 /* AccountStore.swift */; };
 		A1ACCS122F92000000A15674 /* AccountStore+Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1ACCS112F92000000A15674 /* AccountStore+Persistence.swift */; };
 		A1ACCS142F92000000A15674 /* AccountStore+Matching.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1ACCS132F92000000A15674 /* AccountStore+Matching.swift */; };
+		A1AGNT012F92000000A15674 /* AgentVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1AGNT002F92000000A15674 /* AgentVisibility.swift */; };
 		A1APPST022F92000000A15674 /* AppState+ProviderGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1APPST012F92000000A15674 /* AppState+ProviderGrouping.swift */; };
 		A1B2C3D4E5F60001 /* QuotaBackend in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60002 /* QuotaBackend */; };
 		A2B3C4D22F96001000A15674 /* ClaudeSettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4D12F96001000A15674 /* ClaudeSettingsManager.swift */; };
@@ -88,21 +95,25 @@
 		A2B3C4F62F96001000A15674 /* SettingsView+Remote.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4F52F96001000A15674 /* SettingsView+Remote.swift */; };
 		A3F510012F97000100A15674 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A3F510042F97000100A15674 /* Localizable.strings */; };
 		B1198DC3EFC5DB2DFC043BD7 /* ProxyStatsView+Distribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A97BD3A13311949E62C066C /* ProxyStatsView+Distribution.swift */; };
-		B1BAT0012F98000100A15674 /* BatchAuthFileScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1BAT0002F98000100A15674 /* BatchAuthFileScanner.swift */; };
-		B1BAT0032F98000300A15674 /* BatchImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1BAT0022F98000300A15674 /* BatchImportView.swift */; };
-		B1C2D3E4F5A60001 /* StatusBarItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5A60002 /* StatusBarItemView.swift */; };
-		B1REFA012F97002000A15674 /* ProxyRuntimeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */; };
-		B1PA00012F97002000A15674 /* ProxyPortArbiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1PA00002F97002000A15674 /* ProxyPortArbiter.swift */; };
-		B1GP00012F97002000A15674 /* GlobalProxyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00002F97002000A15674 /* GlobalProxyConfig.swift */; };
-		B1GP00112F97002000A15674 /* GlobalProxyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00102F97002000A15674 /* GlobalProxyRuntime.swift */; };
-		B1GP00212F97002000A15674 /* GlobalProxyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00202F97002000A15674 /* GlobalProxyManager.swift */; };
-		B1GP00412F97002000A15674 /* GlobalProxyTrackAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */; };
 		B1AP00012FA1000100A15674 /* APIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00002FA1000100A15674 /* APIProvider.swift */; };
 		B1AP00112FA1000100A15674 /* APIProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00102FA1000100A15674 /* APIProviderStore.swift */; };
 		B1AP00212FA1000100A15674 /* APIProviderDistributor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00202FA1000100A15674 /* APIProviderDistributor.swift */; };
 		B1AP00312FA1000100A15674 /* APIProviderListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00302FA1000100A15674 /* APIProviderListView.swift */; };
 		B1AP00412FA1000100A15674 /* APIProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00402FA1000100A15674 /* APIProviderCard.swift */; };
 		B1AP00512FA1000100A15674 /* APIProviderEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00502FA1000100A15674 /* APIProviderEditorView.swift */; };
+		B1BAT0012F98000100A15674 /* BatchAuthFileScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1BAT0002F98000100A15674 /* BatchAuthFileScanner.swift */; };
+		B1BAT0032F98000300A15674 /* BatchImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1BAT0022F98000300A15674 /* BatchImportView.swift */; };
+		B1C2D3E4F5A60001 /* StatusBarItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5A60002 /* StatusBarItemView.swift */; };
+		B1GP00012F97002000A15674 /* GlobalProxyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00002F97002000A15674 /* GlobalProxyConfig.swift */; };
+		B1GP00112F97002000A15674 /* GlobalProxyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00102F97002000A15674 /* GlobalProxyRuntime.swift */; };
+		B1GP00212F97002000A15674 /* GlobalProxyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00202F97002000A15674 /* GlobalProxyManager.swift */; };
+		B1GP00312F97002000A15674 /* CodexGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */; };
+		B1GP00412F97002000A15674 /* GlobalProxyTrackAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */; };
+		B1GP00512F97002000A15674 /* ClaudeGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */; };
+		B1GP00712F97002000A15674 /* OpenCodeGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */; };
+		B1GP00812F97002000A15674 /* GlobalProxySectionScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00802F97002000A15674 /* GlobalProxySectionScaffold.swift */; };
+		B1PA00012F97002000A15674 /* ProxyPortArbiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1PA00002F97002000A15674 /* ProxyPortArbiter.swift */; };
+		B1REFA012F97002000A15674 /* ProxyRuntimeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */; };
 		B1REFB012F97002000A15674 /* ProviderRefreshResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */; };
 		B1TLS0012F97003000A15674 /* TLSCertificateManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */; };
 		B3943D26F03B43809C53419E /* ProxyStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */; };
@@ -110,26 +121,28 @@
 		C1AA000100000000000000B1 /* JSONWebEditorAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */; };
 		C1AA000200000000000000B2 /* ProxyConfigEditorView+JSONTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */; };
 		C1AA000300000000000000B3 /* ProxyModelLibraryEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AA000300000000000000A3 /* ProxyModelLibraryEditor.swift */; };
+		C1AV00012FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */; };
+		C1CA00022FCA005000B26789 /* CallAnalyticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */; };
+		C1CA00042FCA005000B26789 /* CallAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00032FCA005000B26789 /* CallAnalyticsView.swift */; };
+		C1CA00062FCA005000B26789 /* CallAnalyticsView+Rankings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00052FCA005000B26789 /* CallAnalyticsView+Rankings.swift */; };
+		C1CA00082FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00072FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift */; };
+		C1CA000A2FCA005000B26789 /* CallAnalyticsDerived.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00092FCA005000B26789 /* CallAnalyticsDerived.swift */; };
 		C1CG10012FB0001000B26789 /* CodexGlobalConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CG10002FB0001000B26789 /* CodexGlobalConfig.swift */; };
 		C1CX00012FB0000100B26789 /* CodexConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00002FB0000100B26789 /* CodexConfigManager.swift */; };
 		C1CX00032FB0000200B26789 /* CodexProxyManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */; };
-		B1GP00312F97002000A15674 /* CodexGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */; };
-		B1GP00512F97002000A15674 /* ClaudeGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */; };
-		B1GP00712F97002000A15674 /* OpenCodeGlobalProxySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */; };
-		B1GP00812F97002000A15674 /* GlobalProxySectionScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1GP00802F97002000A15674 /* GlobalProxySectionScaffold.swift */; };
 		C1CX00052FB0000300B26789 /* CodexProxyEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */; };
 		C1CX00072FB0000400B26789 /* StatsHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00062FB0000400B26789 /* StatsHubView.swift */; };
 		C1CX00092FB0000900B26789 /* CodexConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */; };
 		C1GC00012FA0000100B26789 /* GlobalConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1GC00002FA0000100B26789 /* GlobalConfig.swift */; };
 		C1GC00032FA0000200B26789 /* GlobalConfigSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1GC00022FA0000200B26789 /* GlobalConfigSection.swift */; };
 		C1GC00052FA0000300B26789 /* LocalSettingsEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1GC00042FA0000300B26789 /* LocalSettingsEditorView.swift */; };
+		C1JC00022FB0002000B26789 /* JSONCSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1JC00012FB0002000B26789 /* JSONCSanitizer.swift */; };
 		C1MB00022FB0000400B26789 /* MenuBarView+TrackSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */; };
-		C1MB00A22FB0000400B26789 /* MenuBarTrackPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00A12FB0000400B26789 /* MenuBarTrackPanel.swift */; };
-		C1PE00022FB0000500B26789 /* ProxyEditorControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PE00012FB0000500B26789 /* ProxyEditorControls.swift */; };
 		C1MB00042FB0000400B26789 /* MenuBarView+CostTracking.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00032FB0000400B26789 /* MenuBarView+CostTracking.swift */; };
 		C1MB00062FB0000400B26789 /* MenuBarAccountRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */; };
 		C1MB00082FB0000400B26789 /* MenuBarRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00072FB0000400B26789 /* MenuBarRows.swift */; };
 		C1MB000A2FB0000400B26789 /* MenuBarSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00092FB0000400B26789 /* MenuBarSupport.swift */; };
+		C1MB00A22FB0000400B26789 /* MenuBarTrackPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1MB00A12FB0000400B26789 /* MenuBarTrackPanel.swift */; };
 		C1NP00012F9C000100A15674 /* NodeProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00002F9C000100A15674 /* NodeProfile.swift */; };
 		C1NP00032F9C000200A15674 /* NodeProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00022F9C000200A15674 /* NodeProfileStore.swift */; };
 		C1NP00052F9C000300A15674 /* JSONRawEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00042F9C000300A15674 /* JSONRawEditorView.swift */; };
@@ -137,7 +150,6 @@
 		C1NP00092F9C000500A15674 /* ProfileExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1NP00082F9C000500A15674 /* ProfileExportView.swift */; };
 		C1OE00022FB0002000B26789 /* OpenCodeNode.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00012FB0002000B26789 /* OpenCodeNode.swift */; };
 		C1OE00042FB0002000B26789 /* OpenCodeConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00032FB0002000B26789 /* OpenCodeConfigManager.swift */; };
-		C1JC00022FB0002000B26789 /* JSONCSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1JC00012FB0002000B26789 /* JSONCSanitizer.swift */; };
 		C1OE00062FB0002000B26789 /* OpenCodeNodeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */; };
 		C1OE00082FB0002000B26789 /* OpenCodeManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */; };
 		C1OE000A2FB0002000B26789 /* OpenCodeNodeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */; };
@@ -145,19 +157,14 @@
 		C1OE000E2FB0002000B26789 /* OpenCodeProxyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */; };
 		C1OE00122FB0003000B26789 /* ModelSuggestionField.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */; };
 		C1OE00142FB0004000B26789 /* OpenCodeNodeStatsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */; };
-		C1CA00022FCA005000B26789 /* CallAnalyticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */; };
-		C1CA00042FCA005000B26789 /* CallAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00032FCA005000B26789 /* CallAnalyticsView.swift */; };
-		C1CA00062FCA005000B26789 /* CallAnalyticsView+Rankings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00052FCA005000B26789 /* CallAnalyticsView+Rankings.swift */; };
-		C1CA00082FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00072FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift */; };
-		C1CA000A2FCA005000B26789 /* CallAnalyticsDerived.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CA00092FCA005000B26789 /* CallAnalyticsDerived.swift */; };
 		C1OE00162FB0004000B26789 /* OpenCodeNodeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00152FB0004000B26789 /* OpenCodeNodeCard.swift */; };
 		C1OE00182FB0004000B26789 /* OpenCodeNodeStatsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */; };
-		C1AV00012FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */; };
 		C1OE001A2FB0004000B26789 /* OpenCodeConnectivityTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */; };
 		C1OE001C2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */; };
 		C1OE001E2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */; };
 		C1OE00222FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */; };
 		C1OE00242FB0007000B26789 /* CCSwitchLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */; };
+		C1PE00022FB0000500B26789 /* ProxyEditorControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PE00012FB0000500B26789 /* ProxyEditorControls.swift */; };
 		C1PM00022FB0000300B26789 /* ProxyManagementView+Toolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */; };
 		C1PM00042FB0000300B26789 /* ProxyManagementView+List.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00032FB0000300B26789 /* ProxyManagementView+List.swift */; };
 		C1PM00062FB0000300B26789 /* ProxyManagementView+Detail.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1PM00052FB0000300B26789 /* ProxyManagementView+Detail.swift */; };
@@ -172,7 +179,9 @@
 
 /* Begin PBXFileReference section */
 		00A12FE22E8E59EF630BA439 /* UsageTrack.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UsageTrack.swift; sourceTree = "<group>"; };
-		A1AGNT002F92000000A15674 /* AgentVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentVisibility.swift; sourceTree = "<group>"; };
+		1C8773DDEF6B585EC2A61FE2 /* ScienceRealAdopt.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceRealAdopt.swift; sourceTree = "<group>"; };
+		AB01SCAP02F92000000A15674 /* ScienceAuthProxy.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceAuthProxy.swift; sourceTree = "<group>"; };
+		AB01SCAP04F92000000A15674 /* ScienceAuthProxy+Helpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ScienceAuthProxy+Helpers.swift"; sourceTree = "<group>"; };
 		2A97BD3A13311949E62C066C /* ProxyStatsView+Distribution.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProxyStatsView+Distribution.swift"; sourceTree = "<group>"; };
 		2D613C7828C6DACECB0171A7 /* StatsDataAdapter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StatsDataAdapter.swift; sourceTree = "<group>"; };
 		5474125839BFE89230DB2B31 /* ProxyUsageArchive.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProxyUsageArchive.swift; sourceTree = "<group>"; };
@@ -231,10 +240,13 @@
 		5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Sidebar.swift"; sourceTree = "<group>"; };
 		5EFSTC002F99003200A15674 /* DashboardStateCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStateCards.swift; sourceTree = "<group>"; };
 		7EFAD0012F87AC7100A15674 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		82D41358A2C2078B7BFD2F91 /* ScienceProxyManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceProxyManager.swift; sourceTree = "<group>"; };
+		87DC6FD8E42B87DB056A69CB /* ScienceProxyManagementView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceProxyManagementView.swift; sourceTree = "<group>"; };
 		9E3E7768D2A94C7B19550E40 /* ProxyViewModel+UsageArchive.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProxyViewModel+UsageArchive.swift"; sourceTree = "<group>"; };
 		A1ACCS012F92000000A15674 /* AccountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStore.swift; sourceTree = "<group>"; };
 		A1ACCS112F92000000A15674 /* AccountStore+Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AccountStore+Persistence.swift"; sourceTree = "<group>"; };
 		A1ACCS132F92000000A15674 /* AccountStore+Matching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AccountStore+Matching.swift"; sourceTree = "<group>"; };
+		A1AGNT002F92000000A15674 /* AgentVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentVisibility.swift; sourceTree = "<group>"; };
 		A1APPST012F92000000A15674 /* AppState+ProviderGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+ProviderGrouping.swift"; sourceTree = "<group>"; };
 		A2B3C4D12F96001000A15674 /* ClaudeSettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeSettingsManager.swift; sourceTree = "<group>"; };
 		A2B3C4D32F96001000A15674 /* ProxyViewModel+LogManagement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyViewModel+LogManagement.swift"; sourceTree = "<group>"; };
@@ -255,46 +267,52 @@
 		A2B3C4F52F96001000A15674 /* SettingsView+Remote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Remote.swift"; sourceTree = "<group>"; };
 		A3F510022F97000100A15674 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		A3F510032F97000100A15674 /* zh_CN */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = zh_CN; path = zh_CN.lproj/Localizable.strings; sourceTree = "<group>"; };
-		B1BAT0002F98000100A15674 /* BatchAuthFileScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchAuthFileScanner.swift; sourceTree = "<group>"; };
-		B1BAT0022F98000300A15674 /* BatchImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchImportView.swift; sourceTree = "<group>"; };
-		B1C2D3E4F5A60002 /* StatusBarItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarItemView.swift; sourceTree = "<group>"; };
-		B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyRuntimeService.swift; sourceTree = "<group>"; };
-		B1PA00002F97002000A15674 /* ProxyPortArbiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyPortArbiter.swift; sourceTree = "<group>"; };
-		B1GP00002F97002000A15674 /* GlobalProxyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyConfig.swift; sourceTree = "<group>"; };
-		B1GP00102F97002000A15674 /* GlobalProxyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyRuntime.swift; sourceTree = "<group>"; };
-		B1GP00202F97002000A15674 /* GlobalProxyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyManager.swift; sourceTree = "<group>"; };
-		B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyTrackAdapters.swift; sourceTree = "<group>"; };
 		B1AP00002FA1000100A15674 /* APIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProvider.swift; sourceTree = "<group>"; };
 		B1AP00102FA1000100A15674 /* APIProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderStore.swift; sourceTree = "<group>"; };
 		B1AP00202FA1000100A15674 /* APIProviderDistributor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderDistributor.swift; sourceTree = "<group>"; };
 		B1AP00302FA1000100A15674 /* APIProviderListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderListView.swift; sourceTree = "<group>"; };
 		B1AP00402FA1000100A15674 /* APIProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderCard.swift; sourceTree = "<group>"; };
 		B1AP00502FA1000100A15674 /* APIProviderEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderEditorView.swift; sourceTree = "<group>"; };
+		B1BAT0002F98000100A15674 /* BatchAuthFileScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchAuthFileScanner.swift; sourceTree = "<group>"; };
+		B1BAT0022F98000300A15674 /* BatchImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchImportView.swift; sourceTree = "<group>"; };
+		B1C2D3E4F5A60002 /* StatusBarItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarItemView.swift; sourceTree = "<group>"; };
+		B1GP00002F97002000A15674 /* GlobalProxyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyConfig.swift; sourceTree = "<group>"; };
+		B1GP00102F97002000A15674 /* GlobalProxyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyRuntime.swift; sourceTree = "<group>"; };
+		B1GP00202F97002000A15674 /* GlobalProxyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyManager.swift; sourceTree = "<group>"; };
+		B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGlobalProxySection.swift; sourceTree = "<group>"; };
+		B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxyTrackAdapters.swift; sourceTree = "<group>"; };
+		B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeGlobalProxySection.swift; sourceTree = "<group>"; };
+		B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGlobalProxySection.swift; sourceTree = "<group>"; };
+		B1GP00802F97002000A15674 /* GlobalProxySectionScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxySectionScaffold.swift; sourceTree = "<group>"; };
+		B1PA00002F97002000A15674 /* ProxyPortArbiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyPortArbiter.swift; sourceTree = "<group>"; };
+		B1REFA002F97002000A15674 /* ProxyRuntimeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyRuntimeService.swift; sourceTree = "<group>"; };
 		B1REFB002F97002000A15674 /* ProviderRefreshResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderRefreshResult.swift; sourceTree = "<group>"; };
 		B1TLS0002F97003000A15674 /* TLSCertificateManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TLSCertificateManager.swift; sourceTree = "<group>"; };
 		C1AA000100000000000000A1 /* JSONWebEditorAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONWebEditorAssets.swift; sourceTree = "<group>"; };
 		C1AA000200000000000000A2 /* ProxyConfigEditorView+JSONTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyConfigEditorView+JSONTab.swift"; sourceTree = "<group>"; };
 		C1AA000300000000000000A3 /* ProxyModelLibraryEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyModelLibraryEditor.swift; sourceTree = "<group>"; };
+		C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeAvailabilitySection.swift; sourceTree = "<group>"; };
+		C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsStore.swift; sourceTree = "<group>"; };
+		C1CA00032FCA005000B26789 /* CallAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsView.swift; sourceTree = "<group>"; };
+		C1CA00052FCA005000B26789 /* CallAnalyticsView+Rankings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallAnalyticsView+Rankings.swift"; sourceTree = "<group>"; };
+		C1CA00072FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallAnalyticsView+ZeroCall.swift"; sourceTree = "<group>"; };
+		C1CA00092FCA005000B26789 /* CallAnalyticsDerived.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsDerived.swift; sourceTree = "<group>"; };
 		C1CG10002FB0001000B26789 /* CodexGlobalConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGlobalConfig.swift; sourceTree = "<group>"; };
 		C1CX00002FB0000100B26789 /* CodexConfigManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigManager.swift; sourceTree = "<group>"; };
 		C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProxyManagementView.swift; sourceTree = "<group>"; };
-		B1GP00302F97002000A15674 /* CodexGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexGlobalProxySection.swift; sourceTree = "<group>"; };
-		B1GP00502F97002000A15674 /* ClaudeGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeGlobalProxySection.swift; sourceTree = "<group>"; };
-		B1GP00602F97002000A15674 /* OpenCodeGlobalProxySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGlobalProxySection.swift; sourceTree = "<group>"; };
-		B1GP00802F97002000A15674 /* GlobalProxySectionScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalProxySectionScaffold.swift; sourceTree = "<group>"; };
 		C1CX00042FB0000300B26789 /* CodexProxyEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProxyEditorView.swift; sourceTree = "<group>"; };
 		C1CX00062FB0000400B26789 /* StatsHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsHubView.swift; sourceTree = "<group>"; };
 		C1CX00082FB0000900B26789 /* CodexConfigEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexConfigEditorView.swift; sourceTree = "<group>"; };
 		C1GC00002FA0000100B26789 /* GlobalConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalConfig.swift; sourceTree = "<group>"; };
 		C1GC00022FA0000200B26789 /* GlobalConfigSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalConfigSection.swift; sourceTree = "<group>"; };
 		C1GC00042FA0000300B26789 /* LocalSettingsEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalSettingsEditorView.swift; sourceTree = "<group>"; };
+		C1JC00012FB0002000B26789 /* JSONCSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONCSanitizer.swift; sourceTree = "<group>"; };
 		C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MenuBarView+TrackSwitcher.swift"; sourceTree = "<group>"; };
-		C1MB00A12FB0000400B26789 /* MenuBarTrackPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarTrackPanel.swift; sourceTree = "<group>"; };
-		C1PE00012FB0000500B26789 /* ProxyEditorControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyEditorControls.swift; sourceTree = "<group>"; };
 		C1MB00032FB0000400B26789 /* MenuBarView+CostTracking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MenuBarView+CostTracking.swift"; sourceTree = "<group>"; };
 		C1MB00052FB0000400B26789 /* MenuBarAccountRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarAccountRow.swift; sourceTree = "<group>"; };
 		C1MB00072FB0000400B26789 /* MenuBarRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarRows.swift; sourceTree = "<group>"; };
 		C1MB00092FB0000400B26789 /* MenuBarSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarSupport.swift; sourceTree = "<group>"; };
+		C1MB00A12FB0000400B26789 /* MenuBarTrackPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarTrackPanel.swift; sourceTree = "<group>"; };
 		C1NP00002F9C000100A15674 /* NodeProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeProfile.swift; sourceTree = "<group>"; };
 		C1NP00022F9C000200A15674 /* NodeProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeProfileStore.swift; sourceTree = "<group>"; };
 		C1NP00042F9C000300A15674 /* JSONRawEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONRawEditorView.swift; sourceTree = "<group>"; };
@@ -302,7 +320,6 @@
 		C1NP00082F9C000500A15674 /* ProfileExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileExportView.swift; sourceTree = "<group>"; };
 		C1OE00012FB0002000B26789 /* OpenCodeNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNode.swift; sourceTree = "<group>"; };
 		C1OE00032FB0002000B26789 /* OpenCodeConfigManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConfigManager.swift; sourceTree = "<group>"; };
-		C1JC00012FB0002000B26789 /* JSONCSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JSONCSanitizer.swift; sourceTree = "<group>"; };
 		C1OE00052FB0002000B26789 /* OpenCodeNodeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStore.swift; sourceTree = "<group>"; };
 		C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagementView.swift; sourceTree = "<group>"; };
 		C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeEditorView.swift; sourceTree = "<group>"; };
@@ -310,19 +327,14 @@
 		C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeProxyRuntime.swift; sourceTree = "<group>"; };
 		C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSuggestionField.swift; sourceTree = "<group>"; };
 		C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStatsStore.swift; sourceTree = "<group>"; };
-		C1CA00012FCA005000B26789 /* CallAnalyticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsStore.swift; sourceTree = "<group>"; };
-		C1CA00032FCA005000B26789 /* CallAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsView.swift; sourceTree = "<group>"; };
-		C1CA00052FCA005000B26789 /* CallAnalyticsView+Rankings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallAnalyticsView+Rankings.swift"; sourceTree = "<group>"; };
-		C1CA00072FCA005000B26789 /* CallAnalyticsView+ZeroCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallAnalyticsView+ZeroCall.swift"; sourceTree = "<group>"; };
-		C1CA00092FCA005000B26789 /* CallAnalyticsDerived.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAnalyticsDerived.swift; sourceTree = "<group>"; };
 		C1OE00152FB0004000B26789 /* OpenCodeNodeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeCard.swift; sourceTree = "<group>"; };
 		C1OE00172FB0004000B26789 /* OpenCodeNodeStatsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStatsSection.swift; sourceTree = "<group>"; };
-		C1AV00022FB0004000B26789 /* OpenCodeNodeAvailabilitySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeAvailabilitySection.swift; sourceTree = "<group>"; };
 		C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeConnectivityTester.swift; sourceTree = "<group>"; };
 		C1OE001B2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeManagementView+Toolbar.swift"; sourceTree = "<group>"; };
 		C1OE001D2FB0005000B26789 /* OpenCodeGlobalConfigSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeGlobalConfigSection.swift; sourceTree = "<group>"; };
 		C1OE00212FB0006000B26789 /* OpenCodeNodeStore+CCSwitchSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OpenCodeNodeStore+CCSwitchSync.swift"; sourceTree = "<group>"; };
 		C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CCSwitchLocator.swift; sourceTree = "<group>"; };
+		C1PE00012FB0000500B26789 /* ProxyEditorControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyEditorControls.swift; sourceTree = "<group>"; };
 		C1PM00012FB0000300B26789 /* ProxyManagementView+Toolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Toolbar.swift"; sourceTree = "<group>"; };
 		C1PM00032FB0000300B26789 /* ProxyManagementView+List.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+List.swift"; sourceTree = "<group>"; };
 		C1PM00052FB0000300B26789 /* ProxyManagementView+Detail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProxyManagementView+Detail.swift"; sourceTree = "<group>"; };
@@ -331,6 +343,8 @@
 		C1SP00022FB0000600B26789 /* CodexNoProxyFixer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexNoProxyFixer.swift; sourceTree = "<group>"; };
 		C1SP00042FB0000700B26789 /* SystemProxyWarningBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemProxyWarningBanner.swift; sourceTree = "<group>"; };
 		C1SV00012FB0000500B26789 /* SettingsView+MenuBarPins.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+MenuBarPins.swift"; sourceTree = "<group>"; };
+		CB3625A62FC18DD31DE20CB9 /* ScienceSandbox.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceSandbox.swift; sourceTree = "<group>"; };
+		D1605CC60CDCED105310339E /* ScienceVirtualLogin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceVirtualLogin.swift; sourceTree = "<group>"; };
 		E2D13F2156D366B8A69BC697 /* ProxyStatsView+Summary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProxyStatsView+Summary.swift"; sourceTree = "<group>"; };
 		E4778326415BF371DC5B6E6D /* ProxyStatsView+Trend.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProxyStatsView+Trend.swift"; sourceTree = "<group>"; };
 		F9DC4A1479C740ED996962FC /* ProxyStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyStatsView.swift; sourceTree = "<group>"; };
@@ -377,6 +391,7 @@
 				5EFACT002F94000100A15674 /* ProviderActivationManager.swift */,
 				2D613C7828C6DACECB0171A7 /* StatsDataAdapter.swift */,
 				9E3E7768D2A94C7B19550E40 /* ProxyViewModel+UsageArchive.swift */,
+				82D41358A2C2078B7BFD2F91 /* ScienceProxyManager.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -455,6 +470,7 @@
 				5EFPA0002F91000000A15674 /* ProviderAuth */,
 				5EFAD7592F87B10100A15674 /* ProviderAuthManager.swift */,
 				5EFAD7572F87AC7200A15674 /* SecureAccountVault.swift */,
+				ECA000260184146F31D2BF08 /* Science */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -550,6 +566,7 @@
 				E2D13F2156D366B8A69BC697 /* ProxyStatsView+Summary.swift */,
 				E4778326415BF371DC5B6E6D /* ProxyStatsView+Trend.swift */,
 				2A97BD3A13311949E62C066C /* ProxyStatsView+Distribution.swift */,
+				87DC6FD8E42B87DB056A69CB /* ScienceProxyManagementView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -587,6 +604,19 @@
 				B1BAT0002F98000100A15674 /* BatchAuthFileScanner.swift */,
 			);
 			path = ProviderAuth;
+			sourceTree = "<group>";
+		};
+		ECA000260184146F31D2BF08 /* Science */ = {
+			isa = PBXGroup;
+			children = (
+				D1605CC60CDCED105310339E /* ScienceVirtualLogin.swift */,
+				CB3625A62FC18DD31DE20CB9 /* ScienceSandbox.swift */,
+				1C8773DDEF6B585EC2A61FE2 /* ScienceRealAdopt.swift */,
+				AB01SCAP02F92000000A15674 /* ScienceAuthProxy.swift */,
+				AB01SCAP04F92000000A15674 /* ScienceAuthProxy+Helpers.swift */,
+			);
+			name = Science;
+			path = Science;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -850,6 +880,13 @@
 				16107C5456181DB224F92CB4 /* ProxyViewModel+UsageArchive.swift in Sources */,
 				3502209AABD60A3013084D55 /* UsageTrack.swift in Sources */,
 				A1AGNT012F92000000A15674 /* AgentVisibility.swift in Sources */,
+				8307FB7ACC6E3DB155687D2A /* ScienceVirtualLogin.swift in Sources */,
+				1ED5CE49B33A74A1DF312F2A /* ScienceSandbox.swift in Sources */,
+				5D72E0D8279FAF8A415EAFF2 /* ScienceProxyManager.swift in Sources */,
+				3A1997F4B1B7ED7EF2E6A0F9 /* ScienceProxyManagementView.swift in Sources */,
+				7A3790A33E2F7B1157812AA1 /* ScienceRealAdopt.swift in Sources */,
+				AB01SCAP01F92000000A15674 /* ScienceAuthProxy.swift in Sources */,
+				AB01SCAP03F92000000A15674 /* ScienceAuthProxy+Helpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1005,7 +1042,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.12.6;
+				MARKETING_VERSION = 0.13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1037,7 +1074,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.12.6;
+				MARKETING_VERSION = 0.13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

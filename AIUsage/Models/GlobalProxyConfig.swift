@@ -7,6 +7,9 @@ enum GlobalProxyTrack: String, Codable, CaseIterable {
     case codex
     case claude
     case opencode
+    /// Claude Science：免订阅启动 Science（隔离沙箱 + 本地虚拟登录），推理经代理走第三方模型。
+    /// 复用 Claude 轨的 Anthropic→OpenAI 转换代理（同 admin 路由），差异在于沙箱/虚拟登录生命周期。
+    case science
 
     /// 持久化文件名（~/.config/aiusage 下）。
     var configFileName: String { "global-proxy-\(rawValue).json" }
@@ -45,6 +48,14 @@ struct GlobalProxyConfig: Codable, Equatable {
     var openCodeInterface: OpenCodeProtocol?
     /// 当前激活的参与节点 id；nil 表示未选定。
     var activeNodeId: String?
+    /// Science 沙箱监听端口（仅 Science 轨；即 `claude-science serve --port`）。缺省 14410（AIUsage 端口族）。
+    var sciencePort: Int? = nil
+    /// Science 沙箱假账号邮箱（仅 Science 轨；必须以 .invalid 保留顶级域结尾，保证不可路由）。缺省 aiusage@cslocal.invalid。
+    var sandboxEmail: String? = nil
+    /// 接管真实实例（仅 Science 轨）：内部 daemon 跑在独立 data-dir、由 8765 反向代理注入会话，
+    /// 使双击桌面 app 也免登录。**不触碰真实 ~/.claude-science 凭证**，仅改写运行期 operon.lock（停用即删）。
+    /// 缺省 false（安全默认，只做隔离沙箱）。
+    var adoptRealInstance: Bool? = nil
 
     // MARK: Defaults
 
@@ -52,6 +63,17 @@ struct GlobalProxyConfig: Codable, Equatable {
     static let defaultCodexPort = 14399
     static let defaultClaudePort = 14400
     static let defaultOpenCodePort = 14401
+    // Science 轨端口全部落在 AIUsage 自有的 144xx 端口族（区别于其它同类工具，避免撞常用端口）：
+    // 代理端口 14402、沙箱监听 14410、接管内部 daemon 14411；对外唯一例外是 8765（桌面 app 硬编码默认端口）。
+    static let defaultSciencePort = 14402
+    static let defaultScienceListenPort = 14410
+    // 假账号邮箱缺省值：以 `.invalid`（RFC 2606 保留顶级域，永不可解析）保证是不可路由假账号，带 AIUsage 标识。
+    static let defaultSandboxEmail = "aiusage@cslocal.invalid"
+    // 接管真实实例模式下 Science 对外固定端口（= 桌面 app 默认端口）：由本地反向代理（ScienceAuthProxy）占用，
+    // 负责给每个请求注入 operon 会话 cookie，使双击桌面 app / 浏览器打开 8765 都免登录。
+    static let realInstancePort = 8765
+    // 接管模式下内部 Claude Science daemon 的监听端口（反代把 8765 的流量转发到这里）。
+    static let realInstanceInternalPort = 14411
     // 虚拟模型名仅作 CLI 固定入口名，可任意取——会被代理改写为激活节点真实上游模型，故取通用短名。
     static let defaultVirtualModel = "gpt"
     // Claude 三层名需含 opus/sonnet/haiku 关键字（后端据此映射到节点 big/middle/small），裸关键字即可。
@@ -84,6 +106,13 @@ struct GlobalProxyConfig: Codable, Equatable {
                 virtualModel: defaultOpenCodeModel, sonnetModel: nil, haikuModel: nil,
                 openCodeInterface: .openAICompatible, activeNodeId: nil
             )
+        case .science:
+            return GlobalProxyConfig(
+                isEnabled: false, port: defaultSciencePort, clientKey: freshClientKey(),
+                virtualModel: defaultClaudeOpus, sonnetModel: defaultClaudeSonnet,
+                haikuModel: defaultClaudeHaiku, openCodeInterface: nil, activeNodeId: nil,
+                sciencePort: defaultScienceListenPort, sandboxEmail: defaultSandboxEmail
+            )
         }
     }
 
@@ -110,6 +139,22 @@ struct GlobalProxyConfig: Codable, Equatable {
 
     /// 不含 /v1 的本地地址（Anthropic 接口的 OpenCode 上游需要根地址 + /v1/messages）。
     var rootBaseURL: String { "http://127.0.0.1:\(port)" }
+
+    /// Science 沙箱监听端口（缺省 14410；绝不占用真实实例保留端口 8765）。
+    var effectiveSciencePort: Int {
+        let p = sciencePort ?? Self.defaultScienceListenPort
+        return p == 8765 ? Self.defaultScienceListenPort : p
+    }
+    /// Science 沙箱假账号邮箱（缺省 aiusage@cslocal.invalid）。
+    var effectiveSandboxEmail: String { (sandboxEmail?.nilIfBlank) ?? Self.defaultSandboxEmail }
+
+    /// 是否接管真实实例（缺省 false）。
+    var effectiveAdoptReal: Bool { adoptRealInstance ?? false }
+
+    /// 当前 Science 实际监听端口：接管真实实例走 8765，否则走沙箱端口。
+    var effectiveScienceListenPort: Int {
+        effectiveAdoptReal ? Self.realInstancePort : effectiveSciencePort
+    }
 }
 
 // MARK: - Persistence

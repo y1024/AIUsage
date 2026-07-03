@@ -116,6 +116,8 @@ extension MenuBarView {
         case .codex:    codexClaudePanel(family: .codex)
         case .claude:   codexClaudePanel(family: .claude)
         case .opencode: openCodePanel()
+        // Science 轨不在顶部控制台切换（其生命周期含沙箱/虚拟登录，统一在侧边栏「Claude Science 代理」页管理）。
+        case .science:  EmptyView()
         }
     }
 

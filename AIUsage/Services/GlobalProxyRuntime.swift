@@ -47,13 +47,16 @@ final class GlobalProxyRuntime: ObservableObject {
     static let codex = GlobalProxyRuntime(track: .codex, adminPath: "/__aiusage/admin/codex-upstream")
     static let claude = GlobalProxyRuntime(track: .claude, adminPath: "/__aiusage/admin/claude-upstream")
     static let opencode = GlobalProxyRuntime(track: .opencode, adminPath: "/__aiusage/admin/opencode-upstream")
-    static var all: [GlobalProxyRuntime] { [codex, claude, opencode] }
+    // Science 复用 Claude 轨的 Anthropic→OpenAI 转换代理（同 admin 路由，独立进程/端口）。
+    static let science = GlobalProxyRuntime(track: .science, adminPath: "/__aiusage/admin/claude-upstream")
+    static var all: [GlobalProxyRuntime] { [codex, claude, opencode, science] }
 
     static func instance(for track: GlobalProxyTrack) -> GlobalProxyRuntime {
         switch track {
         case .codex: return codex
         case .claude: return claude
         case .opencode: return opencode
+        case .science: return science
         }
     }
 
@@ -67,6 +70,7 @@ final class GlobalProxyRuntime: ObservableObject {
         case .codex: return AppSettings.shared.t("Codex global proxy", "Codex 全局代理")
         case .claude: return AppSettings.shared.t("Claude Code global proxy", "Claude Code 全局代理")
         case .opencode: return AppSettings.shared.t("OpenCode global proxy", "OpenCode 全局代理")
+        case .science: return AppSettings.shared.t("Claude Science proxy", "Claude Science 代理")
         }
     }
 
