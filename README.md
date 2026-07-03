@@ -95,6 +95,12 @@
     <td align="center"><strong>OpenCode Proxy · Nodes &amp; Stats</strong></td>
   </tr>
   <tr>
+    <td colspan="2"><img src="docs/images/Claude-Science_en.png" alt="Claude Science proxy"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><strong>Claude Science Proxy · Login-free Local Science</strong></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/images/proxy-stats_en.png" alt="Usage stats"></td>
     <td width="50%"><img src="docs/images/menu_bar_en.png" alt="Menu bar"></td>
   </tr>

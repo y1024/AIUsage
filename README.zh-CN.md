@@ -95,6 +95,12 @@
     <td align="center"><strong>OpenCode 代理 · 节点与统计</strong></td>
   </tr>
   <tr>
+    <td colspan="2"><img src="docs/images/Claude-Science.png" alt="Claude Science 代理"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><strong>Claude Science 代理 · 免登录本地 Science</strong></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/images/proxy-stats.png" alt="用量统计"></td>
     <td width="50%"><img src="docs/images/menu_bar.png" alt="菜单栏"></td>
   </tr>
