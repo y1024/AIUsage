@@ -145,6 +145,8 @@ enum DefaultsKey {
     static let remotePort = "remotePort"
     static let selectedProviderIds = "selectedProviderIds"
     static let showNotifications = "showNotifications"
+    /// 侧边栏「代理」分组的展开/收起状态。缺省=true（展开）。
+    static let sidebarProxiesGroupExpanded = "sidebarProxiesGroupExpanded"
     static let themeMode = "themeMode"
 }
 
@@ -270,6 +272,10 @@ final class AppSettings: ObservableObject {
         return stored
     }()
 
+    /// 侧边栏「代理」分组是否展开；默认展开，保持与折叠前的可见性一致。
+    @Published var sidebarProxiesGroupExpanded: Bool =
+        UserDefaults.standard.object(forKey: DefaultsKey.sidebarProxiesGroupExpanded) as? Bool ?? true
+
     private var cancellables = Set<AnyCancellable>()
 
     func pruneMenuBarPinnedIds(validQuotaIds: Set<String>, validCostIds: Set<String>) {
@@ -333,6 +339,7 @@ final class AppSettings: ObservableObject {
         }.store(in: &cancellables)
         $proxyAutoRestoreOnLaunch.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.proxyAutoRestoreOnLaunch) }.store(in: &cancellables)
         $hiddenSidebarSections.dropFirst().sink { defaults.set(Array($0), forKey: DefaultsKey.hiddenSidebarSections) }.store(in: &cancellables)
+        $sidebarProxiesGroupExpanded.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.sidebarProxiesGroupExpanded) }.store(in: &cancellables)
     }
 
     static func normalizedAutoRefreshInterval(_ value: Int) -> Int {

@@ -28,8 +28,13 @@ struct SidebarNavItem: Identifiable {
 
 /// 侧边栏导航条目集合与可见性过滤。
 enum SidebarNavigation {
-    /// 分隔线上方的主分组（与历史展示顺序保持一致）。
-    static let primary: [SidebarNavItem] = [
+    /// 代理分组标题（可折叠 Section 的 header）。
+    static var proxiesGroupTitle: String {
+        L("Proxies", "代理", key: "nav.group.proxies")
+    }
+
+    /// 代理分组上方的主条目。
+    static let primaryTop: [SidebarNavItem] = [
         SidebarNavItem(section: .dashboard, titleEn: "Dashboard", titleZh: "仪表盘",
                        localizationKey: "nav.dashboard", icon: .system("chart.bar.doc.horizontal"),
                        tint: .blue, isHideable: false),
@@ -38,19 +43,27 @@ enum SidebarNavigation {
                        tint: .indigo, isHideable: true),
         SidebarNavItem(section: .apiProviders, titleEn: "API Providers", titleZh: "API 提供商",
                        localizationKey: "nav.api_providers", icon: .system("shippingbox.fill"),
-                       tint: .teal, isHideable: true),
-        SidebarNavItem(section: .codexProxyManagement, titleEn: "Codex Proxy", titleZh: "Codex 代理",
+                       tint: .teal, isHideable: true)
+    ]
+
+    /// 可折叠的「代理」分组：分组标题已表达“代理”语义，条目只保留应用名。
+    static let proxies: [SidebarNavItem] = [
+        SidebarNavItem(section: .codexProxyManagement, titleEn: "Codex", titleZh: "Codex",
                        localizationKey: "nav.codex_proxy_management", icon: .providerAsset("codex"),
                        tint: .primary, isHideable: true),
-        SidebarNavItem(section: .opencodeManagement, titleEn: "OpenCode Proxy", titleZh: "OpenCode 代理",
+        SidebarNavItem(section: .opencodeManagement, titleEn: "OpenCode", titleZh: "OpenCode",
                        localizationKey: "nav.opencode_management", icon: .providerAsset("opencode"),
                        tint: .primary, isHideable: true),
-        SidebarNavItem(section: .proxyManagement, titleEn: "Claude Code Proxy", titleZh: "Claude Code 代理",
+        SidebarNavItem(section: .proxyManagement, titleEn: "Claude Code", titleZh: "Claude Code",
                        localizationKey: "nav.proxy_management", icon: .providerAsset("claude"),
                        tint: .primary, isHideable: true),
-        SidebarNavItem(section: .scienceProxyManagement, titleEn: "Claude Science Proxy", titleZh: "Claude Science 代理",
+        SidebarNavItem(section: .scienceProxyManagement, titleEn: "Claude Science", titleZh: "Claude Science",
                        localizationKey: "nav.science_proxy_management", icon: .system("atom"),
-                       tint: .purple, isHideable: true),
+                       tint: .purple, isHideable: true)
+    ]
+
+    /// 代理分组下方的主条目。
+    static let primaryBottom: [SidebarNavItem] = [
         SidebarNavItem(section: .costTracking, titleEn: "Usage Stats", titleZh: "用量统计",
                        localizationKey: "nav.cost_tracking", icon: .system("chart.bar.xaxis"),
                        tint: .green, isHideable: true),
@@ -58,6 +71,9 @@ enum SidebarNavigation {
                        localizationKey: "nav.call_analytics", icon: .system("puzzlepiece.extension"),
                        tint: .purple, isHideable: true)
     ]
+
+    /// 分隔线上方的全部主条目（含代理分组，供设置页等平铺场景使用）。
+    static let primary: [SidebarNavItem] = primaryTop + proxies + primaryBottom
 
     /// 分隔线下方的次分组（消息 + 设置）。
     static let secondary: [SidebarNavItem] = [

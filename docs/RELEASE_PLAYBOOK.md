@@ -11,6 +11,7 @@
 - `appcast.xml` 已由工作流更新并回写到 `main`
 - Release Notes 已补成用户可读版本
 - 产物用稳定自签名证书签名（CI 已强制校验，详见「代码签名」一节）
+- 产物是 **Universal Binary（arm64 + x86_64）**，同时支持 Apple Silicon 和 Intel（v0.13.1 起，`package-release.sh` 已强制 lipo 校验）
 - 本地已重新同步远端 `main`
 
 只要缺一项，都不算真正发版完成。
@@ -242,6 +243,16 @@ xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release \
 ```
 
 - 反过来：要用新的 Swift 6.x 写法（`@concurrent` 等）前，先确认 CI 工具链跟得上，否则会出现「本地过、CI 挂」。
+
+### 8. 发布产物必须是 Universal Binary（v0.13.1 起）
+
+从 v0.13.1 开始，所有发布版本都同时支持 Apple Silicon 和 Intel。三条规则不能破坏：
+
+- `package-release.sh` 里 `xcodebuild` 的 destination 必须是 **`generic/platform=macOS`**。改回具体的 `platform=macOS` 会在 arm64 runner 上静默产出 arm64-only 包。
+- pbxproj 的「Build QuotaServer Helper」脚本按 Xcode 传入的 `ARCHS` 追加 `swift build --arch` 参数；Release（generic destination）产出双架构 helper，Debug 仍只编本机架构。注意 `--arch` 会把 SwiftPM 输出目录改到 `.build/apple/Products/<Config>/`，脚本用 `--show-bin-path` 动态解析，不要改回硬编码路径。
+- `package-release.sh` 的 `verify_universal` 用 `lipo -archs` 校验主程序和 QuotaServer 都包含 arm64 + x86_64，缺一个切片直接 `exit 1`。不要删这段校验。
+
+如需在 Apple Silicon 上验证 x86_64 切片：`arch -x86_64 <binary>`（Rosetta）。背景与细节见 `docs/UNIVERSAL_BINARY_AND_SIDEBAR.md`。
 
 ## 最短手顺
 

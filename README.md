@@ -120,6 +120,8 @@
 
 Download `.dmg` or `.zip` from the [Releases](https://github.com/sylearn/AIUsage/releases) page.
 
+Universal Binary — runs natively on both Apple Silicon and Intel Macs (macOS 14+).
+
 ## Proxies
 
 AIUsage ships four independent proxies — for **Claude Code**, **Codex (Codex CLI)**, **OpenCode** and **Claude Science** — each with node management, usage logging and a unified switcher.

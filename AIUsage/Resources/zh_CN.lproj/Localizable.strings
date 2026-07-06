@@ -1255,8 +1255,20 @@
 /* Views/SidebarNavigation.swift */
 "nav.api_providers" = "API 提供商";
 
-/* Views/ContentView.swift */
-"nav.proxy_management" = "Claude Code 代理";
+/* Views/SidebarNavigation.swift */
+"nav.group.proxies" = "代理";
+
+/* Views/SidebarNavigation.swift */
+"nav.codex_proxy_management" = "Codex";
+
+/* Views/SidebarNavigation.swift */
+"nav.opencode_management" = "OpenCode";
+
+/* Views/SidebarNavigation.swift */
+"nav.proxy_management" = "Claude Code";
+
+/* Views/SidebarNavigation.swift */
+"nav.science_proxy_management" = "Claude Science";
 
 /* Views/ContentView.swift */
 "nav.proxy_stats" = "代理统计";

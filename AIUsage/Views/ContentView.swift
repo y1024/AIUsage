@@ -18,12 +18,31 @@ struct ContentView: View {
         appState.settings.hiddenSidebarSections
     }
 
-    private var visiblePrimary: [SidebarNavItem] {
-        SidebarNavigation.visible(SidebarNavigation.primary, hidden: hiddenSections)
+    private var visiblePrimaryTop: [SidebarNavItem] {
+        SidebarNavigation.visible(SidebarNavigation.primaryTop, hidden: hiddenSections)
+    }
+
+    private var visibleProxies: [SidebarNavItem] {
+        SidebarNavigation.visible(SidebarNavigation.proxies, hidden: hiddenSections)
+    }
+
+    private var visiblePrimaryBottom: [SidebarNavItem] {
+        SidebarNavigation.visible(SidebarNavigation.primaryBottom, hidden: hiddenSections)
     }
 
     private var visibleSecondary: [SidebarNavItem] {
         SidebarNavigation.visible(SidebarNavigation.secondary, hidden: hiddenSections)
+    }
+
+    private var hasVisiblePrimary: Bool {
+        !(visiblePrimaryTop.isEmpty && visibleProxies.isEmpty && visiblePrimaryBottom.isEmpty)
+    }
+
+    private var proxiesGroupExpanded: Binding<Bool> {
+        Binding(
+            get: { appState.settings.sidebarProxiesGroupExpanded },
+            set: { appState.settings.sidebarProxiesGroupExpanded = $0 }
+        )
     }
 
     private func hideSection(_ section: AppSection) {
@@ -92,9 +111,21 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: sectionBinding) {
-                ForEach(visiblePrimary) { navRow($0) }
+                ForEach(visiblePrimaryTop) { navRow($0) }
 
-                if !visiblePrimary.isEmpty && !visibleSecondary.isEmpty {
+                // 四条代理入口收进一个可折叠分组，分组标题表达“代理”语义，
+                // 条目只显示应用名；展开状态持久化，重启后保持。
+                if !visibleProxies.isEmpty {
+                    Section(isExpanded: proxiesGroupExpanded) {
+                        ForEach(visibleProxies) { navRow($0) }
+                    } header: {
+                        Text(SidebarNavigation.proxiesGroupTitle)
+                    }
+                }
+
+                ForEach(visiblePrimaryBottom) { navRow($0) }
+
+                if hasVisiblePrimary && !visibleSecondary.isEmpty {
                     Divider()
                 }
 
@@ -107,6 +138,13 @@ struct ContentView: View {
                 // 若当前分区被（在设置页等处）隐藏，回退到常驻的仪表盘，避免停在空白详情。
                 if hidden.contains(appState.selectedSection.rawValue) {
                     appState.selectedSection = .dashboard
+                }
+            }
+            .onChange(of: appState.selectedSection) { _, section in
+                // 从菜单栏/设置等处跳转到代理页时自动展开分组，避免选中项藏在收起的组里。
+                if SidebarNavigation.proxies.contains(where: { $0.section == section }),
+                   !appState.settings.sidebarProxiesGroupExpanded {
+                    appState.settings.sidebarProxiesGroupExpanded = true
                 }
             }
             .safeAreaInset(edge: .bottom) {

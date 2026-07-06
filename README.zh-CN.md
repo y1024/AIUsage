@@ -120,6 +120,8 @@
 
 从 [Releases](https://github.com/sylearn/AIUsage/releases) 页面下载 `.dmg` 或 `.zip`。
 
+Universal Binary —— Apple Silicon 与 Intel 芯片 Mac 均原生运行（macOS 14+）。
+
 ## 代理
 
 AIUsage 内置四套相互独立的代理 —— 分别面向 **Claude Code**、**Codex（Codex CLI）**、**OpenCode** 与 **Claude Science**，各自支持节点管理、用量记录与统一切换器。

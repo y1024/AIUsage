@@ -715,7 +715,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\nBUILD_CONFIG=debug\nif [ \"${CONFIGURATION}\" = \"Release\" ]; then\n  BUILD_CONFIG=release\nfi\nSWIFT_BIN=\"$(xcrun --find swift)\"\n\"$SWIFT_BIN\" build --package-path \"$SRCROOT/QuotaBackend\" --product QuotaServer -c \"$BUILD_CONFIG\"\nHELPER_DIR=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Helpers\"\nmkdir -p \"$HELPER_DIR\"\ncp \"$SRCROOT/QuotaBackend/.build/$BUILD_CONFIG/QuotaServer\" \"$HELPER_DIR/QuotaServer\"\nchmod +x \"$HELPER_DIR/QuotaServer\"\n";
+			shellScript = "set -eu\nBUILD_CONFIG=debug\nif [ \"${CONFIGURATION}\" = \"Release\" ]; then\n  BUILD_CONFIG=release\nfi\nSWIFT_BIN=\"$(xcrun --find swift)\"\n# Build the helper for every slice the app itself is building, so a Universal\n# release (arm64 + x86_64) ships a QuotaServer that also runs on Intel Macs.\n# Debug builds keep ONLY_ACTIVE_ARCH=YES, so ARCHS is just the native arch.\nARCH_FLAGS=\"\"\nfor ARCH in ${ARCHS:-$(uname -m)}; do\n  ARCH_FLAGS=\"$ARCH_FLAGS --arch $ARCH\"\ndone\n\"$SWIFT_BIN\" build --package-path \"$SRCROOT/QuotaBackend\" --product QuotaServer -c \"$BUILD_CONFIG\" $ARCH_FLAGS\n# --arch changes the SwiftPM output directory; resolve it instead of hardcoding.\nBIN_DIR=\"$(\"$SWIFT_BIN\" build --package-path \"$SRCROOT/QuotaBackend\" --product QuotaServer -c \"$BUILD_CONFIG\" $ARCH_FLAGS --show-bin-path)\"\nHELPER_DIR=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Helpers\"\nmkdir -p \"$HELPER_DIR\"\ncp \"$BIN_DIR/QuotaServer\" \"$HELPER_DIR/QuotaServer\"\nchmod +x \"$HELPER_DIR/QuotaServer\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1042,7 +1042,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.13.0;
+				MARKETING_VERSION = 0.13.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1074,7 +1074,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.13.0;
+				MARKETING_VERSION = 0.13.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

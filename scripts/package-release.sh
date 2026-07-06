@@ -67,11 +67,14 @@ fi
 
 echo "Building ${APP_NAME} ${VERSION}..."
 
+# "generic/platform=macOS" builds all standard architectures (arm64 + x86_64)
+# for a Universal binary. A concrete "platform=macOS" destination would only
+# build the host architecture, silently shipping an arm64-only app.
 xcodebuild \
   -project "$PROJECT_PATH" \
   -scheme "$SCHEME" \
   -configuration "$CONFIGURATION" \
-  -destination "platform=macOS" \
+  -destination "generic/platform=macOS" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
@@ -115,6 +118,24 @@ else
 fi
 
 strip_bundle_detritus "$APP_PATH"
+
+# Verify the shipped binaries are Universal (arm64 + x86_64). Guards against
+# build-setting regressions that would silently drop Intel support.
+verify_universal() {
+  local binary="$1"
+  local archs
+  archs="$(lipo -archs "$binary" 2>/dev/null || true)"
+  if [[ "$archs" != *"arm64"* || "$archs" != *"x86_64"* ]]; then
+    echo "ERROR: $binary is not a Universal binary (archs: ${archs:-unreadable})." >&2
+    echo "Expected both arm64 and x86_64 slices." >&2
+    exit 1
+  fi
+  echo "  $(basename "$binary"): $archs"
+}
+
+echo "Verifying Universal binary slices..."
+verify_universal "$APP_PATH/Contents/MacOS/$APP_NAME"
+verify_universal "$APP_PATH/Contents/Resources/Helpers/QuotaServer"
 
 # Signing identity:
 #   - When MACOS_SIGNING_IDENTITY is set (release builds in CI), sign with a
