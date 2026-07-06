@@ -67,7 +67,30 @@
 
 只需在 `SidebarNavigation.proxies` 数组中追加一条 `SidebarNavItem`，并在 `ContentView` 的 detail switch 中补充对应页面即可，分组、折叠、隐藏逻辑自动生效。
 
-## 四、验证记录
+## 四、FAQ：Universal 与「未来不支持」警告
+
+### 为什么会看到「未来不支持 / Rosetta」弹窗？
+
+macOS 26.4 起，**任何通过 Rosetta 2 运行的进程**启动时都会弹一次「该 App 未来将不受支持」通知（Rosetta 在 macOS 28 基本移除）。触发条件是*进程实际走 Rosetta 翻译执行*，而不是"二进制里含 x86_64 切片"。
+
+- Universal 应用在 M 芯片上原生运行 arm64 切片，`sysctl.proc_translated = 0`，**不会触发该警告**；系统信息里种类显示为 Universal，Apple 明确归类为「升级后继续可用」。
+- 本机曾出现的弹窗来自发布验证时用 `arch -x86_64` 强制以 Rosetta 运行 QuotaServer 的冒烟测试，属于测试行为，正常用户不会遇到。
+- 真正会被警告的是 Intel-only（种类="Intel"）应用——恰恰是我们改成 Universal 之前的反面情形（arm64-only 则是 Intel 用户直接打不开）。
+
+### 要不要按架构拆成两个包（arm64 / x86_64 各发一份）？
+
+**不推荐，维持 Universal 单包。** 拆分的代价：
+
+- Sparkle 单一 appcast 不支持同一版本挂两个 enclosure（官方明确视为 duplicate），必须拆**两条 feed**，构建时按架构注入不同的 `SUFeedURL`；
+- 存量老版本内嵌的是同一条 feed URL，还需要先发过渡版本做分流；
+- CI 要出双包、双签名、双 appcast，Releases 资产翻倍；用户首次下载还得自己选对架构，Intel 用户误下 arm64 包会直接无法启动；
+- 收益只有单包体积减半（zip 18 MB → ~9 MB），对本项目无意义。Sparkle 维护者的原话：分架构分发"不是 Apple/macOS 的方式"。
+
+### 自动更新会下载错架构吗？
+
+不会。Universal 单包模式下所有用户走同一条 appcast、下载同一个包，安装后系统自动执行本机架构的切片——0.13.0（arm64-only）的老用户通过 Sparkle 升到 0.13.1 Universal 也完全正常，不存在"下载到不适合自己版本"的问题。
+
+## 五、验证记录
 
 - Debug 构建通过（Xcode 26 / Swift 6.2）。
 - 运行验证：分组展开态短名显示正确、悬停出现折叠箭头；`defaults write … sidebarProxiesGroupExpanded -bool false` 后重启，分组保持收起、四个代理条目隐藏，其余条目正常。
