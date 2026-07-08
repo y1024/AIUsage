@@ -260,11 +260,4 @@ Claude Code 与 Codex 的用量、计费、缓存和归档细节见 [docs/USAGE_
 
 ## Star 趋势
 
-<p align="center">
-  <a href="https://star-history.com/#sylearn/AIUsage&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=sylearn/AIUsage&type=Date&theme=dark">
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=sylearn/AIUsage&type=Date">
-    </picture>
-  </a>
-</p>
+[![Stargazers over time](https://starchart.cc/sylearn/AIUsage.svg)](https://starchart.cc/sylearn/AIUsage)

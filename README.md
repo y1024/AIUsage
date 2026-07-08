@@ -260,11 +260,4 @@ If AIUsage helps you, consider buying the author a coffee. Your support helps ke
 
 ## Star History
 
-<p align="center">
-  <a href="https://star-history.com/#sylearn/AIUsage&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=sylearn/AIUsage&type=Date&theme=dark">
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=sylearn/AIUsage&type=Date">
-    </picture>
-  </a>
-</p>
+[![Stargazers over time](https://starchart.cc/sylearn/AIUsage.svg)](https://starchart.cc/sylearn/AIUsage)
