@@ -56,6 +56,8 @@ struct GlobalProxyConfig: Codable, Equatable {
     /// 使双击桌面 app 也免登录。**不触碰真实 ~/.claude-science 凭证**，仅改写运行期 operon.lock（停用即删）。
     /// 缺省 false（安全默认，只做隔离沙箱）。
     var adoptRealInstance: Bool? = nil
+    /// 是否允许局域网访问（监听 0.0.0.0 而非 127.0.0.1）。缺省 false（安全默认，仅本机可用）。
+    var allowLAN: Bool? = nil
 
     // MARK: Defaults
 
@@ -150,6 +152,15 @@ struct GlobalProxyConfig: Codable, Equatable {
 
     /// 是否接管真实实例（缺省 false）。
     var effectiveAdoptReal: Bool { adoptRealInstance ?? false }
+
+    /// 是否允许局域网访问（缺省 false）。
+    var effectiveAllowLAN: Bool { allowLAN ?? false }
+
+    /// QuotaServer 绑定地址：开启局域网时监听 0.0.0.0，否则仅本机 127.0.0.1。
+    var bindAddress: String { effectiveAllowLAN ? "0.0.0.0" : "127.0.0.1" }
+
+    /// UI 展示用绑定主机名（与 bindAddress 一致）。
+    var displayBindHost: String { bindAddress }
 
     /// 当前 Science 实际监听端口：接管真实实例走 8765，否则走沙箱端口。
     var effectiveScienceListenPort: Int {

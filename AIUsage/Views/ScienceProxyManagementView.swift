@@ -14,6 +14,7 @@ struct ScienceProxyManagementView: View {
     @State private var emailText = ""
     @State private var selectedNodeId = ""
     @State private var adoptReal = false
+    @State private var allowLAN = false
     @State private var showAccountHelp = false
 
     static let brand = Color(red: 0.55, green: 0.36, blue: 0.96)
@@ -121,8 +122,8 @@ struct ScienceProxyManagementView: View {
                     ? L("real instance 127.0.0.1:\(manager.listenPort)", "真实实例 127.0.0.1:\(manager.listenPort)")
                     : L("sandbox 127.0.0.1:\(manager.listenPort)", "沙箱 127.0.0.1:\(manager.listenPort)")
                 Text(L(
-                    "Running · proxy 127.0.0.1:\(manager.config.port) · \(sciLabel)",
-                    "运行中 · 代理 127.0.0.1:\(manager.config.port) · \(sciLabel)"
+                    "Running · proxy \(manager.config.displayBindHost):\(manager.config.port) · \(sciLabel)",
+                    "运行中 · 代理 \(manager.config.displayBindHost):\(manager.config.port) · \(sciLabel)"
                 ))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -203,6 +204,12 @@ struct ScienceProxyManagementView: View {
 
             if isEnabled {
                 GlobalProxyFlowLayout(spacing: 6) {
+                    if manager.config.effectiveAllowLAN {
+                        GlobalProxySummaryChip(
+                            label: L("LAN Access", "局域网访问"),
+                            value: L("Enabled", "已启用")
+                        )
+                    }
                     GlobalProxySummaryChip(label: L("Mode", "模式"),
                                            value: manager.adoptReal ? L("Real instance", "真实实例") : L("Sandbox", "隔离沙箱"))
                     GlobalProxySummaryChip(label: L("Proxy Port", "代理端口"), value: "\(manager.config.port)")
@@ -236,6 +243,8 @@ struct ScienceProxyManagementView: View {
                     }
                 }
 
+                lanAccessToggle
+
                 Divider().padding(.vertical, 2)
 
                 adoptToggle
@@ -266,6 +275,34 @@ struct ScienceProxyManagementView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    }
+
+    private var lanAccessToggle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(L("Allow LAN Access (0.0.0.0)", "允许局域网访问 (0.0.0.0)"), isOn: Binding(
+                get: { allowLAN },
+                set: { newValue in
+                    allowLAN = newValue
+                    manager.updateAllowLAN(newValue)
+                }
+            ))
+            .font(.caption.weight(.medium))
+
+            if allowLAN {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(L(
+                        "Warning: This will expose the proxy to your local network",
+                        "警告：这将把代理暴露到你的局域网"
+                    ))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
+            }
+        }
     }
 
     private var adoptToggle: some View {
@@ -401,6 +438,7 @@ struct ScienceProxyManagementView: View {
         sciencePortText = "\(manager.config.effectiveSciencePort)"
         emailText = manager.config.effectiveSandboxEmail
         adoptReal = manager.adoptReal
+        allowLAN = manager.config.effectiveAllowLAN
         selectedNodeId = resolvedSelection
     }
 

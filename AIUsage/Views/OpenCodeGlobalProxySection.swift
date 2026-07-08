@@ -30,6 +30,8 @@ struct OpenCodeGlobalProxySection: View {
             isEnabled: isEnabled,
             isBusy: manager.isBusy,
             port: manager.config.port,
+            bindHost: manager.config.displayBindHost,
+            allowLAN: allowLANBinding,
             hasNodes: !nodes.isEmpty,
             emptyHint: emptyHint,
             errorText: manager.operationError,
@@ -119,7 +121,12 @@ struct OpenCodeGlobalProxySection: View {
         }
     }
 
-    // MARK: - Bindings
+    private var allowLANBinding: Binding<Bool> {
+        Binding(
+            get: { manager.config.effectiveAllowLAN },
+            set: { manager.updateAllowLAN($0) }
+        )
+    }
 
     private var enableBinding: Binding<Bool> {
         Binding(

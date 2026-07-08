@@ -184,7 +184,8 @@ Instead of activating one node at a time, run a single fixed local endpoint per 
 
 | Capability | What it does |
 |------------|-------------|
-| **Fixed endpoint** | Each agent points at one stable `127.0.0.1` port once; switching upstreams is in-process and CLI-transparent |
+| **Fixed endpoint** | Each agent points at one stable local port once; switching upstreams is in-process and CLI-transparent |
+| **LAN access (optional)** | Bind the global proxy to `0.0.0.0` so other devices on your LAN can reach it via your machine's IP (off by default) |
 | **Hot-swap active node** | Change the active node with zero restart; each request is rewritten to that node's real upstream model |
 | **Per-node attribution** | Cost and usage are recorded against the real active node and model, not a generic global bucket; ports are arbitrated across all three tracks to avoid collisions |
 
@@ -256,3 +257,14 @@ If AIUsage helps you, consider buying the author a coffee. Your support helps ke
 ## License
 
 [Apache License 2.0](LICENSE)
+
+## Star History
+
+<p align="center">
+  <a href="https://star-history.com/#sylearn/AIUsage&Date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=sylearn/AIUsage&type=Date&theme=dark">
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=sylearn/AIUsage&type=Date">
+    </picture>
+  </a>
+</p>

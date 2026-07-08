@@ -71,6 +71,13 @@ final class ScienceProxyManager: ObservableObject {
         persist()
     }
 
+    /// 更新是否允许局域网访问。仅停用态可改。
+    func updateAllowLAN(_ allowLAN: Bool) {
+        guard !config.isEnabled else { return }
+        config.allowLAN = allowLAN
+        persist()
+    }
+
     // MARK: - Start / Stop / Switch
 
     /// 一键开始：起代理 → 虚拟登录 → 启动沙箱 → （可选）开浏览器。
@@ -97,7 +104,7 @@ final class ScienceProxyManager: ObservableObject {
         // 与 Claude Code 每节点激活互斥性无关（Science 不写 settings.json），此处不接管任何 CLI 配置。
         // 1) 起代理进程（固定端口，复用 Claude 转换链路）。
         do {
-            try await runtime.start(port: config.port, env: env, nodeId: node.id, nodeName: node.name)
+            try await runtime.start(port: config.port, bindHost: config.bindAddress, env: env, nodeId: node.id, nodeName: node.name)
         } catch {
             operationError = error.localizedDescription
             scienceMgrLog.error("Failed to start Science proxy: \(String(describing: error), privacy: .public)")
