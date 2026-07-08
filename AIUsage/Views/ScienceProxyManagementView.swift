@@ -119,8 +119,8 @@ struct ScienceProxyManagementView: View {
                 .frame(width: 7, height: 7)
             if isEnabled {
                 let sciLabel = manager.adoptReal
-                    ? L("real instance \(manager.config.displayBindHost):\(manager.listenPort)", "真实实例 \(manager.config.displayBindHost):\(manager.listenPort)")
-                    : L("sandbox \(manager.config.displayBindHost):\(manager.listenPort)", "沙箱 \(manager.config.displayBindHost):\(manager.listenPort)")
+                    ? L("real instance 127.0.0.1:\(manager.listenPort)", "真实实例 127.0.0.1:\(manager.listenPort)")
+                    : L("sandbox 127.0.0.1:\(manager.listenPort)", "沙箱 127.0.0.1:\(manager.listenPort)")
                 Text(L(
                     "Running · proxy \(manager.config.displayBindHost):\(manager.config.port) · \(sciLabel)",
                     "运行中 · 代理 \(manager.config.displayBindHost):\(manager.config.port) · \(sciLabel)"
