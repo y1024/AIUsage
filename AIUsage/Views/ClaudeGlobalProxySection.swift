@@ -28,6 +28,8 @@ struct ClaudeGlobalProxySection: View {
             isEnabled: isEnabled,
             isBusy: manager.isBusy,
             port: manager.config.port,
+            bindHost: manager.config.displayBindHost,
+            allowLAN: allowLANBinding,
             hasNodes: !nodes.isEmpty,
             emptyHint: L("Create a Claude node first to use the global proxy.", "请先创建 Claude 节点后再使用全局代理。"),
             errorText: manager.operationError,
@@ -109,7 +111,12 @@ struct ClaudeGlobalProxySection: View {
         }
     }
 
-    // MARK: - Bindings
+    private var allowLANBinding: Binding<Bool> {
+        Binding(
+            get: { manager.config.effectiveAllowLAN },
+            set: { manager.updateAllowLAN($0) }
+        )
+    }
 
     private var enableBinding: Binding<Bool> {
         Binding(

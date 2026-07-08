@@ -15,6 +15,8 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
     let isEnabled: Bool
     let isBusy: Bool
     let port: Int
+    let bindHost: String
+    let allowLAN: Binding<Bool>
     let hasNodes: Bool
     let emptyHint: String
     let errorText: String?
@@ -97,7 +99,7 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
                 .fill(isEnabled ? Color.green : Color.secondary.opacity(0.5))
                 .frame(width: 7, height: 7)
             Text(isEnabled
-                 ? L("Running on 127.0.0.1:\(port)", "运行中 · 127.0.0.1:\(port)")
+                 ? L("Running on \(bindHost):\(port)", "运行中 · \(bindHost):\(port)")
                  : L("Stopped", "已停用"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -108,6 +110,12 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
 
     private var runningSummaryBlock: some View {
         GlobalProxyFlowLayout(spacing: 6) {
+            if allowLAN.wrappedValue {
+                GlobalProxySummaryChip(
+                    label: L("LAN Access", "局域网访问"),
+                    value: L("Enabled", "已启用")
+                )
+            }
             runningSummary()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -119,6 +127,7 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .textCase(.uppercase)
+            lanAccessToggle
             config()
         }
         .padding(12)
@@ -127,6 +136,27 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.primary.opacity(0.035))
         )
+    }
+
+    private var lanAccessToggle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(L("Allow LAN Access (0.0.0.0)", "允许局域网访问 (0.0.0.0)"), isOn: allowLAN)
+                .font(.caption.weight(.medium))
+            if allowLAN.wrappedValue {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(L(
+                        "Warning: This will expose the proxy to your local network",
+                        "警告：这将把代理暴露到你的局域网"
+                    ))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
+            }
+        }
     }
 }
 

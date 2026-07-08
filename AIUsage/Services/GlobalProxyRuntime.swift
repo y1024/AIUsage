@@ -102,7 +102,7 @@ final class GlobalProxyRuntime: ObservableObject {
 
     /// 启动常驻全局代理进程。`env` 由各轨适配器构造（上游 / client key / PROXY_TARGET 等）；
     /// 本类注入 admin key 与初始 node_id。端口冲突走跨轨仲裁 fail-loud；启动后等待 /health 就绪。
-    func start(port: Int, env baseEnv: [String: String], nodeId: String, nodeName: String) async throws {
+    func start(port: Int, bindHost: String, env baseEnv: [String: String], nodeId: String, nodeName: String) async throws {
         if isProcessRunning { stop() }
 
         if let conflict = ProxyPortArbiter.conflict(forPorts: [port], excluding: ownerId) {
@@ -121,7 +121,7 @@ final class GlobalProxyRuntime: ObservableObject {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: executablePath)
-        proc.arguments = ["--host", "127.0.0.1", "--port", "\(port)"]
+        proc.arguments = ["--host", bindHost, "--port", "\(port)"]
         proc.environment = environment
 
         let capturedTrack = track
@@ -180,7 +180,7 @@ final class GlobalProxyRuntime: ObservableObject {
         }
 
         self.isRunning = true
-        globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) started on 127.0.0.1:\(port, privacy: .public) pid=\(proc.processIdentifier, privacy: .public) node=\(nodeId, privacy: .public)")
+        globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) started on \(bindHost, privacy: .public):\(port, privacy: .public) pid=\(proc.processIdentifier, privacy: .public) node=\(nodeId, privacy: .public)")
     }
 
     func stop() {

@@ -68,6 +68,13 @@ final class GlobalProxyManager: ObservableObject {
         persist()
     }
 
+    /// 更新是否允许局域网访问。仅停用态可改（运行态改绑定地址需重启进程）。
+    func updateAllowLAN(_ allowLAN: Bool) {
+        guard !config.isEnabled else { return }
+        config.allowLAN = allowLAN
+        persist()
+    }
+
     /// 更新 Claude 三层虚拟模型（写入 settings.json 的 opus/sonnet/haiku）。仅停用态可改。
     func updateClaudeModels(port: Int, opus: String, sonnet: String, haiku: String) {
         guard !config.isEnabled else { return }
@@ -99,6 +106,7 @@ final class GlobalProxyManager: ObservableObject {
         do {
             try await runtime.start(
                 port: config.port,
+                bindHost: config.bindAddress,
                 env: env,
                 nodeId: node.id,
                 nodeName: node.name
@@ -180,6 +188,7 @@ final class GlobalProxyManager: ObservableObject {
         do {
             try await runtime.start(
                 port: config.port,
+                bindHost: config.bindAddress,
                 env: env,
                 nodeId: node.id,
                 nodeName: node.name
