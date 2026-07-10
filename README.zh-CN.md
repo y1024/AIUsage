@@ -173,7 +173,7 @@ AIUsage 内置四套相互独立的代理 —— 分别面向 **Claude Code**、
 | **本地虚拟登录** | 在独立 data-dir 写一份本地自造的虚拟 OAuth 凭证越过登录门，全程零 Anthropic 接触、不碰真实 `~/.claude-science` |
 | **推理走第三方** | 通过 `ANTHROPIC_BASE_URL` 把推理导向复用的本地 `QuotaServer`，剥离入站 OAuth、注入你的第三方 Key，按 opus/sonnet/haiku 档位映射到节点真实模型 |
 | **隔离沙箱** | 独立 HOME / 端口（14410）/ data-dir / 钥匙串，与真实实例零影响；浏览器一键打开已登录页 |
-| **接管真实实例（可选）** | 由 8765 反向代理 + 独立内部 daemon（14411）让**双击桌面 app 也免登录**；仅改写运行期 `operon.lock`，不触碰真实凭证 |
+| **接管真实实例（可选）** | 由 8765 反向代理 + 独立内部 daemon（14411）让**双击桌面 app 也免登录**；会话初始化兼容新版 daemon 的响应/cookie 格式，上游认证变化时只输出脱敏诊断 |
 | **复用节点池** | 与 Claude Code 代理共享 Claude 家族节点；运行时热切换上游，Science 无感 |
 
 **快速开始：** 先在 Claude Code 代理页备好一个上游节点 → 打开 AIUsage → Claude Science 代理 → 选择节点 → 一键开始，浏览器自动打开已登录的 Science。技术细节见 [docs/CLAUDE_SCIENCE_INTEGRATION.md](docs/CLAUDE_SCIENCE_INTEGRATION.md)。

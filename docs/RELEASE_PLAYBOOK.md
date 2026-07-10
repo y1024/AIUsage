@@ -33,12 +33,13 @@ git status -sb
 
 ## 本地预检
 
-每次发版前至少跑这四步：
+每次发版前至少跑这五步：
 
 ```bash
 cd QuotaBackend && swift test
 cd ..
 ./scripts/run_claude_proxy_regression.sh
+./scripts/run_science_auth_proxy_regression.sh
 xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release build CODE_SIGNING_ALLOWED=NO
 ./scripts/package-release.sh <version>
 ```
@@ -47,6 +48,7 @@ xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release bui
 
 - `swift test` 检查后端与包测试
 - `run_claude_proxy_regression.sh` 检查 Claude 代理主链路
+- `run_science_auth_proxy_regression.sh` 检查 Claude Science 的 HTTP、nonce、cookie 兼容与脱敏诊断
 - `xcodebuild ... Release` 提前暴露 Release-only 编译问题
 - `package-release.sh` 提前暴露本地打包问题
 
@@ -261,6 +263,7 @@ git status -sb
 cd QuotaBackend && swift test
 cd ..
 ./scripts/run_claude_proxy_regression.sh
+./scripts/run_science_auth_proxy_regression.sh
 xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release build CODE_SIGNING_ALLOWED=NO
 ./scripts/package-release.sh <version>
 git add <changed-files>

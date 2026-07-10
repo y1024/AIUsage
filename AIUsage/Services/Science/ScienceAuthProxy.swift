@@ -18,6 +18,48 @@ import os.log
 
 private let authProxyLog = Logger(subsystem: "com.aiusage.desktop", category: "ScienceAuthProxy")
 
+struct ScienceAuthProbeResult {
+    let succeeded: Bool
+    let statusCode: Int?
+    let location: String?
+    let contentType: String?
+    let bodyPrefix: String?
+    let transportError: String?
+
+    var summary: String {
+        var parts: [String] = []
+        if let statusCode { parts.append("status=\(statusCode)") }
+        if let location, !location.isEmpty { parts.append("location=\(location)") }
+        if let contentType, !contentType.isEmpty { parts.append("content-type=\(contentType)") }
+        if let bodyPrefix, !bodyPrefix.isEmpty { parts.append("body=\(bodyPrefix)") }
+        if let transportError, !transportError.isEmpty { parts.append("error=\(transportError)") }
+        return parts.isEmpty ? "no response details" : parts.joined(separator: ", ")
+    }
+}
+
+private struct ScienceAuthFailure: Error {
+    enum Stage: String {
+        case mintNonce = "mint-nonce"
+        case exchangeCookies = "exchange-cookies"
+    }
+
+    let stage: Stage
+    let reason: String
+    let statusCode: Int?
+    let location: String?
+    let contentType: String?
+    let bodyPrefix: String?
+
+    var summary: String {
+        var parts = ["stage=\(stage.rawValue)", "reason=\(reason)"]
+        if let statusCode { parts.append("status=\(statusCode)") }
+        if let location, !location.isEmpty { parts.append("location=\(location)") }
+        if let contentType, !contentType.isEmpty { parts.append("content-type=\(contentType)") }
+        if let bodyPrefix, !bodyPrefix.isEmpty { parts.append("body=\(bodyPrefix)") }
+        return parts.joined(separator: ", ")
+    }
+}
+
 final class ScienceAuthProxy: @unchecked Sendable {
     static let shared = ScienceAuthProxy()
 
@@ -26,7 +68,8 @@ final class ScienceAuthProxy: @unchecked Sendable {
     private var _listenPort = 0
     private var _upstreamPort = 0
     private var _dataDir = ""
-    private var _cookies: (auth: String, csrf: String)?
+    private var _cookies: ScienceSessionCookies?
+    private var _lastAuthFailure: ScienceAuthFailure?
     private var _running = false
 
     private init() {}
@@ -50,11 +93,20 @@ final class ScienceAuthProxy: @unchecked Sendable {
             _upstreamPort = upstreamPort
             _dataDir = dataDir
             _cookies = nil
+            _lastAuthFailure = nil
             _running = true
         }
 
-        // 预铸一份 cookie（失败不致命——首个请求会再兜底重铸）。
-        _ = ensureCookies(forceRefresh: true)
+        // 先确认 nonce → cookie 链路真实可用，再占 8765 和劫持真实 lock。
+        // 新版 daemon 的 HTTP 头/响应格式若变化，会在这里给出脱敏诊断，
+        // 不再拖到最后只报一个模糊的 8765 自探失败。
+        guard await bootstrapSession(timeout: 8) else {
+            let details = stateLock.withLock {
+                _lastAuthFailure?.summary ?? "no authentication response"
+            }
+            stateLock.withLock { _running = false }
+            throw ScienceAuthProxyError.sessionBootstrapFailed(details: details)
+        }
 
         var started: [NWListener] = []
         do {
@@ -73,22 +125,49 @@ final class ScienceAuthProxy: @unchecked Sendable {
         authProxyLog.info("ScienceAuthProxy listening on :\(listenPort) → 127.0.0.1:\(upstreamPort)")
     }
 
-    /// 只读探活：反代应对 GET / 注入 cookie 后返回 200（已登录）。用于启动后自检与展示。
-    static func probe(listenPort: Int, timeout: TimeInterval = 6) async -> Bool {
-        guard let url = URL(string: "http://127.0.0.1:\(listenPort)/") else { return false }
+    /// 只读探活：不跟随重定向，返回脱敏的状态/Location/Content-Type/正文摘要。
+    func probe(listenPort: Int, timeout: TimeInterval = 6) async -> ScienceAuthProbeResult {
         let deadline = Date().addingTimeInterval(timeout)
+        var last = ScienceAuthProbeResult(
+            succeeded: false,
+            statusCode: nil,
+            location: nil,
+            contentType: nil,
+            bodyPrefix: nil,
+            transportError: "proxy did not respond"
+        )
         repeat {
-            do {
-                var req = URLRequest(url: url, timeoutInterval: 2)
-                req.httpMethod = "GET"
-                let (_, resp) = try await URLSession.shared.data(for: req)
-                if let http = resp as? HTTPURLResponse, http.statusCode == 200 { return true }
-            } catch {
-                // 未起来 / 连接被拒 → 继续轮询
+            let request = Data(
+                "GET / HTTP/1.1\r\nHost: localhost:\(listenPort)\r\nAccept: text/html\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n".utf8
+            )
+            if let raw = await Self.tcpRoundTrip(host: "127.0.0.1", port: listenPort, request: request),
+               let response = Self.parseHTTPResponse(raw) {
+                let location = response.header("location").map { Self.redactedText($0) }
+                let contentType = response.header("content-type")
+                let bodyPrefix = String(data: response.body.prefix(512), encoding: .utf8)
+                    .map { Self.redactedText($0) }
+                last = ScienceAuthProbeResult(
+                    succeeded: response.statusCode == 200,
+                    statusCode: response.statusCode,
+                    location: location,
+                    contentType: contentType,
+                    bodyPrefix: response.statusCode == 200 ? nil : bodyPrefix,
+                    transportError: nil
+                )
+                if last.succeeded { return last }
+            } else {
+                last = ScienceAuthProbeResult(
+                    succeeded: false,
+                    statusCode: nil,
+                    location: nil,
+                    contentType: nil,
+                    bodyPrefix: nil,
+                    transportError: "connection failed or malformed HTTP response"
+                )
             }
             try? await Task.sleep(nanoseconds: 300_000_000)
         } while Date() < deadline
-        return false
+        return last
     }
 
     func stop() {
@@ -97,6 +176,7 @@ final class ScienceAuthProxy: @unchecked Sendable {
             listeners = []
             _running = false
             _cookies = nil
+            _lastAuthFailure = nil
             return l
         }
         old.forEach { $0.cancel() }
@@ -144,48 +224,194 @@ final class ScienceAuthProxy: @unchecked Sendable {
 
     // MARK: - Cookie 铸造（nonce → operon 会话 cookie）
 
-    private var cookies: (auth: String, csrf: String)? { stateLock.withLock { _cookies } }
+    private var cookies: ScienceSessionCookies? { stateLock.withLock { _cookies } }
     private var upstreamPort: Int { stateLock.withLock { _upstreamPort } }
     private var dataDir: String { stateLock.withLock { _dataDir } }
 
-    /// 确保有一份 cookie；forceRefresh 或缺失时重铸。返回当前 cookie（可能为 nil）。
+    private func bootstrapSession(timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if ensureCookies(forceRefresh: true) != nil { return true }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        } while Date() < deadline
+        return false
+    }
+
+    /// 确保有一份 cookie；forceRefresh 或缺失时重铸。失败信息只保存脱敏摘要。
     @discardableResult
-    private func ensureCookies(forceRefresh: Bool) -> (auth: String, csrf: String)? {
+    private func ensureCookies(forceRefresh: Bool) -> ScienceSessionCookies? {
         if !forceRefresh, let c = cookies { return c }
-        guard let nonce = mintNonce() else {
-            authProxyLog.error("mint nonce failed")
-            return cookies
+        let nonce: String
+        switch mintNonce() {
+        case .success(let value):
+            nonce = value
+        case .failure(let failure):
+            stateLock.withLock { _lastAuthFailure = failure }
+            authProxyLog.error("\(failure.summary, privacy: .public)")
+            return forceRefresh ? nil : cookies
         }
-        guard let fresh = exchangeNonceForCookies(nonce: nonce) else {
-            authProxyLog.error("exchange nonce for cookies failed")
-            return cookies
+        switch exchangeNonceForCookies(nonce: nonce) {
+        case .success(let fresh):
+            stateLock.withLock {
+                _cookies = fresh
+                _lastAuthFailure = nil
+            }
+            authProxyLog.info("Science session cookie bootstrap succeeded (count=\(fresh.items.count))")
+            return fresh
+        case .failure(let failure):
+            stateLock.withLock { _lastAuthFailure = failure }
+            authProxyLog.error("\(failure.summary, privacy: .public)")
+            return forceRefresh ? nil : cookies
         }
-        stateLock.withLock { _cookies = fresh }
-        return fresh
     }
 
     /// 通过 daemon 控制套接字（Unix socket）铸一个一次性 nonce：POST /nonce。
-    private func mintNonce() -> String? {
+    private func mintNonce() -> Result<String, ScienceAuthFailure> {
         let sock = (dataDir as NSString).appendingPathComponent("daemon.sock")
-        let req = "POST /nonce HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        guard let resp = Self.posixRequestUnix(socketPath: sock, request: Data(req.utf8)),
-              let body = Self.httpBody(resp),
-              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              let nonce = json["nonce"] as? String, !nonce.isEmpty else {
-            return nil
+        let req = "POST /nonce HTTP/1.1\r\nHost: localhost\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        guard let raw = Self.posixRequestUnix(socketPath: sock, request: Data(req.utf8)) else {
+            return nonceCLIFallback(after: ScienceAuthFailure(
+                stage: .mintNonce,
+                reason: "daemon.sock unavailable or timed out",
+                statusCode: nil,
+                location: nil,
+                contentType: nil,
+                bodyPrefix: nil
+            ))
         }
-        return nonce
+        guard let response = Self.parseHTTPResponse(raw) else {
+            return nonceCLIFallback(after: ScienceAuthFailure(
+                stage: .mintNonce,
+                reason: "malformed HTTP response",
+                statusCode: nil,
+                location: nil,
+                contentType: nil,
+                bodyPrefix: nil
+            ))
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            return nonceCLIFallback(after: failure(
+                stage: .mintNonce,
+                reason: "HTTP request rejected",
+                response: response
+            ))
+        }
+        guard let nonce = Self.nonceValue(from: response.body), !nonce.isEmpty else {
+            return nonceCLIFallback(after: failure(
+                stage: .mintNonce,
+                reason: "response did not contain a nonce",
+                response: response
+            ))
+        }
+        return .success(nonce)
     }
 
-    /// 用 nonce 向内部 daemon 换取 operon_auth / operon_csrf：GET /?nonce=<nonce>，解析 Set-Cookie。
-    private func exchangeNonceForCookies(nonce: String) -> (auth: String, csrf: String)? {
+    /// 官方 CLI 是版本化的兼容边界；私有 /nonce 响应变化时，用它获取同一 data-dir 的单次链接。
+    private func nonceCLIFallback(after failure: ScienceAuthFailure) -> Result<String, ScienceAuthFailure> {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ScienceSandboxPaths.scienceBinary)
+        process.arguments = ["url", "--data-dir", dataDir]
+        var environment = ProcessInfo.processInfo.environment
+        environment["no_proxy"] = "127.0.0.1,localhost,::1"
+        environment["NO_PROXY"] = "127.0.0.1,localhost,::1"
+        process.environment = environment
+        let output = Pipe()
+        let errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+        do {
+            try process.run()
+        } catch {
+            return .failure(failure)
+        }
+        guard finished.wait(timeout: .now() + 3) == .success else {
+            process.terminate()
+            _ = finished.wait(timeout: .now() + 1)
+            return .failure(failure)
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        _ = errors.fileHandleForReading.readDataToEndOfFile()
+        guard process.terminationStatus == 0,
+              let nonce = Self.nonceValue(from: data), !nonce.isEmpty else {
+            return .failure(failure)
+        }
+        authProxyLog.info("Science nonce CLI fallback succeeded")
+        return .success(nonce)
+    }
+
+    /// 用 nonce 向内部 daemon 换取当前版本下发的会话 cookie。
+    private func exchangeNonceForCookies(nonce: String) -> Result<ScienceSessionCookies, ScienceAuthFailure> {
         let port = upstreamPort
-        let req = "GET /?nonce=\(nonce) HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nConnection: close\r\n\r\n"
-        guard let resp = Self.posixRequestTCP(host: "127.0.0.1", port: port, request: Data(req.utf8)),
-              let head = Self.httpHeadString(resp) else { return nil }
-        guard let auth = Self.cookieValue("operon_auth", in: head),
-              let csrf = Self.cookieValue("operon_csrf", in: head) else { return nil }
-        return (auth, csrf)
+        guard let encodedNonce = Self.percentEncodedQueryValue(nonce) else {
+            return .failure(ScienceAuthFailure(
+                stage: .exchangeCookies,
+                reason: "nonce could not be URL-encoded",
+                statusCode: nil,
+                location: nil,
+                contentType: nil,
+                bodyPrefix: nil
+            ))
+        }
+        // Connect over 127.0.0.1 but present the daemon's own advertised
+        // localhost authority. Newer builds validate Host/Origin more strictly.
+        let req = "GET /?nonce=\(encodedNonce) HTTP/1.1\r\nHost: localhost:\(port)\r\nAccept: text/html\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
+        guard let raw = Self.posixRequestTCP(
+            host: "127.0.0.1",
+            port: port,
+            request: Data(req.utf8)
+        ) else {
+            return .failure(ScienceAuthFailure(
+                stage: .exchangeCookies,
+                reason: "internal daemon unavailable or timed out",
+                statusCode: nil,
+                location: nil,
+                contentType: nil,
+                bodyPrefix: nil
+            ))
+        }
+        guard let response = Self.parseHTTPResponse(raw),
+              let head = Self.httpHeadString(raw) else {
+            return .failure(ScienceAuthFailure(
+                stage: .exchangeCookies,
+                reason: "malformed HTTP response",
+                statusCode: nil,
+                location: nil,
+                contentType: nil,
+                bodyPrefix: nil
+            ))
+        }
+        let fresh = Self.sessionCookies(in: head)
+        let hasSessionCookie = fresh.items.contains {
+            let name = $0.name.lowercased()
+            return name == "operon_auth" || name.contains("auth") || name.contains("session") || name.contains("token")
+        }
+        guard !fresh.isEmpty, hasSessionCookie else {
+            return .failure(failure(
+                stage: .exchangeCookies,
+                reason: "response did not set a recognizable session cookie",
+                response: response
+            ))
+        }
+        return .success(fresh)
+    }
+
+    private func failure(
+        stage: ScienceAuthFailure.Stage,
+        reason: String,
+        response: ScienceHTTPResponse
+    ) -> ScienceAuthFailure {
+        let body = String(data: response.body.prefix(512), encoding: .utf8)
+            .map { Self.redactedText($0) }
+        return ScienceAuthFailure(
+            stage: stage,
+            reason: reason,
+            statusCode: response.statusCode,
+            location: response.header("location").map { Self.redactedText($0) },
+            contentType: response.header("content-type"),
+            bodyPrefix: body
+        )
     }
 
     // MARK: - 每连接处理
@@ -205,9 +431,8 @@ final class ScienceAuthProxy: @unchecked Sendable {
 
         // /login → 直接 302 到 redirect 目标（默认 /）：浏览器随后带上我们下发的 cookie 请求 / → 已登录。
         if req.pathOnly == "/login" || req.pathOnly.hasPrefix("/login/") {
-            let target = req.queryValue("redirect")?.removingPercentEncoding ?? "/"
-            let safeTarget = target.hasPrefix("/") ? target : "/"
-            await Self.send(conn, data: redirectResponse(location: safeTarget))
+            let target = Self.safeLocalRedirect(req.queryValue("redirect"))
+            await Self.send(conn, data: redirectResponse(location: target))
             return
         }
 
@@ -224,7 +449,13 @@ final class ScienceAuthProxy: @unchecked Sendable {
 
     /// 普通 HTTP 转发：重写头（注 cookie / Host），上游 Connection: close 读满响应，按需给浏览器补 Set-Cookie。
     private func forwardHTTP(req: ParsedRequest, body: Data, allowRetry: Bool) async -> Data {
-        let cookie = ensureCookies(forceRefresh: false)
+        guard let cookie = ensureCookies(forceRefresh: false) else {
+            let details = stateLock.withLock { _lastAuthFailure?.summary ?? "no session cookie" }
+            return Self.plainResponse(
+                status: 503,
+                text: "Science authentication unavailable (\(details))"
+            )
+        }
         let port = upstreamPort
         let upstreamReq = buildUpstreamRequest(req: req, body: body, cookie: cookie, websocket: false)
 
@@ -238,7 +469,13 @@ final class ScienceAuthProxy: @unchecked Sendable {
         let location = Self.headerValue("location", in: head) ?? ""
         let sessionInvalid = status == 401 || ((300..<400).contains(status) && location.contains("/login"))
         if sessionInvalid, allowRetry {
-            _ = ensureCookies(forceRefresh: true)
+            guard ensureCookies(forceRefresh: true) != nil else {
+                let details = stateLock.withLock { _lastAuthFailure?.summary ?? "session refresh failed" }
+                return Self.plainResponse(
+                    status: 503,
+                    text: "Science authentication refresh failed (\(details))"
+                )
+            }
             return await forwardHTTP(req: req, body: body, allowRetry: false)
         }
 
@@ -248,7 +485,13 @@ final class ScienceAuthProxy: @unchecked Sendable {
     // MARK: - WebSocket 隧道
 
     private func handleWebSocket(client: NWConnection, req: ParsedRequest, headData: Data, leftover: Data) async {
-        let cookie = ensureCookies(forceRefresh: false)
+        guard let cookie = ensureCookies(forceRefresh: false) else {
+            await Self.send(client, data: Self.plainResponse(
+                status: 503,
+                text: "Science authentication unavailable"
+            ))
+            return
+        }
         let port = upstreamPort
         let upgradeHead = buildUpstreamRequest(req: req, body: Data(), cookie: cookie, websocket: true)
 
@@ -272,13 +515,13 @@ final class ScienceAuthProxy: @unchecked Sendable {
     // MARK: - 头重写
 
     /// 构造发往内部 daemon 的请求字节：保留原头，重写 Host / Origin / Referer、注入 operon cookie，普通请求强制 Connection: close。
-    private func buildUpstreamRequest(req: ParsedRequest, body: Data, cookie: (auth: String, csrf: String)?, websocket: Bool) -> Data {
+    private func buildUpstreamRequest(req: ParsedRequest, body: Data, cookie: ScienceSessionCookies, websocket: Bool) -> Data {
         var lines = "\(req.method) \(req.path) HTTP/1.1\r\n"
         let port = upstreamPort
         // 内部 daemon 用「同源」校验（CORS + WS）：只放行【自身监听端口】的 origin，
         // 浏览器发来的 origin 是对外的 8765 → 会被判「forbidden origin / origin not allowed」。
         // 故把 Origin / Referer 改写成 daemon 自身 origin，让其视为同源放行。
-        let upstreamOrigin = "http://127.0.0.1:\(port)"
+        let upstreamOrigin = "http://localhost:\(port)"
         // 原样保留除 host / cookie / origin / referer / connection（普通请求）外的所有头；WS 保留 connection/upgrade。
         for (name, value) in req.headerPairs {
             let lower = name.lowercased()
@@ -286,7 +529,7 @@ final class ScienceAuthProxy: @unchecked Sendable {
             if !websocket, lower == "connection" { continue }
             lines += "\(name): \(value)\r\n"
         }
-        lines += "Host: 127.0.0.1:\(port)\r\n"
+        lines += "Host: localhost:\(port)\r\n"
         // Origin：浏览器对非 GET / WS 会带；一律改写为 daemon 自身 origin。
         if req.headerPairs.contains(where: { $0.name.lowercased() == "origin" }) || websocket {
             lines += "Origin: \(upstreamOrigin)\r\n"
@@ -296,11 +539,8 @@ final class ScienceAuthProxy: @unchecked Sendable {
             lines += "Referer: \(Self.rewriteRefererOrigin(referer, to: upstreamOrigin))\r\n"
         }
         // 合并 cookie：丢弃客户端可能残留的旧 operon_*，追加当前有效值。
-        var cookieParts = req.otherCookiePairs
-        if let c = cookie {
-            cookieParts.append("operon_auth=\(c.auth)")
-            cookieParts.append("operon_csrf=\(c.csrf)")
-        }
+        var cookieParts = cookie.preservingUnmanagedClientCookies(req.cookieParts)
+        cookieParts.append(contentsOf: cookie.requestPairs)
         if !cookieParts.isEmpty {
             lines += "Cookie: \(cookieParts.joined(separator: "; "))\r\n"
         }
@@ -314,7 +554,7 @@ final class ScienceAuthProxy: @unchecked Sendable {
     }
 
     /// 重写上游响应给浏览器：强制 Connection: close；对 text/html 响应追加 Set-Cookie，让 SPA 能读到 csrf 发 x-operon-csrf。
-    private func rewriteResponseForClient(resp: Data, head: String, cookie: (auth: String, csrf: String)?) -> Data {
+    private func rewriteResponseForClient(resp: Data, head: String, cookie: ScienceSessionCookies) -> Data {
         guard let sep = resp.range(of: Data([13, 10, 13, 10])) else { return resp }
         let body = resp.subdata(in: sep.upperBound..<resp.endIndex)
 
@@ -330,9 +570,10 @@ final class ScienceAuthProxy: @unchecked Sendable {
             rebuilt += line + "\r\n"
         }
         rebuilt += "Connection: close\r\n"
-        if isHTML, let c = cookie {
-            rebuilt += "Set-Cookie: operon_auth=\(c.auth); HttpOnly; SameSite=Strict; Path=/\r\n"
-            rebuilt += "Set-Cookie: operon_csrf=\(c.csrf); SameSite=Strict; Path=/\r\n"
+        if isHTML {
+            for header in cookie.clientHeaders {
+                rebuilt += header + "\r\n"
+            }
         }
         rebuilt += "\r\n"
         var out = Data(rebuilt.utf8)
@@ -343,8 +584,9 @@ final class ScienceAuthProxy: @unchecked Sendable {
     private func redirectResponse(location: String) -> Data {
         var s = "HTTP/1.1 302 Found\r\nLocation: \(location)\r\n"
         if let c = cookies {
-            s += "Set-Cookie: operon_auth=\(c.auth); HttpOnly; SameSite=Strict; Path=/\r\n"
-            s += "Set-Cookie: operon_csrf=\(c.csrf); SameSite=Strict; Path=/\r\n"
+            for header in c.clientHeaders {
+                s += header + "\r\n"
+            }
         }
         s += "Content-Length: 0\r\nConnection: close\r\n\r\n"
         return Data(s.utf8)
@@ -369,6 +611,7 @@ private final class ResumeOnce {
 
 enum ScienceAuthProxyError: LocalizedError {
     case listenFailed(port: Int)
+    case sessionBootstrapFailed(details: String)
 
     var errorDescription: String? {
         switch self {
@@ -376,6 +619,11 @@ enum ScienceAuthProxyError: LocalizedError {
             return AppSettings.shared.t(
                 "Failed to bind the Claude Science auth proxy on port \(port). Is it already in use?",
                 "无法在端口 \(port) 启动 Claude Science 鉴权代理，端口可能被占用。"
+            )
+        case .sessionBootstrapFailed(let details):
+            return AppSettings.shared.t(
+                "Claude Science login session bootstrap failed (\(details)).",
+                "Claude Science 登录会话初始化失败（\(details)）。"
             )
         }
     }

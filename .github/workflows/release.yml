@@ -71,6 +71,10 @@ jobs:
             -resolvePackageDependencies \
             -derivedDataPath build/DerivedData
 
+      - name: Run Claude Science auth proxy regression
+        shell: bash
+        run: ./scripts/run_science_auth_proxy_regression.sh
+
       # Import the stable self-signed code signing certificate (issue #35).
       # Skipped automatically if the secret is absent, in which case the
       # packaging script falls back to ad-hoc signing.

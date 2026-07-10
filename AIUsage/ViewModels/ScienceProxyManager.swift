@@ -169,21 +169,23 @@ final class ScienceProxyManager: ObservableObject {
                 await teardownAdopt()
                 runtime.stop()
                 operationError = error.localizedDescription
-                scienceMgrLog.error("Adopt aborted: auth proxy bind failed: \(String(describing: error), privacy: .public)")
+                scienceMgrLog.error("Adopt aborted: auth proxy startup failed: \(String(describing: error), privacy: .public)")
                 return
             }
             await Task.detached(priority: .userInitiated) { ScienceRealAdopt.hijackLock() }.value
 
-            // 自探：反代对 GET / 注 cookie 后应返回 200（已登录）。失败即回滚，避免再出现「仍显示登录页」。
-            let served = await ScienceAuthProxy.probe(listenPort: GlobalProxyConfig.realInstancePort)
-            if !served {
+            // 自探：反代对 GET / 注 cookie 后应直接返回 200（不跟随登录重定向）。
+            // 失败时附带脱敏的状态/Location/Content-Type/正文摘要，便于定位协议变化。
+            let probe = await ScienceAuthProxy.shared.probe(listenPort: GlobalProxyConfig.realInstancePort)
+            if !probe.succeeded {
                 await teardownAdopt()
                 runtime.stop()
-                operationError = AppSettings.shared.t(
+                let baseMessage = AppSettings.shared.t(
                     "The login-free proxy on 8765 didn't serve a logged-in page. Aborted and restored your real login.",
                     "8765 免登录反代未能返回已登录页，已中止并还原真实登录。"
                 )
-                scienceMgrLog.error("Adopt aborted: 8765 self-probe not logged-in")
+                operationError = "\(baseMessage)\n\(probe.summary)"
+                scienceMgrLog.error("Adopt aborted: 8765 self-probe failed: \(probe.summary, privacy: .public)")
                 return
             }
             scienceMgrLog.info("Adopt verified: 8765 reverse proxy serving logged-in page")

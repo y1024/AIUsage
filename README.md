@@ -173,7 +173,7 @@ Launch a local [Claude Science](https://claude.com) instance without a Claude su
 | **Local virtual login** | Forges a self-made virtual OAuth credential in an isolated data-dir to pass the login gate — zero Anthropic contact, never touching your real `~/.claude-science` |
 | **Inference via third-party** | Points `ANTHROPIC_BASE_URL` at the reused local `QuotaServer`, strips inbound OAuth, injects your third-party key, and maps opus/sonnet/haiku tiers to the node's real models |
 | **Isolated sandbox** | Separate HOME / port (14410) / data-dir / keychain, zero impact on the real instance; one click opens the logged-in page in your browser |
-| **Adopt the real instance (optional)** | An 8765 reverse proxy plus a decoupled internal daemon (14411) makes the **double-clicked desktop app login-free too**; only the runtime `operon.lock` is rewritten, real credentials are never touched |
+| **Adopt the real instance (optional)** | An 8765 reverse proxy plus a decoupled internal daemon (14411) makes the **double-clicked desktop app login-free too**; session bootstrap tolerates current daemon response/cookie formats and reports redacted diagnostics if upstream auth changes |
 | **Shared node pool** | Reuses the Claude-family nodes from the Claude Code proxy; hot-swap the upstream at runtime, transparent to Science |
 
 **Quick start:** Prepare an upstream node on the Claude Code proxy page first → Open AIUsage → Claude Science Proxy → pick a node → One-click start; your browser opens the logged-in Science automatically. See [docs/CLAUDE_SCIENCE_INTEGRATION.md](docs/CLAUDE_SCIENCE_INTEGRATION.md) for the technical design.
