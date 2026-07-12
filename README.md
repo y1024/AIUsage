@@ -135,12 +135,14 @@ Universal Binary — runs natively on both Apple Silicon and Intel Macs (macOS 1
 > **New in v0.14.0** · Powered by the official [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) release.
 >
 > **Improved in v0.14.1** · CPA account synchronization now follows provider-native identity, safely converges verified historical copies, and keeps different workspaces or projects separate even when they share an email address.
+>
+> **Improved in v0.14.2** · A capability matrix now drives account semantics: only providers with a verified adapter (Codex, Antigravity) appear as "connect from AIUsage" candidates; Claude/Kimi/Grok are shown as CPA-native OAuth, Gemini CLI as an official plugin, and monitoring-only accounts (Cursor, Copilot, …) never enter the CPA pool. The Add Upstream wizard gains a safe multi-file import center with local recognition, preview, content/identity deduplication, per-file results, and a dedicated Codex auth.json converter.
 
 CPA Gateway turns subscription accounts into one managed local API surface. AIUsage downloads, verifies, starts, updates, and can roll back CLIProxyAPI independently, so a CPA update does not require a new AIUsage release.
 
 | Capability | What it does |
 | --- | --- |
-| **Unified account pool** | Add CPA-native OAuth accounts, import auth JSON, configure compatible API-key upstreams, or explicitly copy supported AIUsage accounts into CPA |
+| **Unified account pool** | Add CPA-native OAuth accounts, install official provider plugins, configure compatible API-key upstreams, copy supported AIUsage accounts (Codex, Antigravity) into CPA, or migrate auth files with a recognized, deduplicated batch import |
 | **Four managed apps** | Connect Codex, OpenCode, Claude Code, and Claude Science through the existing AIUsage proxy tracks without replacing their native capabilities |
 | **Native client APIs** | Copy complete OpenAI Responses / Chat, Anthropic Messages, and Gemini endpoints from setup sheets, with legacy and advanced paths in the supported-route list |
 | **Unified model catalog** | Collapse known CPA protocol aliases into one logical model, show recognized vendor logos, and expose the exact model ID required by each OpenAI, Anthropic, or Gemini client in model details |

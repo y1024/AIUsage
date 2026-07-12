@@ -142,13 +142,13 @@ struct SubscriptionGatewayView: View {
                 navigation.showAccounts(openAddAccount: true)
                 showAddAccount = true
             } label: {
-                Label(L("Add Account", "添加账号"), systemImage: "plus")
+                Label(L("Add Upstream", "添加上游"), systemImage: "plus")
             }
             .buttonStyle(.bordered)
             .disabled(manager.operation.isBusy)
             .help(L(
-                "Open the account guide; it can install or start CPA when needed.",
-                "打开账号向导；如有需要，可在向导内安装或启动 CPA。"
+                "Open the upstream guide; it can install or start CPA when needed.",
+                "打开添加上游向导；如有需要，可在向导内安装或启动 CPA。"
             ))
 
             runtimeBadge

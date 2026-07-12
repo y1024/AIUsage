@@ -328,6 +328,51 @@ extension CLIProxyAuthFile {
 
 }
 
+func gatewayProviderDisplayName(_ providerID: String) -> String {
+    switch providerID.lowercased() {
+    case "codex", "openai": "Codex"
+    case "anthropic", "claude": "Claude"
+    case "antigravity": "Antigravity"
+    case "kimi": "Kimi"
+    case "xai": "xAI"
+    case "gemini", "gemini-cli": "Gemini CLI"
+    case "vertex": "Vertex AI"
+    case "github-copilot", "copilot": "GitHub Copilot"
+    case "qwen": "Qwen"
+    case "iflow": "iFlow"
+    default: providerID.replacingOccurrences(of: "-", with: " ").capitalized
+    }
+}
+
+func gatewayNativeIdentitySummary(_ identity: CLIProxyAccountIdentity?) -> String? {
+    guard let identity else { return nil }
+    switch identity.providerID.lowercased() {
+    case "codex":
+        var parts: [String] = []
+        if let plan = identity.planDisplayName {
+            parts.append(L("\(plan) plan", "\(plan) 套餐"))
+        }
+        if let accountID = identity.shortAccountID {
+            parts.append(L("Workspace \(accountID)", "工作区 \(accountID)"))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    case "antigravity":
+        guard let projectID = identity.shortProjectID else { return nil }
+        return L("Project \(projectID)", "项目 \(projectID)")
+    default:
+        return identity.shortAccountID ?? identity.shortProjectID
+    }
+}
+
+func gatewayAccountIdentitySubtitle(
+    providerID: String,
+    identity: CLIProxyAccountIdentity?
+) -> String {
+    let provider = gatewayProviderDisplayName(providerID)
+    guard let summary = gatewayNativeIdentitySummary(identity) else { return provider }
+    return "\(provider) · \(summary)"
+}
+
 extension ProxyTarget {
     var gatewayProviderID: String {
         switch self {

@@ -149,12 +149,12 @@ struct SubscriptionGatewayOverviewView: View {
             onboardingCard(
                 icon: "person.badge.plus",
                 tint: .indigo,
-                title: L("Add your first subscription account", "添加第一个订阅账号"),
+                title: L("Add your first upstream", "添加第一个上游"),
                 detail: L(
-                    "Use CPA OAuth, connect a compatible AIUsage account, or import a CPA auth JSON file.",
-                    "可通过 CPA OAuth、接入兼容的 AIUsage 账号，或导入 CPA 认证 JSON 文件。"
+                    "Use CPA OAuth, an official plugin, a compatible AIUsage account, an API key, or a migrated auth file.",
+                    "可通过 CPA OAuth、官方插件、兼容的 AIUsage 账号、API Key 或迁移认证文件添加上游。"
                 ),
-                actionTitle: L("Add account", "添加账号")
+                actionTitle: L("Add upstream", "添加上游")
             ) {
                 navigation.showAccounts(openAddAccount: true)
                 showAddAccount = true

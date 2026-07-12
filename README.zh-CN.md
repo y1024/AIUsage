@@ -135,12 +135,14 @@ Universal Binary —— Apple Silicon 与 Intel 芯片 Mac 均原生运行（mac
 > **v0.14.0 新增** · 由官方 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 发布版提供网关能力。
 >
 > **v0.14.1 改进** · CPA 账号同步改用服务商原生身份，安全收敛经过验证的历史副本；即使邮箱相同，不同工作区或 Project 也会保持独立。
+>
+> **v0.14.2 改进** · 账号语义改由能力矩阵驱动：只有拥有已验证适配器的 Provider（Codex、Antigravity）才作为“从 AIUsage 接入”候选；Claude/Kimi/Grok 显示为 CPA 核心 OAuth，Gemini CLI 显示为官方插件，Cursor、Copilot 等仅监控账号不会进入 CPA 账号池。“添加上游”向导新增安全导入中心：多文件本地识别、导入预览、内容/身份去重、逐项结果，以及独立的 Codex auth.json 转换入口。
 
 CPA 网关把订阅账号汇聚成一套受管本地 API。AIUsage 可以独立下载、校验、启动、更新和回滚 CLIProxyAPI，因此更新 CPA 不需要等待 AIUsage 发布新版本。
 
 | 能力 | 说明 |
 | --- | --- |
-| **统一账号池** | 添加 CPA 原生 OAuth 账号、导入 auth JSON、配置兼容 API Key 上游，或将支持的 AIUsage 账号显式复制到 CPA |
+| **统一账号池** | 添加 CPA 原生 OAuth 账号、安装官方 Provider 插件、配置兼容 API Key 上游、将支持的 AIUsage 账号（Codex、Antigravity）复制到 CPA，或通过可识别、可去重的批量导入迁移认证文件 |
 | **托管四个应用** | 通过现有代理轨接入 Codex、OpenCode、Claude Code 与 Claude Science，完整保留各代理原有能力 |
 | **原生客户端 API** | 在接入详情中完整查看并复制 OpenAI Responses / Chat、Anthropic Messages 与 Gemini 接口，并在支持路由列表中查看 legacy 与高级路径 |
 | **统一模型目录** | 将已知 CPA 协议别名归并为一个逻辑模型，显示可识别厂商 Logo，并在模型详情中提供 OpenAI、Anthropic、Gemini 客户端各自需要的准确模型 ID |

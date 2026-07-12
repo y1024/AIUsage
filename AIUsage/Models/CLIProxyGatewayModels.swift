@@ -998,9 +998,16 @@ nonisolated struct CLIProxyAccountSyncCandidate: Identifiable, Equatable, Sendab
         self.compatibility = compatibility
     }
 
+    /// Structured sync readiness. Candidates only exist for providers with a
+    /// verified conversion adapter; other providers never appear as candidates
+    /// (see `CLIProxyCapabilityMatrix`). There is deliberately no generic
+    /// "unsupported, sign in with CPA" state.
     nonisolated enum Compatibility: Equatable, Sendable {
         case compatible
-        case unsupported(String)
+        /// The managed credential file is gone; fix it under Subscription Accounts.
+        case credentialMissing
+        /// The credential exists but cannot be converted; re-login in AIUsage.
+        case credentialInvalid(String)
     }
 }
 

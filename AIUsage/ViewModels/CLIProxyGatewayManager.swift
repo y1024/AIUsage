@@ -11,10 +11,12 @@ nonisolated private struct CLIProxySyncCandidateSource: Sendable, Equatable {
 
 nonisolated private enum CLIProxySyncCandidateEvaluation: Sendable {
     case compatible(identity: CLIProxyAccountIdentity, modifiedAt: Date?)
-    case requiresAuthFile
-    case unsupportedProvider
     case missingFile
+    case notAnAuthFile
     case conversionFailed(String)
+    /// The provider has no verified adapter; it never becomes a candidate row.
+    /// Providers with a CPA OAuth/plugin path surface as upstream hints instead.
+    case notACandidate(CLIProxyUpstreamCapability)
 }
 
 nonisolated private struct CLIProxySyncCandidateResult: Sendable {
@@ -65,8 +67,9 @@ final class CLIProxyGatewayManager: ObservableObject {
     @Published private(set) var installedVersions: [CLIProxyInstalledVersion] = []
     @Published private(set) var latestRelease: CLIProxyRelease?
     @Published private(set) var lastCheckedAt: Date?
-    @Published private(set) var lastError: String?
-    @Published private(set) var authFiles: [CLIProxyAuthFile] = []
+    // Settable from same-module extensions (CLIProxyGatewayManager+Import).
+    @Published var lastError: String?
+    @Published var authFiles: [CLIProxyAuthFile] = []
     @Published private(set) var availableModels: [CLIProxyModel] = []
     @Published private(set) var modelCatalog: [CLIProxyModelCatalogEntry] = []
     @Published private(set) var unavailableModelProtocols: Set<CLIProxyModelProtocol> = []
@@ -93,10 +96,14 @@ final class CLIProxyGatewayManager: ObservableObject {
     @Published private(set) var accountSyncStates: [String: CLIProxyAccountSyncState] = [:]
     @Published private(set) var syncRecords: [CLIProxyAccountSyncRecord] = []
     @Published private(set) var syncCandidates: [CLIProxyAccountSyncCandidate] = []
+    /// AIUsage-monitored providers that cannot copy credentials but have a
+    /// legitimate CPA path (independent OAuth or an official plugin).
+    @Published private(set) var upstreamAuthHints: [CLIProxyUpstreamAuthHint] = []
     @Published private(set) var authFileIdentities: [String: CLIProxyAccountIdentity] = [:]
     @Published private(set) var authDeduplicationConflictCount = 0
     @Published private(set) var syncManifestError: String?
-    @Published private(set) var lastImportedAuthFileName: String?
+    @Published var authImportSession: CLIProxyAuthImportSession?
+    @Published var isImportingAuthFiles = false
 
     private let paths: CLIProxyPaths
     private let releaseClient: CLIProxyReleaseClient
@@ -337,7 +344,9 @@ final class CLIProxyGatewayManager: ObservableObject {
         }
         guard !Task.isCancelled, generation == syncCandidateGeneration else { return }
 
-        let evaluatedCandidates: [(candidate: CLIProxyAccountSyncCandidate, modifiedAt: Date?)] = results.map { result in
+        var hintAccountsByProvider: [String: (capability: CLIProxyUpstreamCapability, count: Int)] = [:]
+        var evaluatedCandidates: [(candidate: CLIProxyAccountSyncCandidate, modifiedAt: Date?)] = []
+        for result in results {
             let compatibility: CLIProxyAccountSyncCandidate.Compatibility
             let accountIdentity: CLIProxyAccountIdentity?
             let modifiedAt: Date?
@@ -346,33 +355,33 @@ final class CLIProxyGatewayManager: ObservableObject {
                 compatibility = .compatible
                 accountIdentity = identity
                 modifiedAt = sourceModifiedAt
-            case .requiresAuthFile:
-                compatibility = .unsupported(L(
-                    "CPA requires an OAuth auth file for this provider.",
-                    "CPA 需要该服务商的 OAuth 凭据文件。"
-                ))
-                accountIdentity = nil
-                modifiedAt = nil
-            case .unsupportedProvider:
-                compatibility = .unsupported(L(
-                    "No verified conversion adapter is available yet.",
-                    "目前没有经过验证的格式转换适配器。"
-                ))
-                accountIdentity = nil
-                modifiedAt = nil
             case .missingFile:
-                compatibility = .unsupported(L(
-                    "The managed credential file is unavailable.",
-                    "托管凭据文件当前不可用。"
+                compatibility = .credentialMissing
+                accountIdentity = nil
+                modifiedAt = nil
+            case .notAnAuthFile:
+                compatibility = .credentialInvalid(L(
+                    "This credential is not an OAuth auth file and cannot be copied.",
+                    "该凭据不是 OAuth 认证文件，无法复制到 CPA。"
                 ))
                 accountIdentity = nil
                 modifiedAt = nil
             case .conversionFailed(let message):
-                compatibility = .unsupported(message)
+                compatibility = .credentialInvalid(message)
                 accountIdentity = nil
                 modifiedAt = nil
+            case .notACandidate(let capability):
+                switch capability {
+                case .requiresCPAOAuth, .requiresPlugin:
+                    let providerKey = result.source.providerID.lowercased()
+                    let existing = hintAccountsByProvider[providerKey]
+                    hintAccountsByProvider[providerKey] = (capability, (existing?.count ?? 0) + 1)
+                case .syncableFromAIUsage, .notAnUpstream:
+                    break
+                }
+                continue
             }
-            return (
+            evaluatedCandidates.append((
                 CLIProxyAccountSyncCandidate(
                     id: "\(result.source.providerID):\(result.source.credentialID)",
                     providerId: result.source.providerID,
@@ -382,7 +391,14 @@ final class CLIProxyGatewayManager: ObservableObject {
                     compatibility: compatibility
                 ),
                 modifiedAt
-            )
+            ))
+        }
+
+        let hints = hintAccountsByProvider
+            .map { CLIProxyUpstreamAuthHint(providerId: $0.key, capability: $0.value.capability, accountCount: $0.value.count) }
+            .sorted { $0.providerId.localizedStandardCompare($1.providerId) == .orderedAscending }
+        if hints != upstreamAuthHints {
+            upstreamAuthHints = hints
         }
 
         // Multiple historical credential IDs can point at the same native account.
@@ -438,6 +454,13 @@ final class CLIProxyGatewayManager: ObservableObject {
     nonisolated private static func evaluateSyncCandidate(
         _ source: CLIProxySyncCandidateSource
     ) -> CLIProxySyncCandidateResult? {
+        let capability = CLIProxyCapabilityMatrix.capability(forAIUsageProvider: source.providerID)
+        guard case .syncableFromAIUsage = capability else {
+            // Downstream/monitoring-only providers disappear entirely;
+            // OAuth/plugin-capable providers become non-credential hints.
+            if case .notAnUpstream = capability { return nil }
+            return CLIProxySyncCandidateResult(source: source, evaluation: .notACandidate(capability))
+        }
         guard let credential = AccountCredentialStore.shared.loadCredential(
             providerId: source.providerID,
             credentialId: source.credentialID
@@ -445,9 +468,9 @@ final class CLIProxyGatewayManager: ObservableObject {
 
         let evaluation: CLIProxySyncCandidateEvaluation
         if credential.authMethod != .authFile {
-            evaluation = .requiresAuthFile
+            evaluation = .notAnAuthFile
         } else if !CLIProxyCredentialAdapter.supportedProviderIDs.contains(source.providerID) {
-            evaluation = .unsupportedProvider
+            evaluation = .notACandidate(.notAnUpstream)
         } else if !FileManager.default.fileExists(atPath: credential.credential) {
             evaluation = .missingFile
         } else {
@@ -585,33 +608,6 @@ final class CLIProxyGatewayManager: ObservableObject {
             await refreshModelCatalogAndDistribution(using: activeClient)
         } catch { lastError = error.localizedDescription }
         isManagingAccounts = false
-    }
-
-    func importAuthFile(from url: URL) async {
-        guard !isManagingAccounts, let client = managementClient() else { return }
-        isManagingAccounts = true
-        lastError = nil
-        lastImportedAuthFileName = nil
-        defer { isManagingAccounts = false }
-        let accessed = url.startAccessingSecurityScopedResource()
-        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-        do {
-            let data = try Self.readImportableAuthFile(at: url)
-            let currentFiles = try await client.listAuthFiles()
-            let name = Self.uniqueAuthFileName(
-                preferred: url.lastPathComponent,
-                existing: Set(currentFiles.map { $0.name.lowercased() })
-            )
-            try await client.uploadAuthFile(data: data, name: name)
-            lastImportedAuthFileName = name
-            authFiles = try await loadAuthPool(using: client)
-            if let imported = authFiles.first(where: { $0.name == name }) {
-                await loadModels(for: imported, force: true)
-            }
-            await refreshModelCatalogAndDistribution(using: client)
-        } catch {
-            lastError = error.localizedDescription
-        }
     }
 
     func addOpenAICompatibleProvider(
@@ -1056,7 +1052,7 @@ final class CLIProxyGatewayManager: ObservableObject {
             : []
     }
 
-    private func loadAuthPool(using client: CLIProxyManagementClient) async throws -> [CLIProxyAuthFile] {
+    func loadAuthPool(using client: CLIProxyManagementClient) async throws -> [CLIProxyAuthFile] {
         async let filesTask = client.listAuthFiles()
         async let providersTask = client.listOpenAICompatibleProviders()
         var files = try await filesTask
@@ -1682,7 +1678,7 @@ final class CLIProxyGatewayManager: ObservableObject {
         await upsertManagedProvider(targets: targets)
     }
 
-    private func refreshModelCatalogAndDistribution(using client: CLIProxyManagementClient) async {
+    func refreshModelCatalogAndDistribution(using client: CLIProxyManagementClient) async {
         await refreshModelCatalog(using: client)
         await reconcileManagedDistributionIfNeeded()
     }
@@ -1789,7 +1785,7 @@ final class CLIProxyGatewayManager: ObservableObject {
         }
     }
 
-    private func managementClient() -> CLIProxyManagementClient? {
+    func managementClient() -> CLIProxyManagementClient? {
         guard let managementKey = runtime.managementKey,
               let clientKey = runtime.clientAPIKey else {
             lastError = CLIProxyGatewayError.secretStorage("gateway keys are unavailable").localizedDescription
@@ -2057,7 +2053,7 @@ final class CLIProxyGatewayManager: ObservableObject {
         return try CLIProxyAccountSyncManifestValidator.validate(manifest)
     }
 
-    private static func readImportableAuthFile(at url: URL) throws -> Data {
+    static func readImportableAuthFile(at url: URL) throws -> Data {
         guard url.pathExtension.caseInsensitiveCompare("json") == .orderedSame else {
             throw CLIProxyGatewayError.invalidAuthFile("only .json files can be imported")
         }
@@ -2083,31 +2079,6 @@ final class CLIProxyGatewayManager: ObservableObject {
         } catch {
             throw CLIProxyGatewayError.invalidAuthFile(error.localizedDescription)
         }
-    }
-
-    private static func uniqueAuthFileName(preferred: String, existing: Set<String>) -> String {
-        var clean = URL(fileURLWithPath: preferred).lastPathComponent
-            .replacingOccurrences(of: "\\", with: "-")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        clean = String(clean.unicodeScalars.map {
-            CharacterSet.controlCharacters.contains($0) ? Character("-") : Character($0)
-        })
-        if clean.isEmpty { clean = "auth.json" }
-        if URL(fileURLWithPath: clean).pathExtension.caseInsensitiveCompare("json") != .orderedSame {
-            clean += ".json"
-        }
-        var trimmedStem = String(clean.dropLast(5))
-        while trimmedStem.utf8.count > 220 { trimmedStem.removeLast() }
-        if trimmedStem.isEmpty { trimmedStem = "auth" }
-        clean = trimmedStem + ".json"
-        if !existing.contains(clean.lowercased()) { return clean }
-
-        let stem = String(clean.dropLast(5))
-        for suffix in 2...9_999 {
-            let candidate = "\(stem)-\(suffix).json"
-            if !existing.contains(candidate.lowercased()) { return candidate }
-        }
-        return "auth-\(UUID().uuidString).json"
     }
 
     private func convertedAuthFile(_ credential: AccountCredential, sourceData: Data) throws -> Data {
