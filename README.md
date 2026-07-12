@@ -133,6 +133,8 @@ Universal Binary — runs natively on both Apple Silicon and Intel Macs (macOS 1
 ## CPA Gateway
 
 > **New in v0.14.0** · Powered by the official [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) release.
+>
+> **Improved in v0.14.1** · CPA account synchronization now follows provider-native identity, safely converges verified historical copies, and keeps different workspaces or projects separate even when they share an email address.
 
 CPA Gateway turns subscription accounts into one managed local API surface. AIUsage downloads, verifies, starts, updates, and can roll back CLIProxyAPI independently, so a CPA update does not require a new AIUsage release.
 

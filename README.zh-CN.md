@@ -133,6 +133,8 @@ Universal Binary —— Apple Silicon 与 Intel 芯片 Mac 均原生运行（mac
 ## CPA 网关
 
 > **v0.14.0 新增** · 由官方 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 发布版提供网关能力。
+>
+> **v0.14.1 改进** · CPA 账号同步改用服务商原生身份，安全收敛经过验证的历史副本；即使邮箱相同，不同工作区或 Project 也会保持独立。
 
 CPA 网关把订阅账号汇聚成一套受管本地 API。AIUsage 可以独立下载、校验、启动、更新和回滚 CLIProxyAPI，因此更新 CPA 不需要等待 AIUsage 发布新版本。
 
