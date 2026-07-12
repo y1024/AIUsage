@@ -103,13 +103,16 @@ extension ProviderAuthManager {
             }
         }
 
-        // Try JWT chatgpt_account_id from id_token (workspace-scoped for OpenAI).
-        // Combine with email/userId so that different users in the same team
-        // workspace produce distinct fingerprints.
+        // Provider-native Codex identity is workspace + user. Keep the same user
+        // claim precedence as CodexProvider and the CPA identity parser; email is
+        // only a final display-oriented fallback.
         let idTokenForJWT = stringValue(json["id_token"]) ?? stringValue(tokens?["id_token"])
         if let accountId = jwtAuthClaim("chatgpt_account_id", from: idTokenForJWT) {
-            let userIdentity = jwtEmail(from: idTokenForJWT)
-                ?? jwtAuthClaim("chatgpt_user_id", from: idTokenForJWT)
+            let userIdentity = jwtAuthClaim("chatgpt_user_id", from: idTokenForJWT)
+                ?? jwtAuthClaim("user_id", from: idTokenForJWT)
+                ?? jwtClaim("user_id", from: idTokenForJWT)
+                ?? jwtClaim("sub", from: idTokenForJWT)
+                ?? jwtEmail(from: idTokenForJWT)
             if let userIdentity {
                 return normalizedHandle("\(accountId):\(userIdentity)")
             }

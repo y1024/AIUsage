@@ -979,7 +979,24 @@ nonisolated struct CLIProxyAccountSyncCandidate: Identifiable, Equatable, Sendab
     let providerId: String
     let label: String
     let credentialId: String
+    let accountIdentity: CLIProxyAccountIdentity?
     let compatibility: Compatibility
+
+    init(
+        id: String,
+        providerId: String,
+        label: String,
+        credentialId: String,
+        accountIdentity: CLIProxyAccountIdentity? = nil,
+        compatibility: Compatibility
+    ) {
+        self.id = id
+        self.providerId = providerId
+        self.label = label
+        self.credentialId = credentialId
+        self.accountIdentity = accountIdentity
+        self.compatibility = compatibility
+    }
 
     nonisolated enum Compatibility: Equatable, Sendable {
         case compatible
@@ -1008,12 +1025,68 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
     let providerId: String
     let credentialId: String
     let authFileName: String
+    let accountIdentity: String?
     let sourceFingerprint: String
     let lastCopiedFingerprint: String
     let lastSyncedAt: Date
     var mode: CLIProxyAccountSyncMode
 
     var id: String { "\(providerId):\(credentialId)" }
+
+    init(
+        providerId: String,
+        credentialId: String,
+        authFileName: String,
+        accountIdentity: String? = nil,
+        sourceFingerprint: String,
+        lastCopiedFingerprint: String,
+        lastSyncedAt: Date,
+        mode: CLIProxyAccountSyncMode
+    ) {
+        self.providerId = providerId
+        self.credentialId = credentialId
+        self.authFileName = authFileName
+        self.accountIdentity = accountIdentity
+        self.sourceFingerprint = sourceFingerprint
+        self.lastCopiedFingerprint = lastCopiedFingerprint
+        self.lastSyncedAt = lastSyncedAt
+        self.mode = mode
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case providerId
+        case credentialId
+        case authFileName
+        case accountIdentity
+        case sourceFingerprint
+        case lastCopiedFingerprint
+        case lastSyncedAt
+        case mode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        providerId = try container.decode(String.self, forKey: .providerId)
+        credentialId = try container.decode(String.self, forKey: .credentialId)
+        authFileName = try container.decode(String.self, forKey: .authFileName)
+        accountIdentity = try container.decodeIfPresent(String.self, forKey: .accountIdentity)
+        sourceFingerprint = try container.decode(String.self, forKey: .sourceFingerprint)
+        lastCopiedFingerprint = try container.decode(String.self, forKey: .lastCopiedFingerprint)
+        lastSyncedAt = try container.decode(Date.self, forKey: .lastSyncedAt)
+        mode = try container.decode(CLIProxyAccountSyncMode.self, forKey: .mode)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(providerId, forKey: .providerId)
+        try container.encode(credentialId, forKey: .credentialId)
+        try container.encode(authFileName, forKey: .authFileName)
+        try container.encodeIfPresent(accountIdentity, forKey: .accountIdentity)
+        try container.encode(sourceFingerprint, forKey: .sourceFingerprint)
+        try container.encode(lastCopiedFingerprint, forKey: .lastCopiedFingerprint)
+        try container.encode(lastSyncedAt, forKey: .lastSyncedAt)
+        try container.encode(mode, forKey: .mode)
+    }
 }
 
 nonisolated struct CLIProxyAccountSyncManifest: Codable, Equatable, Sendable {
@@ -1021,6 +1094,542 @@ nonisolated struct CLIProxyAccountSyncManifest: Codable, Equatable, Sendable {
     var records: [CLIProxyAccountSyncRecord]
 
     static let empty = CLIProxyAccountSyncManifest(schemaVersion: 1, records: [])
+}
+
+/// Pure structural validation for decoded sync manifests. File I/O and size
+/// limits stay at the caller boundary so this logic is regression-testable.
+nonisolated enum CLIProxyAccountSyncManifestValidator {
+    static func validate(
+        _ manifest: CLIProxyAccountSyncManifest
+    ) throws -> CLIProxyAccountSyncManifest {
+        guard manifest.schemaVersion == 1 else {
+            throw CLIProxyGatewayError.fileSystem("unsupported account sync manifest version")
+        }
+
+        var seenRecordIDs = Set<String>()
+        for record in manifest.records {
+            guard seenRecordIDs.insert(record.id.lowercased()).inserted,
+                  isValidFingerprint(record.sourceFingerprint),
+                  isValidFingerprint(record.lastCopiedFingerprint),
+                  isSafeAuthFileName(record.authFileName),
+                  record.accountIdentity.map({
+                      isSafeAccountIdentity($0, providerID: record.providerId)
+                  }) ?? true else {
+                throw CLIProxyGatewayError.fileSystem(
+                    "account sync manifest contains an invalid or duplicate record; existing data was left unchanged"
+                )
+            }
+        }
+        return manifest
+    }
+
+    private static func isValidFingerprint(_ value: String) -> Bool {
+        value.count == 64 && value.unicodeScalars.allSatisfy {
+            CharacterSet(charactersIn: "0123456789abcdef").contains($0)
+        }
+    }
+
+    private static func isSafeAuthFileName(_ value: String) -> Bool {
+        !value.isEmpty && value.lowercased().hasSuffix(".json") &&
+            value == URL(fileURLWithPath: value).lastPathComponent && !value.contains("\\")
+    }
+
+    private static func isSafeAccountIdentity(_ value: String, providerID: String) -> Bool {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              !parts[0].isEmpty,
+              String(parts[0]).caseInsensitiveCompare(providerID) == .orderedSame,
+              parts[0].unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_")).contains($0)
+              }) else { return false }
+        return isValidFingerprint(String(parts[1]))
+    }
+}
+
+/// A non-secret, rotation-stable identity extracted from a CPA auth file.
+///
+/// The key intentionally excludes access tokens, refresh tokens, and AIUsage's
+/// credential ID. It is safe to use for reconciliation only when
+/// `canAutomaticallyMerge` is true.
+nonisolated struct CLIProxyAccountIdentity: Equatable, Sendable {
+    let key: String
+    let providerID: String
+    let sourceCredentialID: String?
+    let canAutomaticallyMerge: Bool
+    let accountID: String?
+    let projectID: String?
+    let userID: String?
+    let email: String?
+    let planType: String?
+
+    var planDisplayName: String? {
+        guard let planType else { return nil }
+        switch planType {
+        case "free": return "Free"
+        case "plus": return "Plus"
+        case "pro": return "Pro"
+        case "team": return "Team"
+        case "business": return "Business"
+        case "enterprise": return "Enterprise"
+        case "edu", "education": return "Education"
+        default:
+            return planType
+                .replacingOccurrences(of: "-", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+                .split(separator: " ")
+                .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+                .joined(separator: " ")
+        }
+    }
+
+    var shortAccountID: String? { Self.shortIdentifier(accountID) }
+    var shortProjectID: String? { Self.shortIdentifier(projectID) }
+
+    static func parse(data: Data, providerHint: String? = nil) throws -> CLIProxyAccountIdentity {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw CLIProxyGatewayError.invalidAuthFile("credential file is not valid JSON")
+        }
+        guard let root = object as? [String: Any] else {
+            throw CLIProxyGatewayError.invalidAuthFile("credential file must contain a JSON object")
+        }
+
+        let hintedProvider = normalizedProviderID(providerHint)
+        let embeddedProvider = normalizedProviderID(string(root["type"]) ?? string(root["provider"]))
+        guard let providerID = hintedProvider ?? embeddedProvider else {
+            throw CLIProxyGatewayError.unsupportedAccount("a Codex or Antigravity provider is required")
+        }
+        if let hintedProvider, let embeddedProvider, hintedProvider != embeddedProvider {
+            throw CLIProxyGatewayError.invalidAuthFile("provider hint does not match the credential file")
+        }
+
+        let tokens = root["tokens"] as? [String: Any]
+        let tokenClaims = [
+            string(root["id_token"]),
+            string(tokens?["id_token"]),
+            string(root["access_token"]),
+            string(tokens?["access_token"])
+        ].compactMap { $0 }.compactMap(jwtClaims)
+        let sourceCredentialID = firstString([
+            root["aiusage_credential_id"],
+            tokens?["aiusage_credential_id"]
+        ])
+
+        switch providerID {
+        case "codex":
+            let authNamespaces = tokenClaims.compactMap {
+                $0["https://api.openai.com/auth"] as? [String: Any]
+            }
+            let account = resolveEquivalentClaims(
+                [root["account_id"], tokens?["account_id"], root["chatgpt_account_id"]]
+                    + tokenClaims.flatMap { claims in
+                        [
+                            claims["chatgpt_account_id"],
+                            claims["https://api.openai.com/auth.chatgpt_account_id"],
+                            claims["https://api.openai.com/auth/chatgpt_account_id"]
+                        ]
+                    }
+                    + authNamespaces.map { $0["chatgpt_account_id"] },
+                lowercased: true
+            )
+            let chatGPTUser = resolveEquivalentClaims(
+                [root["chatgpt_user_id"]]
+                    + tokenClaims.flatMap { claims in
+                        [
+                            claims["chatgpt_user_id"],
+                            claims["https://api.openai.com/auth.chatgpt_user_id"],
+                            claims["https://api.openai.com/auth/chatgpt_user_id"]
+                        ]
+                    }
+                    + authNamespaces.map { $0["chatgpt_user_id"] },
+                lowercased: true
+            )
+            let genericUser = resolveEquivalentClaims(
+                [root["user_id"]]
+                    + authNamespaces.map { $0["user_id"] }
+                    + tokenClaims.map { $0["user_id"] },
+                lowercased: true
+            )
+            let subject = resolveEquivalentClaims(
+                [root["sub"]] + tokenClaims.map { $0["sub"] },
+                lowercased: true
+            )
+            let selectedUser = chatGPTUser.value ?? genericUser.value ?? subject.value
+            let selectedUserConflict = chatGPTUser.value != nil
+                ? chatGPTUser.hasConflict
+                : (genericUser.value != nil ? genericUser.hasConflict : subject.hasConflict)
+            let plan = resolveEquivalentClaims(
+                [root["plan_type"], root["chatgpt_plan_type"]]
+                    + tokenClaims.flatMap { claims in
+                        [
+                            claims["plan_type"],
+                            claims["chatgpt_plan_type"],
+                            claims["https://api.openai.com/auth.chatgpt_plan_type"],
+                            claims["https://api.openai.com/auth/chatgpt_plan_type"]
+                        ]
+                    }
+                    + authNamespaces.map { $0["chatgpt_plan_type"] },
+                lowercased: true
+            )
+            let email = resolveEquivalentClaims(
+                [root["email"]] + tokenClaims.map { $0["email"] },
+                lowercased: true
+            )
+            let isStrong = account.value != nil
+                && selectedUser != nil
+                && !account.hasConflict
+                && !selectedUserConflict
+            let material = identityMaterial(
+                providerID: providerID,
+                fields: [
+                    ("account", account.material),
+                    ("user", selectedUser)
+                ]
+            )
+            return CLIProxyAccountIdentity(
+                key: identityKey(providerID: providerID, material: material),
+                providerID: providerID,
+                sourceCredentialID: sourceCredentialID,
+                canAutomaticallyMerge: isStrong,
+                accountID: account.value,
+                projectID: nil,
+                userID: selectedUser,
+                email: email.value,
+                planType: plan.value
+            )
+
+        case "antigravity":
+            let project = resolveEquivalentClaims(
+                [root["project_id"], root["projectId"], tokens?["project_id"]],
+                lowercased: true
+            )
+            let email = resolveEquivalentClaims(
+                [root["email"], tokens?["email"]] + tokenClaims.map { $0["email"] },
+                lowercased: true
+            )
+            let isStrong = project.value != nil
+                && email.value != nil
+                && !project.hasConflict
+                && !email.hasConflict
+            let material = identityMaterial(
+                providerID: providerID,
+                fields: [("project", project.material), ("email", email.material)]
+            )
+            return CLIProxyAccountIdentity(
+                key: identityKey(providerID: providerID, material: material),
+                providerID: providerID,
+                sourceCredentialID: sourceCredentialID,
+                canAutomaticallyMerge: isStrong,
+                accountID: nil,
+                projectID: project.value,
+                userID: nil,
+                email: email.value,
+                planType: nil
+            )
+
+        default:
+            throw CLIProxyGatewayError.unsupportedAccount("stable identity is not available for \(providerID)")
+        }
+    }
+
+    private struct ResolvedClaim {
+        let value: String?
+        let values: [String]
+
+        var hasConflict: Bool { values.count > 1 }
+        var material: String? { values.isEmpty ? nil : values.joined(separator: ",") }
+    }
+
+    private static func resolveEquivalentClaims(
+        _ candidates: [Any?],
+        lowercased: Bool
+    ) -> ResolvedClaim {
+        var values: [String] = []
+        for candidate in candidates {
+            guard var value = string(candidate)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else { continue }
+            if lowercased { value = value.lowercased() }
+            if !values.contains(value) { values.append(value) }
+        }
+        return ResolvedClaim(value: values.first, values: values)
+    }
+
+    private static func firstString(_ candidates: [Any?]) -> String? {
+        for candidate in candidates {
+            if let value = string(candidate)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty { return value }
+        }
+        return nil
+    }
+
+    private static func string(_ value: Any?) -> String? {
+        if let value = value as? String { return value }
+        if let value = value as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID() {
+            return value.stringValue
+        }
+        return nil
+    }
+
+    private static func normalizedProviderID(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !value.isEmpty else { return nil }
+        switch value {
+        case "codex", "chatgpt", "openai": return "codex"
+        case "antigravity", "google-antigravity": return "antigravity"
+        default: return value
+        }
+    }
+
+    private static func jwtClaims(_ token: String) -> [String: Any]? {
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard segments.count >= 2 else { return nil }
+        var payload = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let padding = (4 - payload.count % 4) % 4
+        payload += String(repeating: "=", count: padding)
+        guard let data = Data(base64Encoded: payload),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let claims = object as? [String: Any] else { return nil }
+        return claims
+    }
+
+    private static func identityMaterial(
+        providerID: String,
+        fields: [(String, String?)]
+    ) -> String {
+        (["schema=1", "provider=\(providerID)"] + fields.compactMap { name, value in
+            value.map { "\(name)=\($0)" }
+        }).joined(separator: "\u{1F}")
+    }
+
+    private static func identityKey(providerID: String, material: String) -> String {
+        let digest = SHA256.hash(data: Data(material.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "\(providerID):\(digest)"
+    }
+
+    private static func shortIdentifier(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        guard value.count > 14 else { return value }
+        return "\(value.prefix(7))…\(value.suffix(5))"
+    }
+}
+
+/// Computes a non-secret proof that two managed auth files have the same
+/// refresh credential and the same persistent CPA behavior.
+nonisolated enum CLIProxyManagedAuthSafety {
+    static func destructiveMergeFingerprint(for data: Data) throws -> String? {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw CLIProxyGatewayError.invalidAuthFile("credential file is not valid JSON")
+        }
+        guard let root = object as? [String: Any] else {
+            throw CLIProxyGatewayError.invalidAuthFile("credential file must contain a JSON object")
+        }
+
+        var refreshTokens: [String] = []
+        collectRefreshTokens(in: root, into: &refreshTokens)
+        let uniqueRefreshTokens = refreshTokens.reduce(into: [String]()) { result, token in
+            if !result.contains(token) { result.append(token) }
+        }
+        guard uniqueRefreshTokens.count == 1, let refreshToken = uniqueRefreshTokens.first else {
+            return nil
+        }
+
+        let refreshDigest = SHA256.hash(data: Data(refreshToken.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        guard let sanitizedRoot = sanitize(root) as? [String: Any] else { return nil }
+        var material: [String: Any] = [
+            "schema": 1,
+            "refresh_token_sha256": refreshDigest,
+            "persistent_auth": sanitizedRoot
+        ]
+        if let identity = try? CLIProxyAccountIdentity.parse(data: data),
+           let planType = identity.planType {
+            material["codex_plan_type"] = planType
+        }
+        guard JSONSerialization.isValidJSONObject(material) else { return nil }
+        let canonical = try JSONSerialization.data(withJSONObject: material, options: [.sortedKeys])
+        return SHA256.hash(data: canonical)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    private static func collectRefreshTokens(in value: Any, into result: inout [String]) {
+        if let dictionary = value as? [String: Any] {
+            for (key, child) in dictionary {
+                if compactKey(key) == "refreshtoken" {
+                    if let token = child as? String, !token.isEmpty { result.append(token) }
+                } else {
+                    collectRefreshTokens(in: child, into: &result)
+                }
+            }
+        } else if let array = value as? [Any] {
+            for child in array { collectRefreshTokens(in: child, into: &result) }
+        }
+    }
+
+    private static func sanitize(_ value: Any) -> Any? {
+        if let dictionary = value as? [String: Any] {
+            var result: [String: Any] = [:]
+            for (key, child) in dictionary where !isExcludedKey(key) {
+                if shouldNormalizeIdentityValue(key), let string = child as? String {
+                    result[key] = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                } else if let sanitized = sanitize(child) {
+                    result[key] = sanitized
+                }
+            }
+            return result
+        }
+        if let array = value as? [Any] {
+            return array.compactMap(sanitize)
+        }
+        if value is String || value is NSNumber || value is NSNull { return value }
+        return nil
+    }
+
+    private static func isExcludedKey(_ key: String) -> Bool {
+        let normalized = compactKey(key)
+        if normalized == "refreshtoken"
+            || normalized == "accesstoken"
+            || normalized == "idtoken"
+            || normalized == "aiusagecredentialid" {
+            return true
+        }
+        if normalized.contains("expire")
+            || normalized.contains("expiry")
+            || normalized.contains("timestamp") {
+            return true
+        }
+        return [
+            "lastrefresh",
+            "lastrefreshed",
+            "lastupdated",
+            "updatedat",
+            "createdat",
+            "modtime",
+            "nextretryafter",
+            "success",
+            "failed",
+            "recentrequests",
+            "status",
+            "statusmessage",
+            "unavailable"
+        ].contains(normalized)
+    }
+
+    private static func shouldNormalizeIdentityValue(_ key: String) -> Bool {
+        [
+            "type",
+            "provider",
+            "email",
+            "accountid",
+            "chatgptaccountid",
+            "projectid",
+            "userid",
+            "chatgptuserid",
+            "sub",
+            "plantype",
+            "chatgptplantype"
+        ].contains(compactKey(key))
+    }
+
+    private static func compactKey(_ key: String) -> String {
+        key.lowercased().unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init)
+            .joined()
+    }
+}
+
+nonisolated struct CLIProxyManagedAuthCopy: Equatable, Sendable {
+    let fileName: String
+    let identity: CLIProxyAccountIdentity
+    let modifiedAt: Date?
+    let isManifestTracked: Bool
+    let destructiveMergeFingerprint: String?
+
+    var hasStrongOwnership: Bool {
+        if isManifestTracked { return true }
+        guard let credentialID = identity.sourceCredentialID else { return false }
+        let safeCredentialID = credentialID.unicodeScalars
+            .map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "-" }
+            .prefix(24)
+        guard !safeCredentialID.isEmpty else { return false }
+        let legacyName = "aiusage-\(identity.providerID)-\(String(safeCredentialID)).json"
+        let digest = identity.key.split(separator: ":").last.map(String.init) ?? ""
+        let identityName = "aiusage-\(identity.providerID)-\(digest.prefix(24)).json"
+        return fileName.caseInsensitiveCompare(legacyName) == .orderedSame
+            || fileName.caseInsensitiveCompare(identityName) == .orderedSame
+    }
+}
+
+nonisolated struct CLIProxyManagedAuthDeduplicationPlan: Equatable, Sendable {
+    let canonicalFileByIdentity: [String: String]
+    let duplicateFileNames: [String]
+    let conflictingIdentityKeys: [String]
+}
+
+/// Produces a deletion plan without touching disk or the CPA Management API.
+nonisolated enum CLIProxyManagedAuthDeduplicator {
+    static func plan(for copies: [CLIProxyManagedAuthCopy]) -> CLIProxyManagedAuthDeduplicationPlan {
+        let managedStrongCopies = copies.filter {
+            $0.identity.canAutomaticallyMerge
+                && $0.hasStrongOwnership
+        }
+        let grouped = Dictionary(grouping: managedStrongCopies, by: { $0.identity.key })
+        var canonicalFileByIdentity: [String: String] = [:]
+        var duplicateFileNames = Set<String>()
+        var conflictingIdentityKeys: [String] = []
+
+        for identityKey in grouped.keys.sorted() {
+            guard let candidates = grouped[identityKey] else { continue }
+            let ordered = candidates.sorted(by: isPreferredCanonical)
+            guard let canonical = ordered.first else { continue }
+            let fingerprints = Set(ordered.compactMap(\.destructiveMergeFingerprint))
+            guard fingerprints.count == 1,
+                  ordered.allSatisfy({ $0.destructiveMergeFingerprint != nil }) else {
+                if ordered.count > 1 { conflictingIdentityKeys.append(identityKey) }
+                continue
+            }
+            canonicalFileByIdentity[identityKey] = canonical.fileName
+            guard ordered.count > 1 else { continue }
+            for duplicate in ordered.dropFirst() where duplicate.fileName != canonical.fileName {
+                duplicateFileNames.insert(duplicate.fileName)
+            }
+        }
+
+        return CLIProxyManagedAuthDeduplicationPlan(
+            canonicalFileByIdentity: canonicalFileByIdentity,
+            duplicateFileNames: duplicateFileNames.sorted(by: stableFileNameOrder),
+            conflictingIdentityKeys: conflictingIdentityKeys
+        )
+    }
+
+    private static func isPreferredCanonical(
+        _ lhs: CLIProxyManagedAuthCopy,
+        _ rhs: CLIProxyManagedAuthCopy
+    ) -> Bool {
+        let lhsDate = lhs.modifiedAt ?? .distantPast
+        let rhsDate = rhs.modifiedAt ?? .distantPast
+        if lhsDate != rhsDate { return lhsDate > rhsDate }
+        if lhs.isManifestTracked != rhs.isManifestTracked { return lhs.isManifestTracked }
+        return stableFileNameOrder(lhs.fileName, rhs.fileName)
+    }
+
+    private static func stableFileNameOrder(_ lhs: String, _ rhs: String) -> Bool {
+        let normalizedLeft = lhs.lowercased()
+        let normalizedRight = rhs.lowercased()
+        if normalizedLeft != normalizedRight { return normalizedLeft < normalizedRight }
+        return lhs < rhs
+    }
 }
 
 /// Canonicalizes JSON before hashing so formatting and object-key order do not look like credential changes.

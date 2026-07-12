@@ -12,6 +12,18 @@ public struct AccountCredentialReference: Hashable, Sendable {
     }
 }
 
+public struct AccountCredentialDeduplicationPlan: Equatable, Sendable {
+    public let providerId: String?
+    public let remappedCredentialIDs: [String: String]
+
+    public var isEmpty: Bool { remappedCredentialIDs.isEmpty }
+
+    fileprivate init(providerId: String?, remappedCredentialIDs: [String: String]) {
+        self.providerId = providerId
+        self.remappedCredentialIDs = remappedCredentialIDs
+    }
+}
+
 private let credentialLog = Logger(subsystem: "com.aiusage.desktop", category: "CredentialStore")
 
 /// Secure credential store backed by macOS Keychain.
@@ -138,39 +150,106 @@ public final class AccountCredentialStore: @unchecked Sendable {
         }
     }
 
+    /// Stage credential deduplication without mutating the Keychain vault.
+    /// The returned remap can first be persisted by registry consumers and is
+    /// revalidated against current vault state by `commitCredentialDeduplication`.
+    public func planCredentialDeduplication(
+        for providerId: String? = nil
+    ) -> AccountCredentialDeduplicationPlan {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return makeCredentialDeduplicationPlan(
+            for: loadAllCredentialsUnsafe(),
+            providerId: providerId
+        )
+    }
+
+    /// Commit a previously staged plan. A stale plan is rejected rather than
+    /// deleting credentials based on an obsolete registry remap.
     @discardableResult
-    public func deduplicateCredentials(for providerId: String? = nil) -> [String: String] {
+    public func commitCredentialDeduplication(
+        _ plan: AccountCredentialDeduplicationPlan
+    ) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
         let allCredentials = loadAllCredentialsUnsafe()
-        let targetCredentials = providerId.map { id in
+        guard credentialDeduplicationPlan(plan, isValidFor: allCredentials) else {
+            return false
+        }
+        guard !plan.isEmpty else { return true }
+
+        let targetCredentials = credentials(
+            allCredentials,
+            scopedTo: plan.providerId
+        )
+        let retiredIDs = Set(plan.remappedCredentialIDs.keys)
+        let storageKeysToRemove = Set(
+            targetCredentials
+                .filter { retiredIDs.contains($0.id) }
+                .map(storageKey)
+        )
+        guard storageKeysToRemove.count == retiredIDs.count else {
+            return false
+        }
+
+        var vault = loadCredentialVaultUnsafe()
+        for key in storageKeysToRemove {
+            guard vault.removeValue(forKey: key) != nil else {
+                return false
+            }
+        }
+
+        do {
+            try saveCredentialVaultUnsafe(vault)
+        } catch {
+            credentialLog.error("Keychain write failed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        cachedCredentialsByStorageKey = vault
+        return true
+    }
+
+    /// Compatibility wrapper for callers that do not own a related registry.
+    /// Registry-backed flows must use the staged APIs so their references are
+    /// persisted before retired credentials are deleted.
+    @discardableResult
+    public func deduplicateCredentials(for providerId: String? = nil) -> [String: String] {
+        let plan = planCredentialDeduplication(for: providerId)
+        guard commitCredentialDeduplication(plan) else { return [:] }
+        return plan.remappedCredentialIDs
+    }
+
+    func makeCredentialDeduplicationPlan(
+        for allCredentials: [AccountCredential],
+        providerId: String? = nil
+    ) -> AccountCredentialDeduplicationPlan {
+        let targetCredentials = credentials(allCredentials, scopedTo: providerId)
+        let (_, remappedIDs) = canonicalizationResult(for: targetCredentials)
+        return AccountCredentialDeduplicationPlan(
+            providerId: providerId,
+            remappedCredentialIDs: remappedIDs
+        )
+    }
+
+    func credentialDeduplicationPlan(
+        _ plan: AccountCredentialDeduplicationPlan,
+        isValidFor allCredentials: [AccountCredential]
+    ) -> Bool {
+        makeCredentialDeduplicationPlan(
+            for: allCredentials,
+            providerId: plan.providerId
+        ) == plan
+    }
+
+    private func credentials(
+        _ allCredentials: [AccountCredential],
+        scopedTo providerId: String?
+    ) -> [AccountCredential] {
+        providerId.map { id in
             allCredentials.filter { $0.providerId == id }
         } ?? allCredentials
-
-        let (canonical, remappedIDs) = canonicalizationResult(for: targetCredentials)
-        guard !remappedIDs.isEmpty else { return [:] }
-
-        let keptIDs = Set(canonical.map(\.id))
-        var vault = loadCredentialVaultUnsafe()
-        var didMutateVault = false
-        for credential in targetCredentials where !keptIDs.contains(credential.id) {
-            let key = storageKey(credential)
-            if vault.removeValue(forKey: key) != nil {
-                didMutateVault = true
-            }
-        }
-
-        if didMutateVault {
-            do {
-                try saveCredentialVaultUnsafe(vault)
-            } catch {
-                credentialLog.error("Keychain write failed: \(error.localizedDescription, privacy: .public)")
-            }
-            cachedCredentialsByStorageKey = vault
-        }
-
-        return remappedIDs
     }
 
     // MARK: - Internal
@@ -338,38 +417,61 @@ public final class AccountCredentialStore: @unchecked Sendable {
         canonicalizationResult(for: credentials).canonical.sorted(by: credentialSort)
     }
 
-    private func canonicalizationResult(for credentials: [AccountCredential]) -> (canonical: [AccountCredential], remappedIDs: [String: String]) {
+    /// Collapse credentials that refer to the same provider-native account.
+    ///
+    /// Identity equivalence intentionally cannot be represented by one dictionary
+    /// key: complete provider-native identities can match across imported auth-file
+    /// copies, while incomplete tuples may match only on the same normalized path.
+    /// Groups retain every member and accept a new credential only when it is
+    /// compatible with all of them, preventing an incomplete record from bridging
+    /// two conflicting stable identities.
+    func canonicalizationResult(for credentials: [AccountCredential]) -> (canonical: [AccountCredential], remappedIDs: [String: String]) {
         guard !credentials.isEmpty else { return ([], [:]) }
 
-        var canonicalByIdentity: [String: AccountCredential] = [:]
-        var remappedIDs: [String: String] = [:]
+        let orderedCredentials = credentials.sorted { lhs, rhs in
+            let lhsSpecificity = Self.identitySpecificity(lhs)
+            let rhsSpecificity = Self.identitySpecificity(rhs)
+            if lhsSpecificity != rhsSpecificity {
+                return lhsSpecificity > rhsSpecificity
+            }
+            return shouldPreferCredential(lhs, over: rhs)
+        }
 
-        for credential in credentials {
-            let key = credentialIdentityKey(credential)
-            if let existing = canonicalByIdentity[key] {
-                if shouldPreferCredential(credential, over: existing) {
-                    canonicalByIdentity[key] = credential
-                    remappedIDs[existing.id] = credential.id
-                } else {
-                    remappedIDs[credential.id] = existing.id
+        var groups: [[AccountCredential]] = []
+        var preferredCredentials: [AccountCredential] = []
+
+        for credential in orderedCredentials {
+            if let groupIndex = groups.firstIndex(where: { group in
+                group.allSatisfy {
+                    Self.credentialsShareCanonicalIdentity(credential, $0)
+                }
+            }) {
+                groups[groupIndex].append(credential)
+                if shouldPreferCredential(credential, over: preferredCredentials[groupIndex]) {
+                    preferredCredentials[groupIndex] = credential
                 }
             } else {
-                canonicalByIdentity[key] = credential
+                groups.append([credential])
+                preferredCredentials.append(credential)
             }
         }
 
-        let canonical = credentials.filter { credential in
-            canonicalByIdentity[credentialIdentityKey(credential)]?.id == credential.id
+        var remappedIDs: [String: String] = [:]
+        for (group, preferred) in zip(groups, preferredCredentials) {
+            for credential in group where credential.id != preferred.id {
+                remappedIDs[credential.id] = preferred.id
+            }
         }
-        return (canonical, remappedIDs)
+
+        return (preferredCredentials, remappedIDs)
     }
 
-    /// Single source of truth for providers whose accounts cannot be deduped by
-    /// email or accountId alone (same email may span multiple workspaces, and
-    /// the same user-xxx may represent both Plus and Team). All identity layers
-    /// — credential store, provider engine, app-side AccountIdentityPolicy —
-    /// must consult this set rather than keeping their own copies.
-    public static let multiWorkspaceProviders: Set<String> = ["codex"]
+    /// Single source of truth for providers whose accounts cannot be deduped by a
+    /// display handle alone. Codex needs account+user identity, while Antigravity
+    /// needs project+email identity. All identity layers — credential store,
+    /// provider engine, app-side AccountIdentityPolicy — must consult this set
+    /// rather than keeping their own copies.
+    public static let multiWorkspaceProviders: Set<String> = ["codex", "antigravity"]
 
     public static func isMultiWorkspace(_ providerId: String) -> Bool {
         multiWorkspaceProviders.contains(providerId.lowercased())
@@ -400,21 +502,49 @@ public final class AccountCredentialStore: @unchecked Sendable {
         return normalized
     }
 
-    private func credentialIdentityKey(_ credential: AccountCredential) -> String {
-        let provider = credential.providerId.lowercased()
+    /// Stable, secret-free descriptor of the identity information carried by a
+    /// credential. This is intended for diagnostics and tests; callers must use
+    /// `credentialsShareCanonicalIdentity` for comparison because incomplete
+    /// identities are allowed to match only through the normalized auth-file path.
+    public static func canonicalIdentityKey(for credential: AccountCredential) -> String {
+        let provider = normalizedIdentityComponent(credential.providerId)
+            ?? credential.providerId.lowercased()
 
-        if Self.multiWorkspaceProviders.contains(provider) {
+        if provider == "codex" {
+            if let identity = codexNativeIdentity(for: credential) {
+                return "\(provider):account:\(identity.accountId)"
+                    + ":user:\(identity.userId)"
+            }
             if credential.authMethod == .authFile {
-                return "\(provider):authfile:\(Self.normalizedAuthFilePath(credential.credential))"
+                let accountId = normalizedIdentityComponent(credential.metadata["accountId"]) ?? "*"
+                let userId = codexUserId(for: credential) ?? "*"
+                return "\(provider):incomplete:account:\(accountId)"
+                    + ":user:\(userId)"
+                    + ":authfile:\(normalizedAuthFilePath(credential.credential))"
             }
             return "\(provider):raw:\(credential.id.lowercased())"
         }
 
-        if let accountId = normalizedLookup(credential.metadata["accountId"]) {
+        if provider == "antigravity" {
+            if let identity = antigravityNativeIdentity(for: credential) {
+                return "\(provider):project:\(identity.projectId)"
+                    + ":email:\(identity.email)"
+            }
+            if credential.authMethod == .authFile {
+                let projectId = antigravityProjectId(for: credential) ?? "*"
+                let email = antigravityEmail(for: credential) ?? "*"
+                return "\(provider):incomplete:project:\(projectId)"
+                    + ":email:\(email)"
+                    + ":authfile:\(normalizedAuthFilePath(credential.credential))"
+            }
+            return "\(provider):raw:\(credential.id.lowercased())"
+        }
+
+        if let accountId = normalizedIdentityComponent(credential.metadata["accountId"]) {
             return "\(provider):account:\(accountId)"
         }
 
-        if let handle = normalizedLookup(
+        if let handle = normalizedIdentityComponent(
             credential.metadata["accountEmail"]
                 ?? credential.metadata["accountHandle"]
                 ?? credential.accountLabel
@@ -423,10 +553,172 @@ public final class AccountCredentialStore: @unchecked Sendable {
         }
 
         if credential.authMethod == .authFile {
-            return "\(provider):authfile:\(Self.normalizedAuthFilePath(credential.credential))"
+            return "\(provider):authfile:\(normalizedAuthFilePath(credential.credential))"
         }
 
         return "\(provider):raw:\(credential.id.lowercased())"
+    }
+
+    /// Returns whether two credentials represent the same canonical account.
+    ///
+    /// Codex uses `accountId + userId`; Antigravity uses `projectId + email`.
+    /// Every component must be present and equal to match across different files.
+    /// If any stable component is missing, credentials can match only on the same
+    /// normalized auth-file path and only when their known components do not
+    /// conflict. Codex workspace and plan metadata are deliberately excluded
+    /// because subscriptions can be upgraded, downgraded, or renamed.
+    public static func credentialsShareCanonicalIdentity(
+        _ lhs: AccountCredential,
+        _ rhs: AccountCredential
+    ) -> Bool {
+        let lhsProvider = normalizedIdentityComponent(lhs.providerId)
+        let rhsProvider = normalizedIdentityComponent(rhs.providerId)
+        guard lhsProvider == rhsProvider, let provider = lhsProvider else {
+            return false
+        }
+
+        if provider == "antigravity" {
+            return antigravityCredentialsShareCanonicalIdentity(lhs, rhs)
+        }
+
+        guard provider == "codex" else {
+            return canonicalIdentityKey(for: lhs) == canonicalIdentityKey(for: rhs)
+        }
+
+        let lhsAccountId = normalizedIdentityComponent(lhs.metadata["accountId"])
+        let rhsAccountId = normalizedIdentityComponent(rhs.metadata["accountId"])
+        if let lhsAccountId, let rhsAccountId, lhsAccountId != rhsAccountId {
+            return false
+        }
+
+        if knownIdentityValuesConflict(
+            codexUserId(for: lhs),
+            codexUserId(for: rhs)
+        ) {
+            return false
+        }
+
+        if let lhsNative = codexNativeIdentity(for: lhs),
+           let rhsNative = codexNativeIdentity(for: rhs) {
+            return lhsNative == rhsNative
+        }
+
+        return authFilePathsMatch(lhs, rhs)
+    }
+
+    private struct CodexNativeIdentity: Equatable {
+        let accountId: String
+        let userId: String
+    }
+
+    private static func codexNativeIdentity(
+        for credential: AccountCredential
+    ) -> CodexNativeIdentity? {
+        guard let accountId = normalizedIdentityComponent(credential.metadata["accountId"]),
+              let userId = codexUserId(for: credential) else {
+            return nil
+        }
+        return CodexNativeIdentity(
+            accountId: accountId,
+            userId: userId
+        )
+    }
+
+    private static func codexUserId(for credential: AccountCredential) -> String? {
+        normalizedIdentityComponent(
+            credential.metadata["workspaceUserId"] ?? credential.metadata["userId"]
+        )
+    }
+
+    private struct AntigravityNativeIdentity: Equatable {
+        let projectId: String
+        let email: String
+    }
+
+    private static func antigravityCredentialsShareCanonicalIdentity(
+        _ lhs: AccountCredential,
+        _ rhs: AccountCredential
+    ) -> Bool {
+        let lhsProjectId = antigravityProjectId(for: lhs)
+        let rhsProjectId = antigravityProjectId(for: rhs)
+        let lhsEmail = antigravityEmail(for: lhs)
+        let rhsEmail = antigravityEmail(for: rhs)
+
+        if knownIdentityValuesConflict(lhsProjectId, rhsProjectId)
+            || knownIdentityValuesConflict(lhsEmail, rhsEmail) {
+            return false
+        }
+
+        if let lhsNative = antigravityNativeIdentity(for: lhs),
+           let rhsNative = antigravityNativeIdentity(for: rhs) {
+            return lhsNative == rhsNative
+        }
+
+        return authFilePathsMatch(lhs, rhs)
+    }
+
+    private static func antigravityNativeIdentity(
+        for credential: AccountCredential
+    ) -> AntigravityNativeIdentity? {
+        guard let projectId = antigravityProjectId(for: credential),
+              let email = antigravityEmail(for: credential) else {
+            return nil
+        }
+        return AntigravityNativeIdentity(projectId: projectId, email: email)
+    }
+
+    private static func antigravityProjectId(for credential: AccountCredential) -> String? {
+        normalizedIdentityComponent(
+            credential.metadata["projectId"] ?? credential.metadata["project_id"]
+        )
+    }
+
+    private static func antigravityEmail(for credential: AccountCredential) -> String? {
+        let candidates = [
+            credential.metadata["accountEmail"],
+            credential.metadata["accountHandle"],
+            credential.accountLabel,
+        ]
+        return candidates.lazy
+            .compactMap(normalizedIdentityComponent)
+            .first(where: { $0.contains("@") })
+    }
+
+    private static func knownIdentityValuesConflict(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let lhs, let rhs else { return false }
+        return lhs != rhs
+    }
+
+    private static func authFilePathsMatch(
+        _ lhs: AccountCredential,
+        _ rhs: AccountCredential
+    ) -> Bool {
+        guard lhs.authMethod == .authFile, rhs.authMethod == .authFile else {
+            return false
+        }
+        return normalizedAuthFilePath(lhs.credential) == normalizedAuthFilePath(rhs.credential)
+    }
+
+    private static func identitySpecificity(_ credential: AccountCredential) -> Int {
+        switch credential.providerId.lowercased() {
+        case "codex":
+            return (normalizedIdentityComponent(credential.metadata["accountId"]) == nil ? 0 : 1)
+                + (codexUserId(for: credential) == nil ? 0 : 1)
+        case "antigravity":
+            return (antigravityProjectId(for: credential) == nil ? 0 : 1)
+                + (antigravityEmail(for: credential) == nil ? 0 : 1)
+        default:
+            return 0
+        }
+    }
+
+    private static func normalizedIdentityComponent(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .precomposedStringWithCanonicalMapping
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func shouldPreferCredential(_ candidate: AccountCredential, over existing: AccountCredential) -> Bool {
@@ -462,6 +754,11 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
         if normalizedLookup(credential.metadata["accountId"]) != nil {
             score += 80
+        }
+        if Self.isMultiWorkspace(credential.providerId) {
+            // Keep the most identity-rich copy as canonical so a later refresh
+            // does not lose the stable account/user discriminator.
+            score += Self.identitySpecificity(credential) * 10
         }
         if normalizedLookup(credential.metadata["accountEmail"] ?? credential.metadata["accountHandle"] ?? credential.accountLabel) != nil {
             score += 40

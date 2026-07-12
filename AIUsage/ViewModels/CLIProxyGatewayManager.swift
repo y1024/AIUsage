@@ -10,7 +10,7 @@ nonisolated private struct CLIProxySyncCandidateSource: Sendable, Equatable {
 }
 
 nonisolated private enum CLIProxySyncCandidateEvaluation: Sendable {
-    case compatible
+    case compatible(identity: CLIProxyAccountIdentity, modifiedAt: Date?)
     case requiresAuthFile
     case unsupportedProvider
     case missingFile
@@ -20,6 +20,34 @@ nonisolated private enum CLIProxySyncCandidateEvaluation: Sendable {
 nonisolated private struct CLIProxySyncCandidateResult: Sendable {
     let source: CLIProxySyncCandidateSource
     let evaluation: CLIProxySyncCandidateEvaluation
+}
+
+nonisolated private struct CLIProxyManagedAuthPayload: Sendable {
+    let file: CLIProxyAuthFile
+    let data: Data?
+    let identity: CLIProxyAccountIdentity
+    let destructiveMergeFingerprint: String?
+}
+
+nonisolated private struct CLIProxyManagedAuthCacheEntry: Sendable {
+    let size: Int64?
+    let lastRefresh: Date?
+    let updatedAt: Date?
+    let modTime: Date?
+    let createdAt: Date?
+    let identity: CLIProxyAccountIdentity
+    let destructiveMergeFingerprint: String?
+
+    func matches(_ file: CLIProxyAuthFile) -> Bool {
+        guard lastRefresh != nil || updatedAt != nil || modTime != nil || createdAt != nil else {
+            return false
+        }
+        return size == file.size
+            && lastRefresh == file.lastRefresh
+            && updatedAt == file.updatedAt
+            && modTime == file.modTime
+            && createdAt == file.createdAt
+    }
 }
 
 @MainActor
@@ -65,6 +93,9 @@ final class CLIProxyGatewayManager: ObservableObject {
     @Published private(set) var accountSyncStates: [String: CLIProxyAccountSyncState] = [:]
     @Published private(set) var syncRecords: [CLIProxyAccountSyncRecord] = []
     @Published private(set) var syncCandidates: [CLIProxyAccountSyncCandidate] = []
+    @Published private(set) var authFileIdentities: [String: CLIProxyAccountIdentity] = [:]
+    @Published private(set) var authDeduplicationConflictCount = 0
+    @Published private(set) var syncManifestError: String?
     @Published private(set) var lastImportedAuthFileName: String?
 
     private let paths: CLIProxyPaths
@@ -77,6 +108,8 @@ final class CLIProxyGatewayManager: ObservableObject {
     private var lastSyncCandidateSources: [CLIProxySyncCandidateSource] = []
     private var syncCandidateGeneration = 0
     private var syncManifest = CLIProxyAccountSyncManifest.empty
+    private var syncManifestHealthy: Bool { syncManifestError == nil }
+    private var managedAuthCache: [String: CLIProxyManagedAuthCacheEntry] = [:]
     private var activeOAuthOperationID: UUID?
     private var activeOAuthState: String?
     private var modelCatalogRefreshTask: Task<Void, Never>?
@@ -115,6 +148,7 @@ final class CLIProxyGatewayManager: ObservableObject {
                 )
             }
         } catch {
+            syncManifestError = error.localizedDescription
             lastError = error.localizedDescription
         }
         refreshDistributionState()
@@ -250,6 +284,7 @@ final class CLIProxyGatewayManager: ObservableObject {
         lastError = nil
         defer { isManagingAccounts = false }
         do {
+            retrySyncManifestLoadIfNeeded()
             async let files = loadAuthPool(using: client)
             async let catalogRefresh: Void = refreshModelCatalog(using: client)
             authFiles = try await files
@@ -302,38 +337,79 @@ final class CLIProxyGatewayManager: ObservableObject {
         }
         guard !Task.isCancelled, generation == syncCandidateGeneration else { return }
 
-        let candidates = results.map { result in
+        let evaluatedCandidates: [(candidate: CLIProxyAccountSyncCandidate, modifiedAt: Date?)] = results.map { result in
             let compatibility: CLIProxyAccountSyncCandidate.Compatibility
+            let accountIdentity: CLIProxyAccountIdentity?
+            let modifiedAt: Date?
             switch result.evaluation {
-            case .compatible:
+            case .compatible(let identity, let sourceModifiedAt):
                 compatibility = .compatible
+                accountIdentity = identity
+                modifiedAt = sourceModifiedAt
             case .requiresAuthFile:
                 compatibility = .unsupported(L(
                     "CPA requires an OAuth auth file for this provider.",
                     "CPA 需要该服务商的 OAuth 凭据文件。"
                 ))
+                accountIdentity = nil
+                modifiedAt = nil
             case .unsupportedProvider:
                 compatibility = .unsupported(L(
                     "No verified conversion adapter is available yet.",
                     "目前没有经过验证的格式转换适配器。"
                 ))
+                accountIdentity = nil
+                modifiedAt = nil
             case .missingFile:
                 compatibility = .unsupported(L(
                     "The managed credential file is unavailable.",
                     "托管凭据文件当前不可用。"
                 ))
+                accountIdentity = nil
+                modifiedAt = nil
             case .conversionFailed(let message):
                 compatibility = .unsupported(message)
+                accountIdentity = nil
+                modifiedAt = nil
             }
-            return CLIProxyAccountSyncCandidate(
-                id: "\(result.source.providerID):\(result.source.credentialID)",
-                providerId: result.source.providerID,
-                label: result.source.label,
-                credentialId: result.source.credentialID,
-                compatibility: compatibility
+            return (
+                CLIProxyAccountSyncCandidate(
+                    id: "\(result.source.providerID):\(result.source.credentialID)",
+                    providerId: result.source.providerID,
+                    label: result.source.label,
+                    credentialId: result.source.credentialID,
+                    accountIdentity: accountIdentity,
+                    compatibility: compatibility
+                ),
+                modifiedAt
             )
         }
-        .sorted {
+
+        // Multiple historical credential IDs can point at the same native account.
+        // Collapse only strong provider-native identities; weak/email-only identities
+        // stay separate so Codex workspaces are never merged by display label.
+        var preferredByIdentity: [String: (candidate: CLIProxyAccountSyncCandidate, modifiedAt: Date?)] = [:]
+        for evaluated in evaluatedCandidates {
+            let identityKey: String
+            if let identity = evaluated.candidate.accountIdentity,
+               identity.canAutomaticallyMerge {
+                identityKey = identity.key
+            } else {
+                identityKey = evaluated.candidate.id.lowercased()
+            }
+            guard let existing = preferredByIdentity[identityKey] else {
+                preferredByIdentity[identityKey] = evaluated
+                continue
+            }
+            let existingDate = existing.modifiedAt ?? .distantPast
+            let candidateDate = evaluated.modifiedAt ?? .distantPast
+            if candidateDate > existingDate ||
+                (candidateDate == existingDate && evaluated.candidate.credentialId < existing.candidate.credentialId) {
+                preferredByIdentity[identityKey] = evaluated
+            }
+        }
+
+        let candidates = preferredByIdentity.values.map(\.candidate).sorted {
             let providerOrder = $0.providerId.localizedStandardCompare($1.providerId)
             if providerOrder != .orderedSame { return providerOrder == .orderedAscending }
             return $0.label.localizedStandardCompare($1.label) == .orderedAscending
@@ -380,14 +456,21 @@ final class CLIProxyGatewayManager: ObservableObject {
                     contentsOf: URL(fileURLWithPath: credential.credential),
                     options: .mappedIfSafe
                 )
-                _ = try CLIProxyCredentialAdapter.convert(
+                let copiedData = try CLIProxyCredentialAdapter.convert(
                     providerId: credential.providerId,
                     credentialId: credential.id,
                     accountLabel: credential.accountLabel,
                     metadata: credential.metadata,
                     sourceData: sourceData
                 )
-                evaluation = .compatible
+                let identity = try CLIProxyAccountIdentity.parse(
+                    data: copiedData,
+                    providerHint: source.providerID
+                )
+                let modifiedAt = try? URL(fileURLWithPath: credential.credential)
+                    .resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate
+                evaluation = .compatible(identity: identity, modifiedAt: modifiedAt)
             } catch {
                 evaluation = .conversionFailed(error.localizedDescription)
             }
@@ -656,7 +739,8 @@ final class CLIProxyGatewayManager: ObservableObject {
         mode: CLIProxyAccountSyncMode? = nil,
         forceOverwriteCPA: Bool = false
     ) async {
-        guard !isManagingAccounts,
+        guard syncManifestHealthy,
+              !isManagingAccounts,
               case .compatible = candidate.compatibility,
               let client = managementClient(),
               let credential = AccountCredentialStore.shared.loadCredential(
@@ -688,6 +772,7 @@ final class CLIProxyGatewayManager: ObservableObject {
                 providerId: candidate.providerId,
                 credentialId: candidate.credentialId,
                 authFileName: name,
+                accountIdentity: managedIdentityKey(for: candidate),
                 sourceFingerprint: evaluation.sourceFingerprint,
                 lastCopiedFingerprint: evaluation.copiedFingerprint,
                 lastSyncedAt: Date(),
@@ -705,6 +790,7 @@ final class CLIProxyGatewayManager: ObservableObject {
     }
 
     func setSyncMode(_ candidate: CLIProxyAccountSyncCandidate, mode: CLIProxyAccountSyncMode) async {
+        guard syncManifestHealthy else { return }
         guard var record = syncRecord(for: candidate) else {
             await syncAccount(candidate, mode: mode)
             return
@@ -722,10 +808,19 @@ final class CLIProxyGatewayManager: ObservableObject {
     }
 
     func authFileName(for candidate: CLIProxyAccountSyncCandidate) -> String {
+        if let identityKey = managedIdentityKey(for: candidate),
+           let digest = identityKey.split(separator: ":").last,
+           !digest.isEmpty {
+            return "aiusage-\(candidate.providerId)-\(digest.prefix(24)).json"
+        }
         let safeID = candidate.credentialId
             .unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "-" }
             .prefix(24)
         return "aiusage-\(candidate.providerId)-\(String(safeID)).json"
+    }
+
+    func accountIdentity(for file: CLIProxyAuthFile) -> CLIProxyAccountIdentity? {
+        authFileIdentities[file.name.lowercased()]
     }
 
     func isSynced(_ candidate: CLIProxyAccountSyncCandidate) -> Bool {
@@ -965,6 +1060,7 @@ final class CLIProxyGatewayManager: ObservableObject {
         async let filesTask = client.listAuthFiles()
         async let providersTask = client.listOpenAICompatibleProviders()
         var files = try await filesTask
+        files = await reconcileManagedAuthCopies(files, using: client)
         let providers = (try? await providersTask) ?? openAICompatibleProviders
         openAICompatibleProviders = providers
 
@@ -987,6 +1083,562 @@ final class CLIProxyGatewayManager: ObservableObject {
             if providerOrder != .orderedSame { return providerOrder == .orderedAscending }
             return $0.displayLabel.localizedStandardCompare($1.displayLabel) == .orderedAscending
         }
+    }
+
+    /// Reconciles only files that AIUsage can prove it created. Provider-native
+    /// identity decides which files are duplicates; a second fingerprint gate
+    /// requires the same refresh-token lineage and persistent CPA settings before
+    /// any destructive action is planned.
+    private func reconcileManagedAuthCopies(
+        _ files: [CLIProxyAuthFile],
+        using client: CLIProxyManagementClient
+    ) async -> [CLIProxyAuthFile] {
+        let eligibleFiles = files.filter {
+            !$0.runtimeOnly && $0.name.lowercased().hasPrefix("aiusage-")
+        }
+        let eligibleSources = eligibleFiles.map { file in
+            let cached = managedAuthCache[file.name.lowercased()].flatMap { entry in
+                entry.matches(file) ? entry : nil
+            }
+            return (file: file, providerHint: file.gatewayProviderID, cached: cached)
+        }
+        let payloads = await withTaskGroup(
+            of: CLIProxyManagedAuthPayload?.self,
+            returning: [CLIProxyManagedAuthPayload].self
+        ) { group in
+            for source in eligibleSources {
+                group.addTask {
+                    do {
+                        let file = source.file
+                        if let cached = source.cached {
+                            return CLIProxyManagedAuthPayload(
+                                file: file,
+                                data: nil,
+                                identity: cached.identity,
+                                destructiveMergeFingerprint: cached.destructiveMergeFingerprint
+                            )
+                        }
+                        let data = try await client.downloadAuthFile(name: file.name)
+                        let identity = try CLIProxyAccountIdentity.parse(
+                            data: data,
+                            providerHint: source.providerHint
+                        )
+                        let destructiveFingerprint = try CLIProxyManagedAuthSafety
+                            .destructiveMergeFingerprint(for: data)
+                        return CLIProxyManagedAuthPayload(
+                            file: file,
+                            data: data,
+                            identity: identity,
+                            destructiveMergeFingerprint: destructiveFingerprint
+                        )
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            var results: [CLIProxyManagedAuthPayload] = []
+            for await payload in group {
+                if let payload { results.append(payload) }
+            }
+            return results.sorted {
+                $0.file.name.localizedStandardCompare($1.file.name) == .orderedAscending
+            }
+        }
+
+        var identityByName: [String: CLIProxyAccountIdentity] = [:]
+        for payload in payloads {
+            let name = payload.file.name.lowercased()
+            identityByName[name] = payload.identity
+            if payload.file.lastRefresh != nil
+                || payload.file.updatedAt != nil
+                || payload.file.modTime != nil
+                || payload.file.createdAt != nil {
+                managedAuthCache[name] = CLIProxyManagedAuthCacheEntry(
+                    size: payload.file.size,
+                    lastRefresh: payload.file.lastRefresh,
+                    updatedAt: payload.file.updatedAt,
+                    modTime: payload.file.modTime,
+                    createdAt: payload.file.createdAt,
+                    identity: payload.identity,
+                    destructiveMergeFingerprint: payload.destructiveMergeFingerprint
+                )
+            } else {
+                managedAuthCache[name] = nil
+            }
+        }
+        let eligibleNames = Set(eligibleFiles.map { $0.name.lowercased() })
+        managedAuthCache = managedAuthCache.filter { eligibleNames.contains($0.key) }
+        authFileIdentities = identityByName
+
+        guard syncManifestHealthy else {
+            authDeduplicationConflictCount = 0
+            return files
+        }
+
+        let trackedNames = Set(syncManifest.records.map { $0.authFileName.lowercased() })
+        let copies = payloads.map { payload in
+            CLIProxyManagedAuthCopy(
+                fileName: payload.file.name,
+                identity: payload.identity,
+                modifiedAt: managedAuthModifiedAt(payload.file),
+                isManifestTracked: trackedNames.contains(payload.file.name.lowercased()),
+                destructiveMergeFingerprint: payload.destructiveMergeFingerprint
+            )
+        }
+        let plan = CLIProxyManagedAuthDeduplicator.plan(for: copies)
+        var conflictingIdentityKeys = Set(plan.conflictingIdentityKeys)
+        var deletedNames = Set<String>()
+        var copiesByName: [String: CLIProxyManagedAuthCopy] = [:]
+        for (payload, copy) in zip(payloads, copies) {
+            copiesByName[payload.file.name.lowercased()] = copy
+        }
+        var identityByFileName: [String: String] = [:]
+        for payload in payloads {
+            identityByFileName[payload.file.name.lowercased()] = payload.identity.key
+        }
+        let duplicateIdentityKeys = Set(plan.duplicateFileNames.compactMap {
+            identityByFileName[$0.lowercased()]
+        })
+
+        // Old v1 manifests were keyed only by the transient AIUsage credential
+        // ID. Enrich true singleton records before source-vault remapping can
+        // orphan that link and make the next sync create a second CPA file.
+        let manifestBeforeEnrichment = syncManifest
+        if enrichSingletonManagedSyncRecords(payloads: payloads, copies: copies) {
+            do {
+                try saveSyncManifest()
+            } catch {
+                syncManifest = manifestBeforeEnrichment
+                syncRecords = manifestBeforeEnrichment.records
+                syncManifestError = error.localizedDescription
+                lastError = error.localizedDescription
+                return files
+            }
+        }
+
+        // Singleton accounts need no destructive reconciliation. Restrict the
+        // serial revalidation path to identities that actually have duplicates.
+        for identityKey in duplicateIdentityKeys.sorted() {
+            let expectedFileNames = Set(payloads.compactMap { payload -> String? in
+                guard payload.identity.key == identityKey,
+                      let copy = copiesByName[payload.file.name.lowercased()],
+                      copy.identity.canAutomaticallyMerge,
+                      copy.hasStrongOwnership else { return nil }
+                return payload.file.name
+            })
+            guard !expectedFileNames.isEmpty else { continue }
+
+            let originalManifest = syncManifest
+            do {
+                let outcome = try await reconcileManagedAuthGroup(
+                    identityKey: identityKey,
+                    expectedFileNames: expectedFileNames,
+                    using: client
+                )
+                let manifestChanged = migrateManagedSyncRecords(
+                    payloads: outcome.payloads,
+                    plan: outcome.plan
+                )
+                do {
+                    if manifestChanged { try saveSyncManifest() }
+                } catch {
+                    let restoreFailures = await restoreManagedAuthFiles(
+                        outcome.deletedData,
+                        using: client
+                    )
+                    syncManifest = originalManifest
+                    syncRecords = originalManifest.records
+                    try? saveSyncManifest()
+                    let suffix = restoreFailures.isEmpty
+                        ? ""
+                        : "; rollback failed for \(restoreFailures.joined(separator: ", "))"
+                    throw CLIProxyGatewayError.fileSystem(
+                        "account sync manifest could not be updated\(suffix): \(error.localizedDescription)"
+                    )
+                }
+                for name in outcome.deletedData.keys {
+                    deletedNames.insert(name.lowercased())
+                    authFileModels[name] = nil
+                    authFileModelErrors[name] = nil
+                }
+            } catch {
+                syncManifest = originalManifest
+                syncRecords = originalManifest.records
+                conflictingIdentityKeys.insert(identityKey)
+                if lastError == nil { lastError = error.localizedDescription }
+            }
+        }
+
+        authDeduplicationConflictCount = conflictingIdentityKeys.count
+        guard !deletedNames.isEmpty else { return files }
+        authFileIdentities = authFileIdentities.filter { !deletedNames.contains($0.key) }
+        managedAuthCache = managedAuthCache.filter { !deletedNames.contains($0.key) }
+        return files.filter { !deletedNames.contains($0.name.lowercased()) }
+    }
+
+    /// Re-fetches every managed copy immediately before deletion. The rollback
+    /// payload stays in memory only, so refresh credentials are never duplicated
+    /// into another on-disk store.
+    private func reconcileManagedAuthGroup(
+        identityKey: String,
+        expectedFileNames: Set<String>,
+        using client: CLIProxyManagementClient
+    ) async throws -> (
+        payloads: [CLIProxyManagedAuthPayload],
+        plan: CLIProxyManagedAuthDeduplicationPlan,
+        deletedData: [String: Data]
+    ) {
+        let currentFiles = try await client.listAuthFiles()
+        var currentByName: [String: CLIProxyAuthFile] = [:]
+        for file in currentFiles {
+            let name = file.name.lowercased()
+            guard currentByName[name] == nil else {
+                throw CLIProxyGatewayError.syncConflict(
+                    "CPA returned auth file names that differ only by letter case"
+                )
+            }
+            currentByName[name] = file
+        }
+        let trackedNames = Set(syncManifest.records.map { $0.authFileName.lowercased() })
+        var payloads: [CLIProxyManagedAuthPayload] = []
+
+        for expectedName in expectedFileNames.sorted(by: managedAuthFileNameOrder) {
+            guard let file = currentByName[expectedName.lowercased()] else {
+                throw CLIProxyGatewayError.syncConflict(
+                    "managed CPA auth files changed while duplicate cleanup was running"
+                )
+            }
+            payloads.append(try await managedAuthPayload(file, using: client))
+        }
+
+        let copies = payloads.map { payload in
+            CLIProxyManagedAuthCopy(
+                fileName: payload.file.name,
+                identity: payload.identity,
+                modifiedAt: managedAuthModifiedAt(payload.file),
+                isManifestTracked: trackedNames.contains(payload.file.name.lowercased()),
+                destructiveMergeFingerprint: payload.destructiveMergeFingerprint
+            )
+        }
+        let plan = CLIProxyManagedAuthDeduplicator.plan(for: copies)
+        guard !plan.conflictingIdentityKeys.contains(identityKey),
+              let canonicalName = plan.canonicalFileByIdentity[identityKey] else {
+            throw CLIProxyGatewayError.syncConflict(
+                "managed CPA auth copies no longer have identical credentials and settings"
+            )
+        }
+        let plannedNames = Set(plan.duplicateFileNames + [canonicalName])
+        guard Set(expectedFileNames.map { $0.lowercased() })
+            == Set(plannedNames.map { $0.lowercased() }) else {
+            throw CLIProxyGatewayError.syncConflict(
+                "managed CPA auth ownership changed while duplicate cleanup was running"
+            )
+        }
+
+        var deletedData: [String: Data] = [:]
+        for duplicateName in plan.duplicateFileNames {
+            do {
+                let canonicalData = try await client.downloadAuthFile(name: canonicalName)
+                let duplicateData = try await client.downloadAuthFile(name: duplicateName)
+                let canonicalIdentity = try CLIProxyAccountIdentity.parse(data: canonicalData)
+                let duplicateIdentity = try CLIProxyAccountIdentity.parse(data: duplicateData)
+                let canonicalFingerprint = try CLIProxyManagedAuthSafety
+                    .destructiveMergeFingerprint(for: canonicalData)
+                let duplicateFingerprint = try CLIProxyManagedAuthSafety
+                    .destructiveMergeFingerprint(for: duplicateData)
+                let canonicalCopy = CLIProxyManagedAuthCopy(
+                    fileName: canonicalName,
+                    identity: canonicalIdentity,
+                    modifiedAt: nil,
+                    isManifestTracked: trackedNames.contains(canonicalName.lowercased()),
+                    destructiveMergeFingerprint: canonicalFingerprint
+                )
+                let duplicateCopy = CLIProxyManagedAuthCopy(
+                    fileName: duplicateName,
+                    identity: duplicateIdentity,
+                    modifiedAt: nil,
+                    isManifestTracked: trackedNames.contains(duplicateName.lowercased()),
+                    destructiveMergeFingerprint: duplicateFingerprint
+                )
+                guard canonicalIdentity.canAutomaticallyMerge,
+                      duplicateIdentity.canAutomaticallyMerge,
+                      canonicalCopy.hasStrongOwnership,
+                      duplicateCopy.hasStrongOwnership,
+                      canonicalIdentity.key == identityKey,
+                      duplicateIdentity.key == identityKey,
+                      canonicalFingerprint != nil,
+                      canonicalFingerprint == duplicateFingerprint else {
+                    throw CLIProxyGatewayError.syncConflict(
+                        "managed CPA auth copies changed before deletion"
+                    )
+                }
+                deletedData[duplicateName] = duplicateData
+                try await client.deleteAuthFile(name: duplicateName)
+            } catch {
+                let restoreFailures = await restoreManagedAuthFiles(deletedData, using: client)
+                let suffix = restoreFailures.isEmpty
+                    ? ""
+                    : "; rollback failed for \(restoreFailures.joined(separator: ", "))"
+                throw CLIProxyGatewayError.syncConflict(
+                    "managed CPA duplicate cleanup stopped safely\(suffix): \(error.localizedDescription)"
+                )
+            }
+        }
+
+        do {
+            let canonicalData = try await client.downloadAuthFile(name: canonicalName)
+            let canonicalIdentity = try CLIProxyAccountIdentity.parse(data: canonicalData)
+            let canonicalFingerprint = try CLIProxyManagedAuthSafety
+                .destructiveMergeFingerprint(for: canonicalData)
+            guard canonicalIdentity.canAutomaticallyMerge,
+                  canonicalIdentity.key == identityKey,
+                  canonicalFingerprint != nil,
+                  canonicalFingerprint == payloads.first(where: {
+                      $0.file.name.caseInsensitiveCompare(canonicalName) == .orderedSame
+                  })?.destructiveMergeFingerprint else {
+                throw CLIProxyGatewayError.syncConflict(
+                    "the canonical CPA auth copy changed during duplicate cleanup"
+                )
+            }
+        } catch {
+            let restoreFailures = await restoreManagedAuthFiles(deletedData, using: client)
+            let suffix = restoreFailures.isEmpty
+                ? ""
+                : "; rollback failed for \(restoreFailures.joined(separator: ", "))"
+            throw CLIProxyGatewayError.syncConflict(
+                "managed CPA duplicate cleanup was rolled back\(suffix): \(error.localizedDescription)"
+            )
+        }
+
+        return (payloads, plan, deletedData)
+    }
+
+    private func managedAuthPayload(
+        _ file: CLIProxyAuthFile,
+        using client: CLIProxyManagementClient
+    ) async throws -> CLIProxyManagedAuthPayload {
+        let data = try await client.downloadAuthFile(name: file.name)
+        return CLIProxyManagedAuthPayload(
+            file: file,
+            data: data,
+            identity: try CLIProxyAccountIdentity.parse(
+                data: data,
+                providerHint: file.gatewayProviderID
+            ),
+            destructiveMergeFingerprint: try CLIProxyManagedAuthSafety
+                .destructiveMergeFingerprint(for: data)
+        )
+    }
+
+    private func restoreManagedAuthFiles(
+        _ files: [String: Data],
+        using client: CLIProxyManagementClient
+    ) async -> [String] {
+        var failures: [String] = []
+        for name in files.keys.sorted(by: managedAuthFileNameOrder) {
+            guard let data = files[name] else { continue }
+            do {
+                let currentData = try await client.downloadAuthFile(name: name)
+                let expectedHash = try CLIProxyJSONFingerprint.hash(data, requireObject: true)
+                let currentHash = try CLIProxyJSONFingerprint.hash(currentData, requireObject: true)
+                if expectedHash != currentHash { failures.append(name) }
+            } catch CLIProxyGatewayError.managementAPI(let status, _) where status == 404 {
+                do { try await client.uploadAuthFile(data: data, name: name) }
+                catch { failures.append(name) }
+            } catch {
+                failures.append(name)
+            }
+        }
+        return failures
+    }
+
+    private func managedAuthFileNameOrder(_ lhs: String, _ rhs: String) -> Bool {
+        let left = lhs.lowercased()
+        let right = rhs.lowercased()
+        if left != right { return left < right }
+        return lhs < rhs
+    }
+
+    private func managedAuthModifiedAt(_ file: CLIProxyAuthFile) -> Date? {
+        file.lastRefresh ?? file.updatedAt ?? file.modTime ?? file.createdAt
+    }
+
+    /// Adds native identity to an existing v1 record only when exactly one CPA
+    /// file carries that strong identity. This is metadata-only: no auth payload
+    /// is uploaded, deleted, or rewritten.
+    @discardableResult
+    private func enrichSingletonManagedSyncRecords(
+        payloads: [CLIProxyManagedAuthPayload],
+        copies: [CLIProxyManagedAuthCopy]
+    ) -> Bool {
+        let payloadsByIdentity = Dictionary(grouping: payloads, by: { $0.identity.key })
+        var copyByName: [String: CLIProxyManagedAuthCopy] = [:]
+        for (payload, copy) in zip(payloads, copies) {
+            copyByName[payload.file.name.lowercased()] = copy
+        }
+        var records = syncManifest.records
+
+        for (identityKey, group) in payloadsByIdentity where group.count == 1 {
+            guard let payload = group.first,
+                  payload.identity.canAutomaticallyMerge,
+                  let copy = copyByName[payload.file.name.lowercased()],
+                  copy.hasStrongOwnership else { continue }
+
+            let matchingRecords = records.filter {
+                $0.providerId.caseInsensitiveCompare(payload.identity.providerID) == .orderedSame &&
+                    $0.authFileName.caseInsensitiveCompare(payload.file.name) == .orderedSame
+            }
+            guard !matchingRecords.isEmpty else { continue }
+            guard !records.contains(where: {
+                $0.providerId.caseInsensitiveCompare(payload.identity.providerID) != .orderedSame &&
+                    $0.authFileName.caseInsensitiveCompare(payload.file.name) == .orderedSame
+            }),
+            let baseRecord = matchingRecords.max(by: { $0.lastSyncedAt < $1.lastSyncedAt }) else {
+                continue
+            }
+            let keepUpdated = matchingRecords.contains { $0.mode == .keepUpdated }
+            let candidate = syncCandidates.first {
+                managedIdentityKey(for: $0)?.caseInsensitiveCompare(identityKey) == .orderedSame
+            }
+            let matchingIDs = Set(matchingRecords.map { $0.id.lowercased() })
+            guard !records.contains(where: { record in
+                guard !matchingIDs.contains(record.id.lowercased()),
+                      record.providerId.caseInsensitiveCompare(payload.identity.providerID) == .orderedSame else {
+                    return false
+                }
+                if let candidate,
+                   record.credentialId.caseInsensitiveCompare(candidate.credentialId) == .orderedSame {
+                    return true
+                }
+                return record.accountIdentity?.caseInsensitiveCompare(identityKey) == .orderedSame
+            }) else { continue }
+            let replacement = CLIProxyAccountSyncRecord(
+                providerId: candidate?.providerId ?? baseRecord.providerId,
+                credentialId: candidate?.credentialId ?? baseRecord.credentialId,
+                authFileName: payload.file.name,
+                accountIdentity: identityKey,
+                sourceFingerprint: baseRecord.sourceFingerprint,
+                lastCopiedFingerprint: baseRecord.lastCopiedFingerprint,
+                lastSyncedAt: baseRecord.lastSyncedAt,
+                mode: keepUpdated ? .keepUpdated : baseRecord.mode
+            )
+            records.removeAll { matchingIDs.contains($0.id.lowercased()) }
+            records.append(replacement)
+        }
+
+        records.sort { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
+        guard records != syncManifest.records else { return false }
+        syncManifest.records = records
+        syncRecords = records
+        return true
+    }
+
+    /// Adds the stable identity to existing v1 records and collapses records only
+    /// for groups that passed the model-layer destructive gate. Conflicting groups
+    /// remain byte-for-byte represented in the manifest for manual review.
+    @discardableResult
+    private func migrateManagedSyncRecords(
+        payloads: [CLIProxyManagedAuthPayload],
+        plan: CLIProxyManagedAuthDeduplicationPlan
+    ) -> Bool {
+        let conflictingKeys = Set(plan.conflictingIdentityKeys)
+        let grouped = Dictionary(grouping: payloads) { $0.identity.key }
+        var records = syncManifest.records
+
+        for identityKey in plan.canonicalFileByIdentity.keys.sorted() {
+            guard !conflictingKeys.contains(identityKey),
+                  let canonicalName = plan.canonicalFileByIdentity[identityKey],
+                  let group = grouped[identityKey],
+                  let identity = group.first?.identity else { continue }
+
+            let groupNames = Set(group.map { $0.file.name.lowercased() })
+            let groupRecords = records.filter {
+                groupNames.contains($0.authFileName.lowercased()) ||
+                    ($0.providerId.caseInsensitiveCompare(identity.providerID) == .orderedSame &&
+                     $0.accountIdentity?.caseInsensitiveCompare(identityKey) == .orderedSame)
+            }
+            let candidate = syncCandidates.first {
+                managedIdentityKey(for: $0)?.caseInsensitiveCompare(identityKey) == .orderedSame
+            }
+            guard let canonicalPayload = group.first(where: {
+                $0.file.name.caseInsensitiveCompare(canonicalName) == .orderedSame
+            }),
+            let canonicalData = canonicalPayload.data,
+            let canonicalCopiedFingerprint = try? CLIProxyJSONFingerprint.hash(
+                canonicalData,
+                requireObject: true
+            ) else { continue }
+            guard let replacement = migratedSyncRecord(
+                identityKey: identityKey,
+                canonicalName: canonicalName,
+                canonicalCopiedFingerprint: canonicalCopiedFingerprint,
+                candidate: candidate,
+                existingRecords: groupRecords
+            ) else { continue }
+
+            records.removeAll {
+                groupNames.contains($0.authFileName.lowercased()) ||
+                    ($0.providerId.caseInsensitiveCompare(identity.providerID) == .orderedSame &&
+                     $0.accountIdentity?.caseInsensitiveCompare(identityKey) == .orderedSame)
+            }
+            records.append(replacement)
+        }
+
+        records.sort { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
+        guard records != syncManifest.records else { return false }
+        syncManifest.records = records
+        syncRecords = records
+        return true
+    }
+
+    private func migratedSyncRecord(
+        identityKey: String,
+        canonicalName: String,
+        canonicalCopiedFingerprint: String,
+        candidate: CLIProxyAccountSyncCandidate?,
+        existingRecords: [CLIProxyAccountSyncRecord]
+    ) -> CLIProxyAccountSyncRecord? {
+        let canonicalRecord = existingRecords.first {
+            $0.authFileName.caseInsensitiveCompare(canonicalName) == .orderedSame
+        }
+        let baseRecord = canonicalRecord ?? existingRecords.max { $0.lastSyncedAt < $1.lastSyncedAt }
+        let keepUpdated = existingRecords.contains { $0.mode == .keepUpdated }
+
+        if let baseRecord {
+            return CLIProxyAccountSyncRecord(
+                providerId: candidate?.providerId ?? baseRecord.providerId,
+                credentialId: candidate?.credentialId ?? baseRecord.credentialId,
+                authFileName: canonicalName,
+                accountIdentity: identityKey,
+                sourceFingerprint: baseRecord.sourceFingerprint,
+                lastCopiedFingerprint: canonicalCopiedFingerprint,
+                lastSyncedAt: baseRecord.lastSyncedAt,
+                mode: keepUpdated ? .keepUpdated : baseRecord.mode
+            )
+        }
+
+        guard let candidate,
+              let credential = AccountCredentialStore.shared.loadCredential(
+                  providerId: candidate.providerId,
+                  credentialId: candidate.credentialId
+              ),
+              let sourceData = try? Data(
+                  contentsOf: URL(fileURLWithPath: credential.credential),
+                  options: .mappedIfSafe
+              ),
+              let sourceFingerprint = try? CLIProxyJSONFingerprint.hash(sourceData, requireObject: true)
+        else { return nil }
+
+        return CLIProxyAccountSyncRecord(
+            providerId: candidate.providerId,
+            credentialId: candidate.credentialId,
+            authFileName: canonicalName,
+            accountIdentity: identityKey,
+            sourceFingerprint: sourceFingerprint,
+            lastCopiedFingerprint: canonicalCopiedFingerprint,
+            lastSyncedAt: Date(),
+            mode: .manualCopy
+        )
     }
 
     private func loadProviderPluginState(
@@ -1163,6 +1815,7 @@ final class CLIProxyGatewayManager: ObservableObject {
         using client: CLIProxyManagementClient,
         allowKeepUpdated: Bool
     ) async {
+        guard syncManifestHealthy else { return }
         var states: [String: CLIProxyAccountSyncState] = [:]
         var manifestChanged = false
 
@@ -1188,6 +1841,7 @@ final class CLIProxyGatewayManager: ObservableObject {
                         providerId: candidate.providerId,
                         credentialId: candidate.credentialId,
                         authFileName: evaluation.authFileName,
+                        accountIdentity: managedIdentityKey(for: candidate),
                         sourceFingerprint: evaluation.sourceFingerprint,
                         lastCopiedFingerprint: evaluation.copiedFingerprint,
                         lastSyncedAt: Date(),
@@ -1205,8 +1859,9 @@ final class CLIProxyGatewayManager: ObservableObject {
                 try await client.uploadAuthFile(data: evaluation.copiedData, name: record.authFileName)
                 let updated = CLIProxyAccountSyncRecord(
                     providerId: record.providerId,
-                    credentialId: record.credentialId,
+                    credentialId: candidate.credentialId,
                     authFileName: record.authFileName,
+                    accountIdentity: managedIdentityKey(for: candidate) ?? record.accountIdentity,
                     sourceFingerprint: evaluation.sourceFingerprint,
                     lastCopiedFingerprint: evaluation.copiedFingerprint,
                     lastSyncedAt: Date(),
@@ -1292,14 +1947,42 @@ final class CLIProxyGatewayManager: ObservableObject {
         )
     }
 
+    private func managedIdentityKey(for candidate: CLIProxyAccountSyncCandidate) -> String? {
+        guard let identity = candidate.accountIdentity,
+              identity.canAutomaticallyMerge else { return nil }
+        return identity.key
+    }
+
     private func syncRecord(for candidate: CLIProxyAccountSyncCandidate) -> CLIProxyAccountSyncRecord? {
-        syncManifest.records.first {
-            $0.providerId == candidate.providerId && $0.credentialId == candidate.credentialId
+        if let identityKey = managedIdentityKey(for: candidate),
+           let record = syncManifest.records.first(where: {
+               $0.providerId.caseInsensitiveCompare(candidate.providerId) == .orderedSame &&
+               $0.accountIdentity?.caseInsensitiveCompare(identityKey) == .orderedSame
+           }) {
+            return record
+        }
+        return syncManifest.records.first {
+            $0.providerId.caseInsensitiveCompare(candidate.providerId) == .orderedSame &&
+            $0.credentialId.caseInsensitiveCompare(candidate.credentialId) == .orderedSame
         }
     }
 
     private func upsertSyncRecord(_ record: CLIProxyAccountSyncRecord) {
-        syncManifest.records.removeAll { $0.id == record.id }
+        syncManifest.records.removeAll { existing in
+            if existing.providerId.caseInsensitiveCompare(record.providerId) == .orderedSame,
+               existing.credentialId.caseInsensitiveCompare(record.credentialId) == .orderedSame {
+                return true
+            }
+            if existing.authFileName.caseInsensitiveCompare(record.authFileName) == .orderedSame {
+                return true
+            }
+            if existing.providerId.caseInsensitiveCompare(record.providerId) == .orderedSame,
+               let identity = record.accountIdentity,
+               existing.accountIdentity?.caseInsensitiveCompare(identity) == .orderedSame {
+                return true
+            }
+            return false
+        }
         syncManifest.records.append(record)
         syncManifest.records.sort { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
         syncRecords = syncManifest.records
@@ -1316,18 +1999,47 @@ final class CLIProxyGatewayManager: ObservableObject {
     }
 
     private func saveSyncManifest() throws {
-        syncManifest.schemaVersion = 1
+        guard syncManifestHealthy else {
+            throw CLIProxyGatewayError.fileSystem(
+                "account sync manifest is unavailable; existing data was left unchanged"
+            )
+        }
+        var manifest = syncManifest
+        manifest.schemaVersion = 1
+        manifest = try CLIProxyAccountSyncManifestValidator.validate(manifest)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(syncManifest)
+        let data = try encoder.encode(manifest)
         try paths.prepare()
         try data.write(to: paths.syncManifestURL, options: .atomic)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o600],
             ofItemAtPath: paths.syncManifestURL.path
         )
-        syncRecords = syncManifest.records
+        syncManifest = manifest
+        syncRecords = manifest.records
+    }
+
+    /// A corrupt or temporarily unreadable manifest stays fail-closed, but a
+    /// later refresh may recover after the user repairs or removes that file.
+    private func retrySyncManifestLoadIfNeeded() {
+        guard syncManifestError != nil else { return }
+        do {
+            try paths.prepare()
+            let manifest = try Self.loadSyncManifest(from: paths.syncManifestURL)
+            if FileManager.default.fileExists(atPath: paths.syncManifestURL.path) {
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: paths.syncManifestURL.path
+                )
+            }
+            syncManifest = manifest
+            syncRecords = manifest.records
+            syncManifestError = nil
+        } catch {
+            syncManifestError = error.localizedDescription
+        }
     }
 
     private static func loadSyncManifest(from url: URL) throws -> CLIProxyAccountSyncManifest {
@@ -1338,19 +2050,11 @@ final class CLIProxyGatewayManager: ObservableObject {
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        var manifest = try decoder.decode(CLIProxyAccountSyncManifest.self, from: Data(contentsOf: url))
-        guard manifest.schemaVersion == 1 else {
-            throw CLIProxyGatewayError.fileSystem("unsupported account sync manifest version")
-        }
-        var seen = Set<String>()
-        manifest.records = manifest.records.filter { record in
-            guard seen.insert(record.id).inserted,
-                  isValidFingerprint(record.sourceFingerprint),
-                  isValidFingerprint(record.lastCopiedFingerprint),
-                  isSafeAuthFileName(record.authFileName) else { return false }
-            return true
-        }
-        return manifest
+        let manifest = try decoder.decode(
+            CLIProxyAccountSyncManifest.self,
+            from: Data(contentsOf: url)
+        )
+        return try CLIProxyAccountSyncManifestValidator.validate(manifest)
     }
 
     private static func readImportableAuthFile(at url: URL) throws -> Data {
@@ -1404,17 +2108,6 @@ final class CLIProxyGatewayManager: ObservableObject {
             if !existing.contains(candidate.lowercased()) { return candidate }
         }
         return "auth-\(UUID().uuidString).json"
-    }
-
-    private static func isValidFingerprint(_ value: String) -> Bool {
-        value.count == 64 && value.unicodeScalars.allSatisfy {
-            CharacterSet(charactersIn: "0123456789abcdef").contains($0)
-        }
-    }
-
-    private static func isSafeAuthFileName(_ value: String) -> Bool {
-        !value.isEmpty && value.lowercased().hasSuffix(".json") &&
-            value == URL(fileURLWithPath: value).lastPathComponent && !value.contains("\\")
     }
 
     private func convertedAuthFile(_ credential: AccountCredential, sourceData: Data) throws -> Data {

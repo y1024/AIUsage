@@ -7,10 +7,11 @@ internal let accountPersistenceLog = Logger(subsystem: "com.aiusage.desktop", ca
 
 /// Single source of truth for account identity / dedup rules.
 ///
-/// Codex allows one email to exist in multiple workspaces (personal + multiple teams),
-/// and one team to hold multiple emails. Identity therefore has to be anchored on
-/// `credentialId` or `sourceFilePath` (normalized auth file path), never email alone. Non-multi-workspace providers
-/// (Gemini, Cursor, etc.) fall back to email as before.
+/// Provider-native accounts cannot always be identified by email: Codex uses a
+/// workspace + user tuple, while Antigravity uses project + email. Registry
+/// identity therefore stays anchored on a canonical `credentialId` or normalized
+/// auth-file path. Providers without native multi-account identity keep the prior
+/// account/email fallback.
 ///
 /// All matching and dedup logic lives here so the `AccountRegistryRefreshSnapshot`
 /// (reconcile worker) and `AccountStore` extensions can share exactly one
@@ -624,8 +625,9 @@ extension AccountStore {
 
     func normalizePersistedState() {
         bootstrapCredentialIndexFromRegistry()
-        let credentialRemapping = AccountCredentialStore.shared.deduplicateCredentials()
-        var didChange = applyCredentialRemapping(credentialRemapping)
+        let credentialStore = AccountCredentialStore.shared
+        let deduplicationPlan = credentialStore.planCredentialDeduplication()
+        var didChange = applyCredentialRemapping(deduplicationPlan.remappedCredentialIDs)
         if normalizeAccountRegistryAgainstCredentials() {
             didChange = true
         }
@@ -641,11 +643,25 @@ extension AccountStore {
             didChange = true
         }
 
-        if didChange {
-            persistAccountRegistry()
+        let requiresRegistryBarrier = !deduplicationPlan.isEmpty
+        let registryPersisted: Bool
+        if didChange || requiresRegistryBarrier {
+            registryPersisted = persistAccountRegistry()
+        } else {
+            registryPersisted = true
         }
 
-        cleanupManagedCredentialArtifacts()
+        var credentialVaultCommitted = true
+        if registryPersisted, requiresRegistryBarrier {
+            credentialVaultCommitted = credentialStore.commitCredentialDeduplication(deduplicationPlan)
+            if !credentialVaultCommitted {
+                accountPersistenceLog.error("Credential deduplication commit deferred because the staged plan changed or the vault write failed.")
+            }
+        }
+
+        if registryPersisted, credentialVaultCommitted {
+            cleanupManagedCredentialArtifacts()
+        }
     }
 
     private func stripCompositeAccountIds() -> Bool {
@@ -738,6 +754,7 @@ extension AccountStore {
     }
 
     func existingAuthenticatedCredential(
+        incomingCredential: AccountCredential,
         providerId: String,
         accountHandle: String,
         accountId: String?,
@@ -751,6 +768,12 @@ extension AccountStore {
         let normalizedSourceIdentifier = normalizedAccountLookupValue(sourceIdentifier)
 
         return AccountCredentialStore.shared.loadCredentials(for: providerId).first { credential in
+            if AccountCredentialStore.credentialsShareCanonicalIdentity(
+                credential,
+                incomingCredential
+            ) {
+                return true
+            }
             let isMultiWs = AccountIdentityPolicy.isMultiWorkspace(providerId)
 
             if !isMultiWs,

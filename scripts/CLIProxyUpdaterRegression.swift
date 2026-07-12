@@ -29,6 +29,13 @@ struct CLIProxyUpdaterRegression {
         try testDefaultPluginDirectoryUpgradeMigration()
         try testCredentialAdapters()
         try testCanonicalCredentialFingerprint()
+        try testSyncManifestValidation()
+        try testCodexIdentityKeepsPlansSeparate()
+        try testCodexIdentityParityAndPlanChanges()
+        try testCodexManagedCopiesDeduplicateSafely()
+        try testAntigravityManagedCopiesDeduplicate()
+        try testWeakIdentityNeverDeduplicates()
+        try testManagedCopyConflictsAreNeverDeleted()
         try testExpandedAuthFileDecoding()
         try testDynamicProviderModels()
         try await testVersionedInstallAndRollback()
@@ -612,6 +619,476 @@ struct CLIProxyUpdaterRegression {
         let changedHash = try CLIProxyJSONFingerprint.hash(changed)
         try expect(firstHash == reorderedHash, "canonical JSON fingerprint changed for formatting or key order")
         try expect(firstHash != changedHash, "canonical JSON fingerprint missed a credential value change")
+    }
+
+    private static func testSyncManifestValidation() throws {
+        let sourceHash = String(repeating: "a", count: 64)
+        let copiedHash = String(repeating: "b", count: 64)
+        let legacyJSON = #"""
+        {
+          "schemaVersion": 1,
+          "records": [{
+            "providerId": "codex",
+            "credentialId": "legacy-credential",
+            "authFileName": "aiusage-codex-legacy.json",
+            "sourceFingerprint": "\#(sourceHash)",
+            "lastCopiedFingerprint": "\#(copiedHash)",
+            "lastSyncedAt": "2026-07-12T12:00:00Z",
+            "mode": "manualCopy"
+          }]
+        }
+        """#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let legacy = try decoder.decode(
+            CLIProxyAccountSyncManifest.self,
+            from: Data(legacyJSON.utf8)
+        )
+        try expect(legacy.records.first?.accountIdentity == nil, "legacy v1 manifest required accountIdentity")
+        let validatedLegacy = try CLIProxyAccountSyncManifestValidator.validate(legacy)
+        try expect(
+            validatedLegacy == legacy,
+            "valid legacy v1 manifest was rejected"
+        )
+
+        let identityHash = String(repeating: "c", count: 64)
+        let current = CLIProxyAccountSyncManifest(
+            schemaVersion: 1,
+            records: [syncManifestRecord(accountIdentity: "codex:\(identityHash)")]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(current)
+        let decoded = try decoder.decode(CLIProxyAccountSyncManifest.self, from: encoded)
+        try expect(decoded == current, "manifest accountIdentity did not round-trip")
+        let validatedCurrent = try CLIProxyAccountSyncManifestValidator.validate(decoded)
+        try expect(
+            validatedCurrent == current,
+            "round-tripped manifest failed structural validation"
+        )
+
+        let duplicateRecords = CLIProxyAccountSyncManifest(
+            schemaVersion: 1,
+            records: [
+                syncManifestRecord(providerID: "codex", credentialID: "Duplicate", fileName: "first.json"),
+                syncManifestRecord(providerID: "CODEX", credentialID: "duplicate", fileName: "second.json")
+            ]
+        )
+        try expectManifestRejected(duplicateRecords, "case-insensitive duplicate manifest record ID was accepted")
+
+        let invalidManifests = [
+            CLIProxyAccountSyncManifest(
+                schemaVersion: 2,
+                records: [syncManifestRecord()]
+            ),
+            CLIProxyAccountSyncManifest(
+                schemaVersion: 1,
+                records: [syncManifestRecord(sourceFingerprint: String(repeating: "a", count: 63))]
+            ),
+            CLIProxyAccountSyncManifest(
+                schemaVersion: 1,
+                records: [syncManifestRecord(lastCopiedFingerprint: String(repeating: "F", count: 64))]
+            ),
+            CLIProxyAccountSyncManifest(
+                schemaVersion: 1,
+                records: [syncManifestRecord(fileName: "../escape.json")]
+            ),
+            CLIProxyAccountSyncManifest(
+                schemaVersion: 1,
+                records: [syncManifestRecord(accountIdentity: "antigravity:\(identityHash)")]
+            ),
+            CLIProxyAccountSyncManifest(
+                schemaVersion: 1,
+                records: [syncManifestRecord(accountIdentity: "codex:\(String(repeating: "c", count: 63))")]
+            )
+        ]
+        for (index, manifest) in invalidManifests.enumerated() {
+            try expectManifestRejected(manifest, "invalid manifest fixture \(index) was accepted")
+        }
+    }
+
+    private static func syncManifestRecord(
+        providerID: String = "codex",
+        credentialID: String = "credential",
+        fileName: String = "aiusage-codex-credential.json",
+        accountIdentity: String? = nil,
+        sourceFingerprint: String = String(repeating: "a", count: 64),
+        lastCopiedFingerprint: String = String(repeating: "b", count: 64)
+    ) -> CLIProxyAccountSyncRecord {
+        CLIProxyAccountSyncRecord(
+            providerId: providerID,
+            credentialId: credentialID,
+            authFileName: fileName,
+            accountIdentity: accountIdentity,
+            sourceFingerprint: sourceFingerprint,
+            lastCopiedFingerprint: lastCopiedFingerprint,
+            lastSyncedAt: Date(timeIntervalSince1970: 1_752_321_600),
+            mode: .manualCopy
+        )
+    }
+
+    private static func expectManifestRejected(
+        _ manifest: CLIProxyAccountSyncManifest,
+        _ message: String
+    ) throws {
+        do {
+            _ = try CLIProxyAccountSyncManifestValidator.validate(manifest)
+            throw RegressionFailure(message)
+        } catch is CLIProxyGatewayError {
+            // Expected.
+        }
+    }
+
+    private static func testCodexIdentityKeepsPlansSeparate() throws {
+        let freeData = try codexAuthData(
+            accountID: "account-free-1234567890",
+            userID: "user-shared-1234567890",
+            plan: "free",
+            email: "same@example.com",
+            credentialID: "free-credential",
+            refreshToken: "shared-refresh"
+        )
+        let teamData = try codexAuthData(
+            accountID: "account-team-1234567890",
+            userID: "user-shared-1234567890",
+            plan: "team",
+            email: "same@example.com",
+            credentialID: "team-credential",
+            refreshToken: "shared-refresh"
+        )
+        let free = try CLIProxyAccountIdentity.parse(data: freeData, providerHint: "codex")
+        let team = try CLIProxyAccountIdentity.parse(data: teamData, providerHint: "codex")
+
+        try expect(free.canAutomaticallyMerge && team.canAutomaticallyMerge, "complete Codex identities were not strong")
+        try expect(free.key != team.key, "Free and Team workspaces with one email were merged")
+        try expect(free.planDisplayName == "Free" && team.planDisplayName == "Team", "Codex plan summary is wrong")
+        try expect(free.shortAccountID != free.accountID, "long Codex account ID was not shortened for display")
+
+        let plan = CLIProxyManagedAuthDeduplicator.plan(for: [
+            try managedCopy(name: "free.json", data: freeData, modifiedAt: 1, manifestTracked: true),
+            try managedCopy(name: "team.json", data: teamData, modifiedAt: 2, manifestTracked: true)
+        ])
+        try expect(plan.duplicateFileNames.isEmpty, "same-email Codex plans produced a deletion candidate")
+        try expect(plan.conflictingIdentityKeys.isEmpty, "separate Codex plans were reported as conflicts")
+    }
+
+    private static func testCodexIdentityParityAndPlanChanges() throws {
+        let plusData = try codexAuthData(
+            accountID: "same-account-1234567890",
+            userID: "same-user-1234567890",
+            plan: "plus",
+            email: "upgrade@example.com",
+            credentialID: "upgrade-plus",
+            refreshToken: "upgrade-refresh"
+        )
+        let teamData = try codexAuthData(
+            accountID: "same-account-1234567890",
+            userID: "same-user-1234567890",
+            plan: "team",
+            email: "upgrade@example.com",
+            credentialID: "upgrade-team",
+            refreshToken: "upgrade-refresh"
+        )
+        let jwtAccountAndSubjectOnly = try codexAuthData(
+            accountID: "same-account-1234567890",
+            userID: "same-user-1234567890",
+            plan: "plus",
+            email: "upgrade@example.com",
+            credentialID: "jwt-subject-only",
+            refreshToken: "upgrade-refresh",
+            includeRootAccountID: false,
+            includeChatGPTUserID: false
+        )
+        let noPlan = try codexAuthData(
+            accountID: "same-account-1234567890",
+            userID: "same-user-1234567890",
+            plan: "plus",
+            email: "upgrade@example.com",
+            credentialID: "no-plan",
+            refreshToken: "upgrade-refresh",
+            includePlanClaim: false
+        )
+
+        let plus = try CLIProxyAccountIdentity.parse(data: plusData)
+        let team = try CLIProxyAccountIdentity.parse(data: teamData)
+        let fallback = try CLIProxyAccountIdentity.parse(data: jwtAccountAndSubjectOnly)
+        let planless = try CLIProxyAccountIdentity.parse(data: noPlan)
+        try expect(plus.key == team.key, "Codex plan change created a new account identity")
+        try expect(plus.key == fallback.key, "root account/chatgpt user and JWT account/sub did not have identity parity")
+        try expect(plus.key == planless.key && planless.canAutomaticallyMerge, "missing plan claim weakened a complete Codex identity")
+        try expect(plus.planDisplayName == "Plus" && team.planDisplayName == "Team", "plan display did not follow the current JWT")
+
+        let plusFingerprint = try CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: plusData)
+        let teamFingerprint = try CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: teamData)
+        try expect(plusFingerprint != teamFingerprint, "plan change was omitted from the destructive safety fingerprint")
+        let plan = CLIProxyManagedAuthDeduplicator.plan(for: [
+            try managedCopy(name: "upgrade-plus.json", data: plusData, modifiedAt: 1, manifestTracked: true),
+            try managedCopy(name: "upgrade-team.json", data: teamData, modifiedAt: 2, manifestTracked: true)
+        ])
+        try expect(plan.duplicateFileNames.isEmpty, "different Codex plan snapshots were automatically deleted")
+        try expect(plan.conflictingIdentityKeys == [plus.key], "plan change was not surfaced as a safe-review conflict")
+    }
+
+    private static func testCodexManagedCopiesDeduplicateSafely() throws {
+        let first = try codexAuthData(
+            accountID: "team-account-1234567890",
+            userID: "team-user-1234567890",
+            plan: "team",
+            email: "team@example.com",
+            credentialID: "historical-1",
+            refreshToken: "same-team-refresh",
+            accessToken: "rotated-access-1"
+        )
+        let second = try codexAuthData(
+            accountID: "team-account-1234567890",
+            userID: "team-user-1234567890",
+            plan: "team",
+            email: "team@example.com",
+            credentialID: "historical-z",
+            refreshToken: "same-team-refresh",
+            accessToken: "rotated-access-2"
+        )
+        let third = try codexAuthData(
+            accountID: "team-account-1234567890",
+            userID: "team-user-1234567890",
+            plan: "team",
+            email: "team@example.com",
+            credentialID: "historical-b",
+            refreshToken: "same-team-refresh",
+            accessToken: "rotated-access-3"
+        )
+        let fourth = try codexAuthData(
+            accountID: "team-account-1234567890",
+            userID: "team-user-1234567890",
+            plan: "team",
+            email: "team@example.com",
+            credentialID: "historical-c",
+            refreshToken: "same-team-refresh",
+            accessToken: "rotated-access-4"
+        )
+        let firstIdentity = try CLIProxyAccountIdentity.parse(data: first)
+        let secondIdentity = try CLIProxyAccountIdentity.parse(data: second)
+        try expect(firstIdentity.key == secondIdentity.key, "Codex identity changed with credential ID or access-token rotation")
+        try expect(firstIdentity.sourceCredentialID != secondIdentity.sourceCredentialID, "source linkage fixture is invalid")
+        let firstMergeFingerprint = try CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: first)
+        let secondMergeFingerprint = try CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: second)
+        try expect(
+            firstMergeFingerprint == secondMergeFingerprint,
+            "safe merge fingerprint changed with volatile tokens or AIUsage marker"
+        )
+
+        let plan = CLIProxyManagedAuthDeduplicator.plan(for: [
+            try managedCopy(name: "aiusage-codex-historical-1.json", data: first, modifiedAt: 1, manifestTracked: true),
+            try managedCopy(name: "aiusage-codex-historical-z.json", data: second, modifiedAt: 2, manifestTracked: false),
+            try managedCopy(name: "aiusage-codex-historical-b.json", data: third, modifiedAt: 2, manifestTracked: true),
+            try managedCopy(name: "aiusage-codex-historical-c.json", data: fourth, modifiedAt: 2, manifestTracked: true),
+            try managedCopy(name: "marker-only-arbitrary.json", data: second, modifiedAt: 3, manifestTracked: false)
+        ])
+        try expect(
+            plan.canonicalFileByIdentity[firstIdentity.key] == "aiusage-codex-historical-b.json",
+            "canonical ordering did not prefer latest, manifest-tracked, then stable filename"
+        )
+        try expect(
+            plan.duplicateFileNames == [
+                "aiusage-codex-historical-1.json",
+                "aiusage-codex-historical-c.json",
+                "aiusage-codex-historical-z.json"
+            ],
+            "same Team copies did not produce a stable duplicate plan"
+        )
+        try expect(!plan.duplicateFileNames.contains("marker-only-arbitrary.json"), "marker-only arbitrary file was deletable")
+        try expect(plan.conflictingIdentityKeys.isEmpty, "safe same-Team copies were reported as conflicting")
+    }
+
+    private static func testAntigravityManagedCopiesDeduplicate() throws {
+        let first = try antigravityAuthData(
+            projectID: "project-alpha-1234567890",
+            email: "gravity@example.com",
+            credentialID: "gravity-1",
+            refreshToken: "gravity-refresh",
+            accessToken: "gravity-access-1"
+        )
+        let second = try antigravityAuthData(
+            projectID: "project-alpha-1234567890",
+            email: "GRAVITY@example.com",
+            credentialID: "gravity-2",
+            refreshToken: "gravity-refresh",
+            accessToken: "gravity-access-2"
+        )
+        let otherProject = try antigravityAuthData(
+            projectID: "project-beta-1234567890",
+            email: "gravity@example.com",
+            credentialID: "gravity-3",
+            refreshToken: "gravity-refresh"
+        )
+        let firstIdentity = try CLIProxyAccountIdentity.parse(data: first)
+        let secondIdentity = try CLIProxyAccountIdentity.parse(data: second)
+        let otherIdentity = try CLIProxyAccountIdentity.parse(data: otherProject)
+        try expect(firstIdentity.key == secondIdentity.key, "same Antigravity project and email did not share identity")
+        try expect(firstIdentity.key != otherIdentity.key, "different Antigravity projects with one email were merged")
+        try expect(firstIdentity.shortProjectID != firstIdentity.projectID, "long Antigravity project ID was not shortened")
+
+        let plan = CLIProxyManagedAuthDeduplicator.plan(for: [
+            try managedCopy(name: "gravity-old.json", data: first, modifiedAt: 1, manifestTracked: true),
+            try managedCopy(name: "gravity-new.json", data: second, modifiedAt: 2, manifestTracked: true),
+            try managedCopy(name: "gravity-other.json", data: otherProject, modifiedAt: 3, manifestTracked: true)
+        ])
+        try expect(plan.duplicateFileNames == ["gravity-old.json"], "Antigravity strong identity was not deduplicated safely")
+        try expect(
+            plan.canonicalFileByIdentity[firstIdentity.key] == "gravity-new.json",
+            "newest Antigravity copy was not canonical"
+        )
+    }
+
+    private static func testWeakIdentityNeverDeduplicates() throws {
+        let weak = Data(#"{"type":"codex","email":"weak@example.com","aiusage_credential_id":"weak-1","refresh_token":"same"}"#.utf8)
+        let otherWeak = Data(#"{"type":"codex","email":"weak@example.com","aiusage_credential_id":"weak-2","refresh_token":"same"}"#.utf8)
+        let identity = try CLIProxyAccountIdentity.parse(data: weak)
+        try expect(!identity.canAutomaticallyMerge, "email-only Codex auth was treated as a strong identity")
+        let plan = CLIProxyManagedAuthDeduplicator.plan(for: [
+            try managedCopy(name: "weak-a.json", data: weak, modifiedAt: 1, manifestTracked: true),
+            try managedCopy(name: "weak-b.json", data: otherWeak, modifiedAt: 2, manifestTracked: true)
+        ])
+        try expect(plan.canonicalFileByIdentity.isEmpty, "weak identity was assigned a canonical file")
+        try expect(plan.duplicateFileNames.isEmpty, "weak identity produced a deletion candidate")
+        try expect(plan.conflictingIdentityKeys.isEmpty, "weak identity was promoted to a destructive conflict")
+    }
+
+    private static func testManagedCopyConflictsAreNeverDeleted() throws {
+        let base = try codexAuthData(
+            accountID: "conflict-account-1234567890",
+            userID: "conflict-user-1234567890",
+            plan: "team",
+            email: "conflict@example.com",
+            credentialID: "conflict-1",
+            refreshToken: "refresh-a"
+        )
+        let differentRefresh = try codexAuthData(
+            accountID: "conflict-account-1234567890",
+            userID: "conflict-user-1234567890",
+            plan: "team",
+            email: "conflict@example.com",
+            credentialID: "conflict-2",
+            refreshToken: "refresh-b"
+        )
+        let differentSettings = try codexAuthData(
+            accountID: "conflict-account-1234567890",
+            userID: "conflict-user-1234567890",
+            plan: "team",
+            email: "conflict@example.com",
+            credentialID: "conflict-3",
+            refreshToken: "refresh-a",
+            note: "locally edited"
+        )
+        let identity = try CLIProxyAccountIdentity.parse(data: base)
+
+        for conflicting in [differentRefresh, differentSettings] {
+            let plan = CLIProxyManagedAuthDeduplicator.plan(for: [
+                try managedCopy(name: "conflict-a.json", data: base, modifiedAt: 1, manifestTracked: true),
+                try managedCopy(name: "conflict-b.json", data: conflicting, modifiedAt: 2, manifestTracked: true)
+            ])
+            try expect(plan.duplicateFileNames.isEmpty, "refresh token or persistent setting conflict produced a deletion")
+            try expect(plan.conflictingIdentityKeys == [identity.key], "unsafe managed copies were not surfaced for review")
+            try expect(plan.canonicalFileByIdentity[identity.key] == nil, "unsafe group received a verified canonical file")
+        }
+
+        let missingRefresh = Data(#"{"type":"antigravity","project_id":"project","email":"user@example.com","aiusage_credential_id":"managed"}"#.utf8)
+        let missingRefreshFingerprint = try CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: missingRefresh)
+        try expect(
+            missingRefreshFingerprint == nil,
+            "auth file without refresh token received a destructive merge fingerprint"
+        )
+        let missingRefreshPlan = CLIProxyManagedAuthDeduplicator.plan(for: [
+            try managedCopy(name: "missing-refresh.json", data: missingRefresh, modifiedAt: 1, manifestTracked: true)
+        ])
+        try expect(missingRefreshPlan.canonicalFileByIdentity.isEmpty, "missing refresh token received a verified canonical file")
+    }
+
+    private static func managedCopy(
+        name: String,
+        data: Data,
+        modifiedAt: TimeInterval,
+        manifestTracked: Bool
+    ) throws -> CLIProxyManagedAuthCopy {
+        CLIProxyManagedAuthCopy(
+            fileName: name,
+            identity: try CLIProxyAccountIdentity.parse(data: data),
+            modifiedAt: Date(timeIntervalSince1970: modifiedAt),
+            isManifestTracked: manifestTracked,
+            destructiveMergeFingerprint: try CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: data)
+        )
+    }
+
+    private static func codexAuthData(
+        accountID: String,
+        userID: String,
+        plan: String,
+        email: String,
+        credentialID: String,
+        refreshToken: String,
+        accessToken: String = "access",
+        note: String = "Synced from AIUsage",
+        includeRootAccountID: Bool = true,
+        includeChatGPTUserID: Bool = true,
+        includePlanClaim: Bool = true
+    ) throws -> Data {
+        var authClaims: [String: Any] = ["chatgpt_account_id": accountID]
+        if includeChatGPTUserID { authClaims["chatgpt_user_id"] = userID }
+        if includePlanClaim { authClaims["chatgpt_plan_type"] = plan }
+        let claims: [String: Any] = [
+            "sub": userID,
+            "email": email,
+            "https://api.openai.com/auth": authClaims
+        ]
+        var object: [String: Any] = [
+            "type": "codex",
+            "email": email,
+            "id_token": try unsignedJWT(claims),
+            "access_token": accessToken,
+            "refresh_token": refreshToken,
+            "aiusage_credential_id": credentialID,
+            "disabled": false,
+            "note": note,
+            "priority": 0,
+            "websockets": false
+        ]
+        if includeRootAccountID { object["account_id"] = accountID }
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    private static func antigravityAuthData(
+        projectID: String,
+        email: String,
+        credentialID: String,
+        refreshToken: String,
+        accessToken: String = "access"
+    ) throws -> Data {
+        let object: [String: Any] = [
+            "type": "antigravity",
+            "project_id": projectID,
+            "email": email,
+            "access_token": accessToken,
+            "refresh_token": refreshToken,
+            "aiusage_credential_id": credentialID,
+            "disabled": false,
+            "note": "Synced from AIUsage",
+            "priority": 0,
+            "websockets": false
+        ]
+        return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    private static func unsignedJWT(_ claims: [String: Any]) throws -> String {
+        let header = try JSONSerialization.data(withJSONObject: ["alg": "none", "typ": "JWT"], options: [.sortedKeys])
+        let payload = try JSONSerialization.data(withJSONObject: claims, options: [.sortedKeys])
+        return "\(base64URL(header)).\(base64URL(payload))."
+    }
+
+    private static func base64URL(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 
     private static func testExpandedAuthFileDecoding() throws {

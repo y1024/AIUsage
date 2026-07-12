@@ -711,9 +711,14 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     private func decodeUserId(fromJWT token: String?) -> String? {
         guard let payload = decodeJWTPayload(token: token) else { return nil }
         if let auth = payload["https://api.openai.com/auth"] as? [String: Any] {
-            return stringValue(auth["chatgpt_user_id"])
+            if let chatGPTUserID = stringValue(auth["chatgpt_user_id"]) {
+                return chatGPTUserID
+            }
+            if let userID = stringValue(auth["user_id"]) {
+                return userID
+            }
         }
-        return nil
+        return stringValue(payload["user_id"]) ?? stringValue(payload["sub"])
     }
 
     // MARK: - ChatGPT / Codex Plan Mapping

@@ -76,8 +76,8 @@ struct SubscriptionGatewayAccountsView: View {
                 GatewaySectionTitle(
                     title: L("Account center", "账号中心"),
                     subtitle: L(
-                        "CPA accounts and eligible AIUsage accounts are joined into one list, so a synchronized copy never appears twice.",
-                        "CPA 账号与可接入的 AIUsage 账号会合并到同一列表中，同步副本不会重复出现。"
+                        "CPA and eligible AIUsage accounts share one list. Verified managed copies are reconciled by native identity; conflicting copies stay visible for review.",
+                        "CPA 账号与可接入的 AIUsage 账号共用一个列表；已验证副本按原生身份收敛，冲突副本会保留供检查。"
                     ),
                     actionTitle: L("Add Account", "添加账号"),
                     actionSystemImage: "plus"
@@ -134,7 +134,34 @@ struct SubscriptionGatewayAccountsView: View {
     @ViewBuilder
     private var errorBanners: some View {
         if let error = manager.lastError { GatewayErrorBanner(message: error) }
+        if let error = manager.syncManifestError, error != manager.lastError {
+            GatewayErrorBanner(message: error)
+        }
         if case .failed(let error) = runtime.state { GatewayErrorBanner(message: error) }
+        if manager.authDeduplicationConflictCount > 0 { deduplicationConflictBanner }
+    }
+
+    private var deduplicationConflictBanner: some View {
+        GatewayCard {
+            HStack(alignment: .top, spacing: 11) {
+                Image(systemName: "exclamationmark.shield.fill")
+                    .foregroundStyle(.orange)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L("Managed-copy conflicts were kept", "托管副本冲突已保留"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(L(
+                        "CPA copy conflicts or failed safety checks were found for \(manager.authDeduplicationConflictCount) native account identities. AIUsage kept every unverified copy and did not overwrite it.",
+                        "发现 \(manager.authDeduplicationConflictCount) 组 CPA 副本存在冲突或未通过安全复核。AIUsage 已保留所有未经验证的副本，没有自动删除或覆盖。"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+        }
     }
 
     private var summaryRow: some View {
@@ -285,6 +312,7 @@ struct SubscriptionGatewayAccountsView: View {
         _ file: CLIProxyAuthFile,
         linkedCandidate: CLIProxyAccountSyncCandidate?
     ) -> some View {
+        let identitySummary = gatewayNativeIdentitySummary(manager.accountIdentity(for: file))
         return HStack(spacing: 13) {
             GatewayProviderIcon(providerID: file.gatewayProviderID, size: 42)
             VStack(alignment: .leading, spacing: 4) {
@@ -301,12 +329,18 @@ struct SubscriptionGatewayAccountsView: View {
                 Text(file.gatewaySourceTitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let identitySummary {
+                    Text(identitySummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 if file.gatewayNeedsAttention, let message = file.statusMessage, !message.isEmpty {
                     Text(message)
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .lineLimit(2)
-                } else if let note = file.note, !note.isEmpty {
+                } else if let note = file.gatewayVisibleNote {
                     Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
@@ -438,6 +472,12 @@ struct SubscriptionGatewayAccountsView: View {
                             systemImage: "arrow.right.circle.fill"
                         )
                     }
+                }
+                if let identitySummary = gatewayNativeIdentitySummary(candidate.accountIdentity) {
+                    Text(identitySummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 switch candidate.compatibility {
                 case .compatible:
@@ -617,7 +657,11 @@ struct SubscriptionGatewayAccountsView: View {
         manager.authFiles.filter { !$0.disabled && !$0.gatewayNeedsAttention }.count
     }
 
-    private var attentionCount: Int { manager.authFiles.filter(\.gatewayNeedsAttention).count }
+    private var attentionCount: Int {
+        manager.authFiles.filter(\.gatewayNeedsAttention).count
+            + manager.authDeduplicationConflictCount
+            + (manager.syncManifestError == nil ? 0 : 1)
+    }
     private var unsyncedCandidateCount: Int { manager.syncCandidates.filter { !manager.isSynced($0) }.count }
 
     private func beginAccountPrerequisite() {
@@ -1397,7 +1441,12 @@ private struct CLIProxyAccountDetailSheet: View {
                 GatewayProviderIcon(providerID: file.gatewayProviderID, size: 46)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(currentFile.displayLabel).font(.title3.weight(.bold))
-                    Text(providerDisplayName(currentFile.gatewayProviderID)).font(.subheadline).foregroundStyle(.secondary)
+                    Text(gatewayAccountIdentitySubtitle(
+                        providerID: currentFile.gatewayProviderID,
+                        identity: currentIdentity
+                    ))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(L("Done", "完成")) { dismiss() }.keyboardShortcut(.cancelAction)
@@ -1436,8 +1485,19 @@ private struct CLIProxyAccountDetailSheet: View {
                             if let message = currentFile.statusMessage, !message.isEmpty {
                                 detailRow(L("Status detail", "状态详情"), message)
                             }
+                            if let plan = currentIdentity?.planDisplayName {
+                                detailRow(L("Plan", "套餐"), plan)
+                            }
+                            if let accountID = currentIdentity?.accountID {
+                                detailRow(L("Workspace ID", "工作区 ID"), accountID)
+                            }
+                            if let projectID = currentIdentity?.projectID {
+                                detailRow(L("Project ID", "项目 ID"), projectID)
+                            }
                             if let accountType = currentFile.accountType { detailRow(L("Account type", "账号类型"), accountType) }
-                            if let projectID = currentFile.projectID { detailRow(L("Project", "项目"), projectID) }
+                            if currentIdentity?.projectID == nil, let projectID = currentFile.projectID {
+                                detailRow(L("Project", "项目"), projectID)
+                            }
                             if let refreshed = currentFile.lastRefresh {
                                 detailRow(L("Last refresh", "上次刷新"), refreshed.formatted(date: .abbreviated, time: .shortened))
                             }
@@ -1624,6 +1684,7 @@ private struct CLIProxyAccountDetailSheet: View {
         manager.authFiles.first { $0.name == file.name } ?? file
     }
 
+    private var currentIdentity: CLIProxyAccountIdentity? { manager.accountIdentity(for: currentFile) }
     private var models: [CLIProxyModel] { manager.models(for: currentFile) }
     private var visibleModels: [CLIProxyModel] { showAllModels ? models : Array(models.prefix(8)) }
     private var metadataChanged: Bool {
@@ -1652,5 +1713,47 @@ private func providerDisplayName(_ providerID: String) -> String {
     case "qwen": "Qwen"
     case "iflow": "iFlow"
     default: providerID.replacingOccurrences(of: "-", with: " ").capitalized
+    }
+}
+
+private func gatewayNativeIdentitySummary(_ identity: CLIProxyAccountIdentity?) -> String? {
+    guard let identity else { return nil }
+    switch identity.providerID.lowercased() {
+    case "codex":
+        var parts: [String] = []
+        if let plan = identity.planDisplayName {
+            parts.append(L("\(plan) plan", "\(plan) 套餐"))
+        }
+        if let accountID = identity.shortAccountID {
+            parts.append(L("Workspace \(accountID)", "工作区 \(accountID)"))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    case "antigravity":
+        guard let projectID = identity.shortProjectID else { return nil }
+        return L("Project \(projectID)", "项目 \(projectID)")
+    default:
+        return identity.shortAccountID ?? identity.shortProjectID
+    }
+}
+
+private func gatewayAccountIdentitySubtitle(
+    providerID: String,
+    identity: CLIProxyAccountIdentity?
+) -> String {
+    let provider = providerDisplayName(providerID)
+    guard let summary = gatewayNativeIdentitySummary(identity) else { return provider }
+    return "\(provider) · \(summary)"
+}
+
+private extension CLIProxyAuthFile {
+    var gatewayVisibleNote: String? {
+        guard let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty else {
+            return nil
+        }
+        let normalized = note.lowercased()
+        if normalized == "synced from aiusage" || normalized == "来自 aiusage 的同步副本" {
+            return nil
+        }
+        return note
     }
 }

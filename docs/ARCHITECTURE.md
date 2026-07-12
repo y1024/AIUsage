@@ -13,7 +13,7 @@ AIUsage/
 │   ├── AppState.swift            # Thin facade: UI navigation + coordinator references
 │   ├── AppSettings.swift         # UserDefaults-backed preferences (ObservableObject)
 │   ├── AccountStore.swift        # Account registry & credential management
-│   ├── CLIProxyGatewayModels.swift # CPA settings, auth, model catalog and per-API route identities
+│   ├── CLIProxyGatewayModels.swift # CPA settings/auth, native account identity, safe dedup plans, model/route identity
 │   ├── ProviderModels.swift      # App-side ProviderData, alerts, etc.
 │   ├── ProxyConfiguration.swift  # Proxy node config model (legacy, kept for compat) + NodeType / ProxyNodeFamily
 │   └── NodeProfile.swift         # File-based node profile (_metadata + full settings.json)
@@ -141,7 +141,7 @@ graph TD
 | **AccountStore** | Account registry, credential lifecycle, normalization/dedup, Keychain persistence |
 | **ProviderRefreshCoordinator** | Refresh timers, `ProviderEngine` orchestration, local/remote fetch, data merging |
 | **ProviderActivationManager** | CLI active account detection (Codex/Gemini), auth file I/O |
-| **CLIProxyGatewayManager** | CPA release lifecycle, account-pool operations, canonical model catalog, provider plugin management and distribution into existing proxy tracks |
+| **CLIProxyGatewayManager** | CPA release lifecycle, account-pool operations, manifest/native-identity reconciliation, canonical model catalog, provider plugin management and distribution into existing proxy tracks |
 | **CLIProxyRuntimeController** | CPA process/config/secret lifecycle, loopback health checks, optional LAN addresses and throttled diagnostic logs |
 
 The core provider singletons forward `objectWillChange` to `AppState`. CPA views observe `CLIProxyGatewayManager.shared` and `CLIProxyRuntimeController.shared` directly so frequent runtime/model updates do not invalidate the entire app shell.
@@ -220,6 +220,12 @@ The live model catalog intentionally separates three concepts:
 
 Known CPA compatibility aliases are collapsed into one logical entry while every protocol-specific route ID remains available. Account candidate discovery, compatibility checks and credential-file conversion run outside SwiftUI rendering; published snapshots are indexed in memory. CPA stdout/stderr is redacted off the main actor and published in 200 ms batches, removing the two high-frequency render invalidation paths that previously delayed top-level tab selection. Explicit full account reconciliation remains an asynchronous management operation rather than a render-time task.
 
+CPA account reconciliation uses provider-native identity instead of display email or imported-file path. Codex identity is the normalized ChatGPT account/workspace ID plus a user discriminator (`chatgpt_user_id`, explicit `user_id`, then JWT `sub`); plan and email remain display metadata, so a plan upgrade does not create another identity while two workspaces for one email stay separate. Antigravity identity is project ID plus normalized email, preserving multiple projects for one Google account. Keys are provider-prefixed SHA-256 digests of those non-secret claims and never include tokens or the AIUsage credential ID. Incomplete or contradictory claims are weak identities and are never automatically merged. The Accounts UI exposes plan/workspace or project summaries so visually identical emails remain understandable.
+
+`account-sync-manifest.json` keeps the existing schema version compatible by decoding its new optional native-identity key with `decodeIfPresent`. A missing manifest starts empty; an existing manifest that is malformed, unsupported, or internally invalid marks reconciliation unhealthy and blocks sync writes, record migration, and destructive cleanup. Legacy provider/credential/file-name linkage remains a compatibility fallback only.
+
+Historical `aiusage-*.json` convergence is deliberately fail-closed. A pure plan accepts only strong native identity plus strong AIUsage ownership, then requires every copy to have the same destructive safety fingerprint: a SHA-256 refresh-token lineage and the same persistent CPA settings (`disabled`, `note`, `priority`, `websockets`, and other non-volatile fields). Access/id tokens, expiry/timestamp fields, request counters, and the AIUsage marker are excluded. Different or missing fingerprints produce a visible retained-conflict count and no deletion. Before execution, canonical and duplicate payloads are downloaded and checked again; rollback payloads live only in memory for that operation and are released afterward. AIUsage intentionally creates no second on-disk OAuth backup directory.
+
 LAN mode binds the CPA data listener to all interfaces only after explicit opt-in. `remote-management.allow-remote` remains disabled, the management key is separate and never shown, and AIUsage itself always calls management and health endpoints through loopback.
 
 ## Proxy Subsystem
@@ -271,7 +277,8 @@ Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_A
 | `~/.config/opencode/opencode.json` 或 `opencode.jsonc` | OpenCode configuration; managed provider entries injected on activation. `$XDG_CONFIG_HOME` 优先；存在 `.jsonc` 时优先接管 `.jsonc`（JSONC 经 `JSONCSanitizer` 容错解析） |
 | `~/.config/opencode/opencode.json[c].aiusage.bak` | Backup of the OpenCode config before takeover (verbatim copy preserves comments/formatting; restored on deactivation) |
 | `~/.codex/.env` | Managed `no_proxy` block (loopback only) written when a system proxy is detected; removed on deactivation |
-| `~/Library/Application Support/AIUsage/CLIProxyAPI/` | CPA versioned binaries, `current` symlink, preserved `config.yaml`, auth directory, stable plugin data, settings and account-sync manifest |
+| `~/Library/Application Support/AIUsage/CLIProxyAPI/` | CPA versioned binaries, `current` symlink, preserved `config.yaml`, auth directory, stable plugin data, settings and account-sync manifest. Duplicate-auth rollback payloads are memory-only; no second token-bearing backup directory is created. |
+| `~/Library/Application Support/AIUsage/CLIProxyAPI/account-sync-manifest.json` | Mode, file linkage, optional provider-prefixed native-identity digest, timestamps and one-way content fingerprints; never credential JSON or token material. Existing v1 records without native identity remain readable. |
 | **Keychain** (`CLIProxySecretStore`) | Separate CPA client and management keys; management key is never displayed or reused as a client credential |
 | `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/**/*.jsonl` | Codex non-proxy session logs (read-only token source for CodexCostProvider; overridable via `$CODEX_HOME`) |
 | `~/Library/Caches/AIUsage/codex-cost-file-cache-v*.json` | CodexCostFileScanCache — per-file scan results, keyed on size + mtime so reopened sessions skip re-parsing |

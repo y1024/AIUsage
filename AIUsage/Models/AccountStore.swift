@@ -27,7 +27,6 @@ final class AccountStore: ObservableObject {
         self.providerCatalogOrder = providerCatalogOrder
         bootstrapCredentialIndexFromRegistry()
         normalizePersistedState()
-        cleanupManagedCredentialArtifacts()
     }
 
     func updateProviderCatalogOrder(_ ids: [String]) {
@@ -36,6 +35,7 @@ final class AccountStore: ObservableObject {
 
     // MARK: - Public account API
 
+    @discardableResult
     func saveAccount(
         providerId: String,
         email: String,
@@ -45,9 +45,9 @@ final class AccountStore: ObservableObject {
         credentialId: String? = nil,
         providerResultId: String? = nil,
         ensureProviderSelected: (String) -> Void
-    ) {
+    ) -> Bool {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedEmail.isEmpty else { return }
+        guard !normalizedEmail.isEmpty else { return false }
 
         let now = SharedFormatters.iso8601String(from: Date())
         let credentialSnapshot = credentialId.flatMap {
@@ -60,11 +60,16 @@ final class AccountStore: ObservableObject {
         let normalizedProviderResultId = providerResultId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().nilIfBlank
             ?? credentialId.map { "\(providerId):cred:\($0)".lowercased() }
         let effectiveDisplayName = displayName?.nilIfBlank ?? credentialSnapshot?.displayName
+        let requiresCredentialBoundIdentity = AccountIdentityPolicy.isMultiWorkspace(providerId)
 
         if let index = accountRegistry.firstIndex(where: {
             guard $0.providerId == providerId else { return false }
             if let credentialId, $0.credentialId == credentialId { return true }
             if let normalizedProviderResultId, $0.normalizedProviderResultId == normalizedProviderResultId { return true }
+            // Codex and Antigravity native identities have already been resolved
+            // to a canonical credential ID before this method is called. Falling
+            // back to accountId/email here would collapse distinct users/projects.
+            if requiresCredentialBoundIdentity { return false }
             if let normalizedAccountId, $0.normalizedAccountId == normalizedAccountId { return true }
             if let normalizedAccountId, let storedAccountId = $0.normalizedAccountId,
                storedAccountId != normalizedAccountId {
@@ -107,7 +112,7 @@ final class AccountStore: ObservableObject {
         _ = normalizeAccountRegistryAgainstCredentials()
         deduplicateAccountRegistry()
         ensureProviderSelected(providerId)
-        persistAccountRegistry()
+        return persistAccountRegistry()
     }
 
     func registerAuthenticatedCredential(
@@ -146,9 +151,23 @@ final class AccountStore: ObservableObject {
         if let accountId {
             enrichedCredential.metadata["accountId"] = accountId
         }
+        if let accountPlan = usage.accountPlan?.nilIfBlank {
+            enrichedCredential.metadata["accountPlan"] = accountPlan
+        }
+        if let workspaceType = (usage.extra["workspaceType"]?.value as? String)?.nilIfBlank {
+            enrichedCredential.metadata["workspaceType"] = workspaceType
+        }
+        if let workspaceUserId = (usage.extra["userId"]?.value as? String)?.nilIfBlank {
+            enrichedCredential.metadata["workspaceUserId"] = workspaceUserId
+        }
+        if providerId == "antigravity",
+           let projectId = (usage.extra["projectId"]?.value as? String)?.nilIfBlank {
+            enrichedCredential.metadata["projectId"] = projectId
+        }
         enrichedCredential.lastUsedAt = validatedAt
 
         if let existingCredential = existingAuthenticatedCredential(
+            incomingCredential: enrichedCredential,
             providerId: providerId,
             accountHandle: accountHandle,
             accountId: accountId,
@@ -174,12 +193,14 @@ final class AccountStore: ObservableObject {
             )
         }
 
-        try AccountCredentialStore.shared.saveCredential(enrichedCredential)
-        let credentialRemapping = AccountCredentialStore.shared.deduplicateCredentials(for: providerId)
+        let credentialStore = AccountCredentialStore.shared
+        try credentialStore.saveCredential(enrichedCredential)
+        let deduplicationPlan = credentialStore.planCredentialDeduplication(for: providerId)
+        let credentialRemapping = deduplicationPlan.remappedCredentialIDs
         if !credentialRemapping.isEmpty {
             applyCredentialRemapping(credentialRemapping)
             if let remappedID = credentialRemapping[enrichedCredential.id] {
-                let canonicalCredential = AccountCredentialStore.shared
+                let canonicalCredential = credentialStore
                     .loadCredentials(for: providerId)
                     .first(where: { $0.id == remappedID })
                 var rewrittenCanonicalCredential = AccountCredential(
@@ -197,12 +218,12 @@ final class AccountStore: ObservableObject {
                         incomingCredential: &rewrittenCanonicalCredential
                     )
                 }
-                try AccountCredentialStore.shared.saveCredential(rewrittenCanonicalCredential)
+                try credentialStore.saveCredential(rewrittenCanonicalCredential)
                 enrichedCredential = rewrittenCanonicalCredential
             }
         }
 
-        saveAccount(
+        let registryPersisted = saveAccount(
             providerId: providerId,
             email: accountHandle,
             displayName: displayName,
@@ -212,6 +233,12 @@ final class AccountStore: ObservableObject {
             providerResultId: "\(providerId):cred:\(enrichedCredential.id)",
             ensureProviderSelected: ensureProviderSelected
         )
+
+        if registryPersisted,
+           !deduplicationPlan.isEmpty,
+           !credentialStore.commitCredentialDeduplication(deduplicationPlan) {
+            accountPersistenceLog.error("Credential deduplication commit deferred because the staged plan changed or the vault write failed.")
+        }
 
         insertImmediateProviderData(
             providerId,
