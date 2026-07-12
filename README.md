@@ -81,6 +81,12 @@
     <td align="center"><strong>Provider & Multi-account Monitoring</strong></td>
   </tr>
   <tr>
+    <td colspan="2"><img src="docs/images/CPA_en.png" alt="CPA Gateway overview with managed runtime, account pool, connected apps, and live models"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><strong>CPA Gateway · Managed Runtime, Account Pool &amp; Live Models</strong></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/images/Claude-Code-Proxy-1_en.png" alt="Claude Code proxy node management"></td>
     <td width="50%"><img src="docs/images/Claude-Code-Proxy-2_en.png" alt="Claude Code proxy configuration"></td>
   </tr>

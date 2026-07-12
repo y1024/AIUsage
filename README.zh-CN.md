@@ -81,6 +81,12 @@
     <td align="center"><strong>服务商与多账号监控</strong></td>
   </tr>
   <tr>
+    <td colspan="2"><img src="docs/images/CPA.png" alt="CPA 网关概览，展示托管运行服务、账号池、已接入应用和实时模型"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><strong>CPA 网关 · 托管运行时、账号池与实时模型</strong></td>
+  </tr>
+  <tr>
     <td width="50%"><img src="docs/images/Claude-Code-Proxy-1.png" alt="Claude Code 代理节点管理"></td>
     <td width="50%"><img src="docs/images/Claude-Code-Proxy-2.png" alt="Claude Code 代理配置"></td>
   </tr>
