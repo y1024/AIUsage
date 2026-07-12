@@ -50,6 +50,16 @@ struct ScienceHTTPResponse {
     }
 }
 
+enum ScienceNonceExchangeMode: String {
+    case formPOST = "POST /api/auth/nonce"
+    case legacyQueryGET = "GET /?nonce=..."
+}
+
+struct ScienceNonceExchangeRequest {
+    let mode: ScienceNonceExchangeMode
+    let data: Data
+}
+
 // MARK: - ScienceAuthProxy 低层辅助（HTTP 解析 / 套接字 IO）
 // 单一职责：把「解析请求头、回环 socket 往返、NWConnection 收发与双向对拷」这些机械活从主逻辑里抽离。
 
@@ -97,6 +107,41 @@ struct ParsedRequest {
 
 extension ScienceAuthProxy {
     // MARK: - HTTP 解析
+
+    /// Build both known nonce exchange shapes in compatibility order. Claude
+    /// Science 0.1.15 accepts the form POST, while older releases accept the
+    /// query GET. A rejected POST does not consume the nonce on legacy builds,
+    /// so the same one-time nonce can safely fall back to the GET shape.
+    static func nonceExchangeRequests(nonce: String, port: Int) -> [ScienceNonceExchangeRequest] {
+        guard let encodedNonce = percentEncodedQueryValue(nonce) else { return [] }
+
+        let origin = "http://127.0.0.1:\(port)"
+        let body = Data("nonce=\(encodedNonce)&dest=/".utf8)
+        var post = Data(
+            "POST /api/auth/nonce HTTP/1.1\r\n".utf8
+        )
+        post.append(Data("Host: 127.0.0.1:\(port)\r\n".utf8))
+        post.append(Data("Accept: application/json\r\n".utf8))
+        post.append(Data("Content-Type: application/x-www-form-urlencoded\r\n".utf8))
+        post.append(Data("Origin: \(origin)\r\n".utf8))
+        post.append(Data("Referer: \(origin)/?nonce=\(encodedNonce)\r\n".utf8))
+        post.append(Data("Content-Length: \(body.count)\r\n".utf8))
+        post.append(Data("Accept-Encoding: identity\r\nConnection: close\r\n\r\n".utf8))
+        post.append(body)
+
+        let legacy = Data((
+            "GET /?nonce=\(encodedNonce) HTTP/1.1\r\n" +
+            "Host: localhost:\(port)\r\n" +
+            "Accept: text/html\r\n" +
+            "Accept-Encoding: identity\r\n" +
+            "Connection: close\r\n\r\n"
+        ).utf8)
+
+        return [
+            ScienceNonceExchangeRequest(mode: .formPOST, data: post),
+            ScienceNonceExchangeRequest(mode: .legacyQueryGET, data: legacy),
+        ]
+    }
 
     static func parseRequestHead(_ data: Data) -> ParsedRequest? {
         guard let text = httpHeadString(data) else { return nil }

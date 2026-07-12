@@ -27,6 +27,7 @@ private struct ScienceAuthProxyRegression {
         try testSessionCookieParsing()
         try testCookieFiltering()
         try testQueryEncoding()
+        try testNonceExchangeRequests()
         try testSafeRedirects()
         try testDiagnosticRedaction()
         if let dataDir = ProcessInfo.processInfo.environment["SCIENCE_AUTH_LIVE_DATA_DIR"],
@@ -113,6 +114,35 @@ private struct ScienceAuthProxyRegression {
         )
     }
 
+    private static func testNonceExchangeRequests() throws {
+        let nonce = "a+b&c=d?e%f\r\nInjected: yes"
+        let requests = ScienceAuthProxy.nonceExchangeRequests(nonce: nonce, port: 14411)
+        try expect(requests.map(\.mode) == [.formPOST, .legacyQueryGET],
+                   "Nonce exchange compatibility order changed")
+        try expect(requests.count == 2, "Expected modern and legacy nonce exchange requests")
+
+        let post = String(data: requests[0].data, encoding: .utf8) ?? ""
+        let encoded = "a%2Bb%26c%3Dd%3Fe%25f%0D%0AInjected%3A%20yes"
+        let body = "nonce=\(encoded)&dest=/"
+        try expect(post.hasPrefix("POST /api/auth/nonce HTTP/1.1\r\n"),
+                   "Modern exchange must use POST /api/auth/nonce")
+        try expect(post.contains("Host: 127.0.0.1:14411\r\n"), "Modern exchange Host is wrong")
+        try expect(post.contains("Origin: http://127.0.0.1:14411\r\n"), "Modern exchange Origin is missing")
+        try expect(post.contains("Referer: http://127.0.0.1:14411/?nonce=\(encoded)\r\n"),
+                   "Modern exchange Referer is missing")
+        try expect(post.contains("Content-Type: application/x-www-form-urlencoded\r\n"),
+                   "Modern exchange form content type is missing")
+        try expect(post.contains("Content-Length: \(body.utf8.count)\r\n"),
+                   "Modern exchange Content-Length is wrong")
+        try expect(post.hasSuffix("\r\n\r\n\(body)"), "Modern exchange form body is wrong")
+        try expect(!post.contains("\r\nInjected: yes"), "Nonce enabled HTTP header injection")
+
+        let legacy = String(data: requests[1].data, encoding: .utf8) ?? ""
+        try expect(legacy.hasPrefix("GET /?nonce=\(encoded) HTTP/1.1\r\n"),
+                   "Legacy exchange query is wrong")
+        try expect(legacy.contains("Host: localhost:14411\r\n"), "Legacy exchange Host changed")
+    }
+
     private static func testSafeRedirects() throws {
         try expect(ScienceAuthProxy.safeLocalRedirect("%2Fworkspace%3Ftab%3D1") == "/workspace?tab=1",
                    "Safe local redirect was not decoded")
@@ -141,22 +171,22 @@ private struct ScienceAuthProxyRegression {
             socketPath: socketPath,
             request: nonceRequest
         ), let nonceResponse = ScienceAuthProxy.parseHTTPResponse(nonceRaw),
-           let nonce = ScienceAuthProxy.nonceValue(from: nonceResponse.body),
-           let encodedNonce = ScienceAuthProxy.percentEncodedQueryValue(nonce) else {
+           let nonce = ScienceAuthProxy.nonceValue(from: nonceResponse.body) else {
             throw RegressionFailure.failed("Live daemon nonce exchange failed")
         }
-        let cookieRequest = Data(
-            "GET /?nonce=\(encodedNonce) HTTP/1.1\r\nHost: localhost:\(port)\r\nAccept: text/html\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n".utf8
-        )
-        guard let cookieRaw = ScienceAuthProxy.posixRequestTCP(
-            host: "127.0.0.1",
-            port: port,
-            request: cookieRequest
-        ), let head = ScienceAuthProxy.httpHeadString(cookieRaw) else {
-            throw RegressionFailure.failed("Live daemon cookie exchange failed")
+        let requests = ScienceAuthProxy.nonceExchangeRequests(nonce: nonce, port: port)
+        for exchange in requests {
+            guard let cookieRaw = ScienceAuthProxy.posixRequestTCP(
+                host: "127.0.0.1",
+                port: port,
+                request: exchange.data
+            ), let head = ScienceAuthProxy.httpHeadString(cookieRaw) else { continue }
+            let cookies = ScienceAuthProxy.sessionCookies(in: head)
+            if !cookies.isEmpty {
+                print("Live daemon nonce/cookie exchange passed via \(exchange.mode.rawValue) (cookies=\(cookies.items.count)).")
+                return
+            }
         }
-        let cookies = ScienceAuthProxy.sessionCookies(in: head)
-        try expect(!cookies.isEmpty, "Live daemon did not return session cookies")
-        print("Live daemon nonce/cookie exchange passed (cookies=\(cookies.items.count)).")
+        throw RegressionFailure.failed("Live daemon did not return session cookies")
     }
 }

@@ -116,7 +116,7 @@ Claude Science 发 `thinking.type: "auto"`，而 Anthropic 兼容上游只认 `e
 
 对 `claude-science` 二进制（bun 打包）与桌面启动器（`ClaudeScience`，Swift/Cocoa）反编译得到：
 
-- **登录门是 cookie 会话**（fastify）：`GET /` 必须带 `operon_auth`（HttpOnly cookie）否则 `401 → /login`；`operon_csrf` 供 SPA 读出做 `x-operon-csrf` 双提交。这两个 cookie 只能由加载一次性 nonce 链接（`/?nonce=<nonce>`）时服务端 `Set-Cookie` 下发；nonce 单次、约 3 分钟，可通过控制套接字 `daemon.sock` 的 `POST /nonce` 铸取。cookie 绑定 daemon 本次启动的签名密钥，**daemon 重启即失效**（那句 "session expired"）。
+- **登录门是 cookie 会话**（fastify）：`GET /` 必须带 `operon_auth`（HttpOnly cookie）否则 `401 → /login`；`operon_csrf` 供 SPA 读出做 `x-operon-csrf` 双提交。nonce 单次、约 3 分钟，可通过控制套接字 `daemon.sock` 的 `POST /nonce` 铸取。旧版在加载 `GET /?nonce=<nonce>` 时下发 cookie；0.1.15 系列改为同源表单 `POST /api/auth/nonce`（`nonce=<nonce>&dest=/`）。cookie 绑定 daemon 本次启动的签名密钥，**daemon 重启即失效**（那句 "session expired"）。
 - **同源校验**：对**改状态请求**（发消息 POST、`/api/ws` 长连）daemon 只放行**自身监听端口**的 origin。关键函数：
   - `pf_(O,z) = (z ? z.has(O) : npG.test(O)) || SF(O)`，其中 `npG = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/`。当 daemon 配了 allowlist（`strictOriginRef.value` 为 Set）时走 `z.has(O)`**精确匹配**，只含自身端口 origin。
   - WS 用 `Pb_(origin, strictOrigin ?? strictOriginRef.value)`，同样精确匹配。
@@ -138,7 +138,7 @@ Claude Science 发 `thinking.type: "auto"`，而 Anthropic 兼容上游只认 `e
 **`ScienceAuthProxy`（8765 反向代理，回环 127.0.0.1 + ::1）**
 1. `start()` 先完成 nonce → cookie 会话初始化，再等 `NWListener` 到 `.ready`；认证初始化或 bind 失败都会抛出明确错误，不再静默带病启动。
 2. 首选通过独立 daemon 的 `daemon.sock` 铸 nonce；兼容 Content-Length、chunked、嵌套 nonce/登录 URL 等响应。私有响应格式变化时，回退到同版本官方 CLI `claude-science url --data-dir`。
-3. nonce 按 query value 严格编码；会话 cookie 从所有 `Set-Cookie` 动态提取，不再只硬编码 `operon_auth`/`operon_csrf`，并在内存缓存。
+3. nonce 严格编码；先走 0.1.15+ 的同源表单 `POST /api/auth/nonce`，若未下发会话 cookie，再用同一 nonce 回退旧版 `GET /?nonce=...`。旧版拒绝 POST 时不会消耗 nonce，因此双协议可共存。会话 cookie 从所有 `Set-Cookie` 动态提取，不再只硬编码 `operon_auth`/`operon_csrf`，并在内存缓存。
 4. 每个请求转发到 14411 时：注入当前有效 cookie；**改写 `Host` / `Origin` / `Referer`**，把浏览器的 `:8765` 换成 daemon 自己公布的 `http://localhost:14411`——通过新版 daemon 更严格的 authority/同源检查。
 5. `/login` → 直接 `302` 到 `redirect` 目标（默认 `/`）；对 `text/html` 响应额外 `Set-Cookie`，使 SPA 能读出 csrf。
 6. **WebSocket**（`/api/ws`）：注 cookie + 改写 Origin 后原样双向隧道对拷。

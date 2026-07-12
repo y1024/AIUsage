@@ -344,7 +344,8 @@ final class ScienceAuthProxy: @unchecked Sendable {
     /// 用 nonce 向内部 daemon 换取当前版本下发的会话 cookie。
     private func exchangeNonceForCookies(nonce: String) -> Result<ScienceSessionCookies, ScienceAuthFailure> {
         let port = upstreamPort
-        guard let encodedNonce = Self.percentEncodedQueryValue(nonce) else {
+        let requests = Self.nonceExchangeRequests(nonce: nonce, port: port)
+        guard !requests.isEmpty else {
             return .failure(ScienceAuthFailure(
                 stage: .exchangeCookies,
                 reason: "nonce could not be URL-encoded",
@@ -354,47 +355,63 @@ final class ScienceAuthProxy: @unchecked Sendable {
                 bodyPrefix: nil
             ))
         }
-        // Connect over 127.0.0.1 but present the daemon's own advertised
-        // localhost authority. Newer builds validate Host/Origin more strictly.
-        let req = "GET /?nonce=\(encodedNonce) HTTP/1.1\r\nHost: localhost:\(port)\r\nAccept: text/html\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
-        guard let raw = Self.posixRequestTCP(
-            host: "127.0.0.1",
-            port: port,
-            request: Data(req.utf8)
-        ) else {
-            return .failure(ScienceAuthFailure(
-                stage: .exchangeCookies,
-                reason: "internal daemon unavailable or timed out",
-                statusCode: nil,
-                location: nil,
-                contentType: nil,
-                bodyPrefix: nil
-            ))
+
+        var attemptDetails: [String] = []
+        var lastResponse: ScienceHTTPResponse?
+        for exchange in requests {
+            guard let raw = Self.posixRequestTCP(
+                host: "127.0.0.1",
+                port: port,
+                request: exchange.data
+            ) else {
+                attemptDetails.append("\(exchange.mode.rawValue): transport-error")
+                continue
+            }
+            guard let response = Self.parseHTTPResponse(raw),
+                  let head = Self.httpHeadString(raw) else {
+                attemptDetails.append("\(exchange.mode.rawValue): malformed-response")
+                continue
+            }
+            let fresh = Self.sessionCookies(in: head)
+            var details = ["\(exchange.mode.rawValue): status=\(response.statusCode)"]
+            if let location = response.header("location") {
+                details.append("location=\(Self.redactedText(location))")
+            }
+            if let contentType = response.header("content-type") {
+                details.append("content-type=\(Self.redactedText(contentType))")
+            }
+            var cookieNames = fresh.items.prefix(8).map { String($0.name.prefix(40)) }.sorted()
+            if fresh.items.count > cookieNames.count { cookieNames.append("...") }
+            details.append("cookie-names=[\(cookieNames.joined(separator: ","))]")
+            attemptDetails.append(details.joined(separator: " "))
+
+            let hasSessionCookie = fresh.items.contains {
+                let name = $0.name.lowercased()
+                return name == "operon_auth" || name.contains("auth") || name.contains("session") || name.contains("token")
+            }
+            if !fresh.isEmpty, hasSessionCookie {
+                authProxyLog.info("Science cookie exchange succeeded via \(exchange.mode.rawValue, privacy: .public)")
+                return .success(fresh)
+            }
+            lastResponse = response
         }
-        guard let response = Self.parseHTTPResponse(raw),
-              let head = Self.httpHeadString(raw) else {
-            return .failure(ScienceAuthFailure(
-                stage: .exchangeCookies,
-                reason: "malformed HTTP response",
-                statusCode: nil,
-                location: nil,
-                contentType: nil,
-                bodyPrefix: nil
-            ))
-        }
-        let fresh = Self.sessionCookies(in: head)
-        let hasSessionCookie = fresh.items.contains {
-            let name = $0.name.lowercased()
-            return name == "operon_auth" || name.contains("auth") || name.contains("session") || name.contains("token")
-        }
-        guard !fresh.isEmpty, hasSessionCookie else {
+
+        let reason = "no recognizable session cookie; attempts=\(attemptDetails.joined(separator: " | "))"
+        if let lastResponse {
             return .failure(failure(
                 stage: .exchangeCookies,
-                reason: "response did not set a recognizable session cookie",
-                response: response
+                reason: reason,
+                response: lastResponse
             ))
         }
-        return .success(fresh)
+        return .failure(ScienceAuthFailure(
+            stage: .exchangeCookies,
+            reason: reason,
+            statusCode: nil,
+            location: nil,
+            contentType: nil,
+            bodyPrefix: nil
+        ))
     }
 
     private func failure(
