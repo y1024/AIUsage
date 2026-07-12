@@ -29,12 +29,15 @@ final class CLIProxyRuntimeController: ObservableObject {
     private let binaryStore: CLIProxyBinaryStore
     private let configStore: CLIProxyConfigStore
     private let secretStore: CLIProxySecretStore
+    private var cachedSecrets: CLIProxySecrets?
     private var process: Process?
     private var shouldBeRunning = false
     private var restartAttempts = 0
     private var isLoadingSettings = true
     private var stdoutPipe: Pipe?
     private var stderrPipe: Pipe?
+    private var pendingProcessLogs: [String] = []
+    private var logFlushTask: Task<Void, Never>?
 
     private var pidURL: URL { paths.root.appendingPathComponent("runtime.pid.json") }
     var baseURL: URL { URL(string: "http://127.0.0.1:\(settings.normalized.port)")! }
@@ -50,8 +53,8 @@ final class CLIProxyRuntimeController: ObservableObject {
         guard settings.normalized.allowLANAccess else { return [] }
         return detectedLANBaseURLs
     }
-    var clientAPIKey: String? { secretStore.load()?.clientAPIKey }
-    var managementKey: String? { secretStore.load()?.managementKey }
+    var clientAPIKey: String? { cachedSecrets?.clientAPIKey }
+    var managementKey: String? { cachedSecrets?.managementKey }
 
     init(
         paths: CLIProxyPaths,
@@ -64,6 +67,7 @@ final class CLIProxyRuntimeController: ObservableObject {
         self.configStore = configStore ?? CLIProxyConfigStore(paths: paths)
         self.secretStore = secretStore
         self.settings = (configStore ?? CLIProxyConfigStore(paths: paths)).loadSettings()
+        self.cachedSecrets = secretStore.load()
         try paths.prepare()
         reapOwnedOrphanIfNeeded()
         isLoadingSettings = false
@@ -110,6 +114,7 @@ final class CLIProxyRuntimeController: ObservableObject {
 
     func stopSynchronouslyForTermination() {
         shouldBeRunning = false
+        finishPendingProcessLogs()
         guard let process, process.isRunning else {
             clearPIDRecord()
             return
@@ -206,6 +211,7 @@ final class CLIProxyRuntimeController: ObservableObject {
 
     private func stopOwnedProcess() async {
         guard let process else {
+            finishPendingProcessLogs()
             clearPIDRecord()
             state = .stopped
             return
@@ -225,6 +231,7 @@ final class CLIProxyRuntimeController: ObservableObject {
         stdoutPipe = nil
         stderrPipe = nil
         self.process = nil
+        finishPendingProcessLogs()
         clearPIDRecord()
         state = .stopped
     }
@@ -233,6 +240,7 @@ final class CLIProxyRuntimeController: ObservableObject {
         settings value: CLIProxyGatewaySettings? = nil
     ) throws -> CLIProxySecrets {
         let secrets = try secretStore.loadOrCreate()
+        cachedSecrets = secrets
         try configStore.writeRuntimeConfig(
             settings: (value ?? settings).normalized,
             secrets: secrets
@@ -284,14 +292,16 @@ final class CLIProxyRuntimeController: ObservableObject {
         handle.readabilityHandler = { [weak self] file in
             let data = file.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            let redacted = Self.redactLog(text, secrets: secrets)
+            let lines = redacted.split(whereSeparator: \.isNewline).map(String.init)
+            guard !lines.isEmpty else { return }
             Task { @MainActor [weak self] in
-                let redacted = Self.redactLog(text, secrets: secrets)
-                redacted.split(whereSeparator: \.isNewline).forEach { self?.appendLog(String($0)) }
+                self?.enqueueProcessLogs(lines)
             }
         }
     }
 
-    private static func redactLog(_ text: String, secrets: CLIProxySecrets) -> String {
+    nonisolated private static func redactLog(_ text: String, secrets: CLIProxySecrets) -> String {
         var redacted = text
             .replacingOccurrences(of: secrets.managementKey, with: "[REDACTED]")
             .replacingOccurrences(of: secrets.clientAPIKey, with: "[REDACTED]")
@@ -310,6 +320,33 @@ final class CLIProxyRuntimeController: ObservableObject {
             )
         }
         return redacted
+    }
+
+    /// CPA can emit several lines per request. Publish them in short batches so
+    /// views observing runtime state are not invalidated once for every stdout
+    /// line while the gateway is busy.
+    private func enqueueProcessLogs(_ lines: [String]) {
+        pendingProcessLogs.append(contentsOf: lines.filter { !$0.isEmpty })
+        guard !pendingProcessLogs.isEmpty, logFlushTask == nil else { return }
+        logFlushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            self?.flushProcessLogs()
+        }
+    }
+
+    private func flushProcessLogs() {
+        logFlushTask = nil
+        guard !pendingProcessLogs.isEmpty else { return }
+        recentLogs.append(contentsOf: pendingProcessLogs)
+        pendingProcessLogs.removeAll(keepingCapacity: true)
+        if recentLogs.count > 200 { recentLogs.removeFirst(recentLogs.count - 200) }
+    }
+
+    private func finishPendingProcessLogs() {
+        logFlushTask?.cancel()
+        logFlushTask = nil
+        flushProcessLogs()
     }
 
     private func appendLog(_ line: String) {

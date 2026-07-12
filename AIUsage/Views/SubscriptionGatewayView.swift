@@ -159,19 +159,22 @@ struct SubscriptionGatewayView: View {
         HStack(spacing: 4) {
             ForEach(CLIProxyGatewaySection.allCases) { section in
                 Button {
+                    guard navigation.selectedSection != section else { return }
                     navigation.selectedSection = section
                 } label: {
                     Label(section.shortTitle, systemImage: section.systemImage)
                         .font(.subheadline.weight(navigation.selectedSection == section ? .semibold : .medium))
                         .foregroundStyle(navigation.selectedSection == section ? Color.accentColor : Color.secondary)
+                        .frame(minWidth: 78, minHeight: 34)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
                                 .fill(navigation.selectedSection == section ? Color.accentColor.opacity(0.11) : .clear)
                         )
+                        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .help(section.title)
                 .accessibilityAddTraits(navigation.selectedSection == section ? .isSelected : [])
             }
             Spacer()

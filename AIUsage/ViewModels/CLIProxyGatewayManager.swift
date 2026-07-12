@@ -3,6 +3,25 @@ import Combine
 import Foundation
 import QuotaBackend
 
+nonisolated private struct CLIProxySyncCandidateSource: Sendable, Equatable {
+    let providerID: String
+    let label: String
+    let credentialID: String
+}
+
+nonisolated private enum CLIProxySyncCandidateEvaluation: Sendable {
+    case compatible
+    case requiresAuthFile
+    case unsupportedProvider
+    case missingFile
+    case conversionFailed(String)
+}
+
+nonisolated private struct CLIProxySyncCandidateResult: Sendable {
+    let source: CLIProxySyncCandidateSource
+    let evaluation: CLIProxySyncCandidateEvaluation
+}
+
 @MainActor
 final class CLIProxyGatewayManager: ObservableObject {
     static let shared: CLIProxyGatewayManager = {
@@ -45,6 +64,7 @@ final class CLIProxyGatewayManager: ObservableObject {
     @Published private(set) var oauthPlugin: CLIProxyPlugin?
     @Published private(set) var accountSyncStates: [String: CLIProxyAccountSyncState] = [:]
     @Published private(set) var syncRecords: [CLIProxyAccountSyncRecord] = []
+    @Published private(set) var syncCandidates: [CLIProxyAccountSyncCandidate] = []
     @Published private(set) var lastImportedAuthFileName: String?
 
     private let paths: CLIProxyPaths
@@ -52,7 +72,10 @@ final class CLIProxyGatewayManager: ObservableObject {
     private let downloader: CLIProxyAssetDownloader
     private let binaryStore: CLIProxyBinaryStore
     let runtime: CLIProxyRuntimeController
-    private var syncCandidateCache: [String: CLIProxyAccountSyncCandidate] = [:]
+    private var accountRegistryCancellable: AnyCancellable?
+    private var syncCandidateRefreshTask: Task<Void, Never>?
+    private var lastSyncCandidateSources: [CLIProxySyncCandidateSource] = []
+    private var syncCandidateGeneration = 0
     private var syncManifest = CLIProxyAccountSyncManifest.empty
     private var activeOAuthOperationID: UUID?
     private var activeOAuthState: String?
@@ -95,13 +118,22 @@ final class CLIProxyGatewayManager: ObservableObject {
             lastError = error.localizedDescription
         }
         refreshDistributionState()
+        accountRegistryCancellable = AccountStore.shared.$accountRegistry
+            .removeDuplicates()
+            .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+            .sink { [weak self] accounts in
+                self?.scheduleSyncCandidateRefresh(
+                    sources: Self.syncCandidateSources(from: accounts)
+                )
+            }
     }
 
     func refresh(checkRemote: Bool = true) async {
         await reloadInstalledVersions()
         refreshDistributionState()
+        await refreshSyncCandidates()
         if runtime.state.isRunning {
-            await refreshAccounts()
+            await refreshAccounts(refreshCandidates: false)
             await refreshProviderPlugins(includeStore: false)
         }
         guard checkRemote else { return }
@@ -204,55 +236,15 @@ final class CLIProxyGatewayManager: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    var syncCandidates: [CLIProxyAccountSyncCandidate] {
-        AccountStore.shared.accountRegistry.compactMap { account in
-            guard let credentialId = account.credentialId else { return nil }
-            return syncCandidate(
-                providerId: account.providerId,
-                label: account.preferredLabel,
-                credentialId: credentialId
-            )
-        }
-    }
-
     func syncCandidate(providerId: String, label: String, credentialId: String) -> CLIProxyAccountSyncCandidate? {
-        guard let credential = AccountCredentialStore.shared.loadCredential(
-            providerId: providerId,
-            credentialId: credentialId
-        ) else { return nil }
-        let attributes = try? FileManager.default.attributesOfItem(atPath: credential.credential)
-        let modifiedAt = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let cacheKey = "\(providerId)|\(credentialId)|\(label)|\(modifiedAt)"
-        if let cached = syncCandidateCache[cacheKey] { return cached }
-        let compatibility: CLIProxyAccountSyncCandidate.Compatibility
-        if credential.authMethod != .authFile {
-            compatibility = .unsupported(L("CPA requires an OAuth auth file for this provider.", "CPA 需要该服务商的 OAuth 凭据文件。"))
-        } else if !CLIProxyCredentialAdapter.supportedProviderIDs.contains(providerId) {
-            compatibility = .unsupported(L("No verified conversion adapter is available yet.", "目前没有经过验证的格式转换适配器。"))
-        } else if !FileManager.default.fileExists(atPath: credential.credential) {
-            compatibility = .unsupported(L("The managed credential file is unavailable.", "托管凭据文件当前不可用。"))
-        } else {
-            do {
-                let sourceData = try Data(contentsOf: URL(fileURLWithPath: credential.credential), options: .mappedIfSafe)
-                _ = try convertedAuthFile(credential, sourceData: sourceData)
-                compatibility = .compatible
-            } catch {
-                compatibility = .unsupported(error.localizedDescription)
-            }
+        syncCandidates.first {
+            $0.providerId.caseInsensitiveCompare(providerId) == .orderedSame &&
+            $0.credentialId.caseInsensitiveCompare(credentialId) == .orderedSame
         }
-        let candidate = CLIProxyAccountSyncCandidate(
-            id: "\(providerId):\(credentialId)",
-            providerId: providerId,
-            label: label,
-            credentialId: credentialId,
-            compatibility: compatibility
-        )
-        if syncCandidateCache.count > 200 { syncCandidateCache.removeAll(keepingCapacity: true) }
-        syncCandidateCache[cacheKey] = candidate
-        return candidate
     }
 
-    func refreshAccounts() async {
+    func refreshAccounts(refreshCandidates: Bool = true) async {
+        if refreshCandidates { await refreshSyncCandidates() }
         guard runtime.state.isRunning, !isManagingAccounts, let client = managementClient() else { return }
         isManagingAccounts = true
         lastError = nil
@@ -268,6 +260,139 @@ final class CLIProxyGatewayManager: ObservableObject {
             await refreshSyncStates(using: client, allowKeepUpdated: true)
             await reconcileManagedDistributionIfNeeded()
         } catch { lastError = error.localizedDescription }
+    }
+
+    func refreshSyncCandidates() async {
+        let sources = Self.syncCandidateSources(from: AccountStore.shared.accountRegistry)
+        lastSyncCandidateSources = sources
+        syncCandidateRefreshTask?.cancel()
+        syncCandidateRefreshTask = nil
+        await rebuildSyncCandidates(from: sources)
+    }
+
+    private func scheduleSyncCandidateRefresh(sources: [CLIProxySyncCandidateSource]) {
+        guard sources != lastSyncCandidateSources else { return }
+        lastSyncCandidateSources = sources
+        syncCandidateRefreshTask?.cancel()
+        syncCandidateRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.rebuildSyncCandidates(from: sources)
+        }
+    }
+
+    private func rebuildSyncCandidates(from sources: [CLIProxySyncCandidateSource]) async {
+        syncCandidateGeneration &+= 1
+        let generation = syncCandidateGeneration
+        let results = await withTaskGroup(
+            of: [CLIProxySyncCandidateResult].self,
+            returning: [CLIProxySyncCandidateResult].self
+        ) { group in
+            group.addTask(priority: .userInitiated) {
+                var results: [CLIProxySyncCandidateResult] = []
+                results.reserveCapacity(sources.count)
+                for source in sources {
+                    guard !Task.isCancelled else { break }
+                    if let result = Self.evaluateSyncCandidate(source) {
+                        results.append(result)
+                    }
+                }
+                return results
+            }
+            return await group.next() ?? []
+        }
+        guard !Task.isCancelled, generation == syncCandidateGeneration else { return }
+
+        let candidates = results.map { result in
+            let compatibility: CLIProxyAccountSyncCandidate.Compatibility
+            switch result.evaluation {
+            case .compatible:
+                compatibility = .compatible
+            case .requiresAuthFile:
+                compatibility = .unsupported(L(
+                    "CPA requires an OAuth auth file for this provider.",
+                    "CPA 需要该服务商的 OAuth 凭据文件。"
+                ))
+            case .unsupportedProvider:
+                compatibility = .unsupported(L(
+                    "No verified conversion adapter is available yet.",
+                    "目前没有经过验证的格式转换适配器。"
+                ))
+            case .missingFile:
+                compatibility = .unsupported(L(
+                    "The managed credential file is unavailable.",
+                    "托管凭据文件当前不可用。"
+                ))
+            case .conversionFailed(let message):
+                compatibility = .unsupported(message)
+            }
+            return CLIProxyAccountSyncCandidate(
+                id: "\(result.source.providerID):\(result.source.credentialID)",
+                providerId: result.source.providerID,
+                label: result.source.label,
+                credentialId: result.source.credentialID,
+                compatibility: compatibility
+            )
+        }
+        .sorted {
+            let providerOrder = $0.providerId.localizedStandardCompare($1.providerId)
+            if providerOrder != .orderedSame { return providerOrder == .orderedAscending }
+            return $0.label.localizedStandardCompare($1.label) == .orderedAscending
+        }
+        if candidates != syncCandidates {
+            syncCandidates = candidates
+        }
+    }
+
+    nonisolated private static func syncCandidateSources(
+        from accounts: [StoredProviderAccount]
+    ) -> [CLIProxySyncCandidateSource] {
+        var seen = Set<String>()
+        return accounts.compactMap { account in
+            guard let credentialID = account.credentialId else { return nil }
+            let identity = "\(account.providerId.lowercased()):\(credentialID.lowercased())"
+            guard seen.insert(identity).inserted else { return nil }
+            return CLIProxySyncCandidateSource(
+                providerID: account.providerId,
+                label: account.preferredLabel,
+                credentialID: credentialID
+            )
+        }
+    }
+
+    nonisolated private static func evaluateSyncCandidate(
+        _ source: CLIProxySyncCandidateSource
+    ) -> CLIProxySyncCandidateResult? {
+        guard let credential = AccountCredentialStore.shared.loadCredential(
+            providerId: source.providerID,
+            credentialId: source.credentialID
+        ) else { return nil }
+
+        let evaluation: CLIProxySyncCandidateEvaluation
+        if credential.authMethod != .authFile {
+            evaluation = .requiresAuthFile
+        } else if !CLIProxyCredentialAdapter.supportedProviderIDs.contains(source.providerID) {
+            evaluation = .unsupportedProvider
+        } else if !FileManager.default.fileExists(atPath: credential.credential) {
+            evaluation = .missingFile
+        } else {
+            do {
+                let sourceData = try Data(
+                    contentsOf: URL(fileURLWithPath: credential.credential),
+                    options: .mappedIfSafe
+                )
+                _ = try CLIProxyCredentialAdapter.convert(
+                    providerId: credential.providerId,
+                    credentialId: credential.id,
+                    accountLabel: credential.accountLabel,
+                    metadata: credential.metadata,
+                    sourceData: sourceData
+                )
+                evaluation = .compatible
+            } catch {
+                evaluation = .conversionFailed(error.localizedDescription)
+            }
+        }
+        return CLIProxySyncCandidateResult(source: source, evaluation: evaluation)
     }
 
     /// Refresh only the public model catalog. The overview polls this lightweight
@@ -964,17 +1089,9 @@ final class CLIProxyGatewayManager: ObservableObject {
 
     private func applyModelCatalog(_ snapshot: CLIProxyModelCatalogSnapshot) {
         availableModels = Self.normalizedModels(snapshot.openAIModels)
-
-        var protocolsByID: [String: Set<CLIProxyModelProtocol>] = [:]
-        for entry in snapshot.entries {
-            protocolsByID[entry.model.id.lowercased(), default: []].formUnion(entry.protocols)
-        }
-        modelCatalog = Self.normalizedModels(snapshot.entries.map(\.model)).map { model in
-            CLIProxyModelCatalogEntry(
-                model: model,
-                protocols: protocolsByID[model.id.lowercased(), default: []]
-            )
-        }
+        // The client already reduced protocol aliases into canonical entries.
+        // Keep each API format's route ID intact for the setup detail sheet.
+        modelCatalog = snapshot.entries
         unavailableModelProtocols = snapshot.unavailableProtocols
     }
 
@@ -982,7 +1099,9 @@ final class CLIProxyGatewayManager: ObservableObject {
         var seen = Set<String>()
         return models
             .filter { !$0.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .filter { seen.insert($0.id).inserted }
+            .filter {
+                seen.insert($0.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()).inserted
+            }
             .sorted { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
     }
 

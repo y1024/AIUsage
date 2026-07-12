@@ -15,6 +15,15 @@ struct CLIProxyUpdaterRegression {
     static func main() async throws {
         try testReleaseSelection()
         try testVersionRules()
+        try testClaudeCompatibilityAliasCanonicalization()
+        try testUnifiedCatalogDeduplicatesProtocolAliases()
+        try testCatalogPreservesPerFormatRouteIDs()
+        try testCaseAndWhitespaceCanonicalMerge()
+        try testProviderResolutionPrefersOwnedBy()
+        try testDisplayNameEnrichmentDoesNotChangeIdentity()
+        try testUnknownCustomProviderUsesNeutralBrand()
+        try testInvalidClaudeAliasIsNotDecoded()
+        try testThinkingSuffixIsPreserved()
         try testSettingsThreeWayMerge()
         try testRuntimeConfiguration()
         try testDefaultPluginDirectoryUpgradeMigration()
@@ -72,6 +81,186 @@ struct CLIProxyUpdaterRegression {
         try expect(CLIProxyVersion.compare("v7.2.67", "7.2.67") == .orderedSame, "v prefix normalization failed")
         try expect(!CLIProxyVersion.isSafePathComponent("../7.2.67"), "path traversal version was accepted")
         try expect(!CLIProxyVersion.isSafePathComponent("7.2.67/evil"), "nested version path was accepted")
+    }
+
+    private static func testClaudeCompatibilityAliasCanonicalization() throws {
+        let routeID = "claude-fable-5-dd-2-egami-tpg"
+        try expect(
+            CLIProxyModelIdentity.canonicalID(for: routeID, protocol: .anthropic) == "gpt-image-2",
+            "Anthropic compatibility alias did not decode to its canonical model ID"
+        )
+    }
+
+    private static func testUnifiedCatalogDeduplicatesProtocolAliases() throws {
+        let openAIModels = [
+            CLIProxyModel(id: "gpt-image-2", ownedBy: "openai")
+        ]
+        let snapshot = CLIProxyModelCatalogBuilder.build(
+            openAIModels: openAIModels,
+            anthropicModels: [
+                CLIProxyModel(
+                    id: "claude-fable-5-dd-2-egami-tpg",
+                    displayName: "GPT Image 2",
+                    ownedBy: "openai"
+                )
+            ],
+            geminiModels: [
+                CLIProxyModel(id: "gpt-image-2", displayName: "GPT Image 2", ownedBy: "openai")
+            ]
+        )
+
+        try expect(snapshot.openAIModels == openAIModels, "catalog builder modified the OpenAI distribution source")
+        try expect(snapshot.entries.count == 1, "one model exposed through three API formats was duplicated")
+        guard let entry = snapshot.entries.first else {
+            throw RegressionFailure("unified catalog unexpectedly had no entries")
+        }
+        try expect(entry.model.id == "gpt-image-2", "unified catalog did not retain the canonical model ID")
+        try expect(
+            entry.protocols == Set([.openAI, .anthropic, .gemini]),
+            "unified catalog did not retain every API format"
+        )
+    }
+
+    private static func testCatalogPreservesPerFormatRouteIDs() throws {
+        let anthropicRoute = "claude-fable-5-dd-2-egami-tpg"
+        let caseVariantAnthropicRoute = "claude-fable-5-dd-2-EGAMI-TPG"
+        let snapshot = CLIProxyModelCatalogBuilder.build(
+            openAIModels: [CLIProxyModel(id: "gpt-image-2", ownedBy: "openai")],
+            anthropicModels: [
+                CLIProxyModel(id: anthropicRoute, ownedBy: "openai"),
+                CLIProxyModel(id: caseVariantAnthropicRoute, ownedBy: "openai")
+            ],
+            geminiModels: [CLIProxyModel(id: "gpt-image-2", ownedBy: "google")]
+        )
+        guard let entry = snapshot.entries.first else {
+            throw RegressionFailure("route preservation catalog unexpectedly had no entries")
+        }
+
+        try expect(entry.models(for: .openAI).map(\.id) == ["gpt-image-2"], "OpenAI route ID was lost")
+        try expect(
+            Set(entry.models(for: .anthropic).map(\.id)) == Set([anthropicRoute, caseVariantAnthropicRoute]),
+            "distinct Anthropic route aliases were lost"
+        )
+        try expect(entry.models(for: .gemini).map(\.id) == ["gpt-image-2"], "Gemini route ID was lost")
+        try expect(
+            entry.routeID(for: .anthropic).map {
+                Set([anthropicRoute, caseVariantAnthropicRoute]).contains($0)
+            } == true,
+            "preferred Anthropic route ID was wrong"
+        )
+    }
+
+    private static func testCaseAndWhitespaceCanonicalMerge() throws {
+        let openAIModels = [CLIProxyModel(id: "  GPT-IMAGE-2  ", ownedBy: "openai")]
+        let snapshot = CLIProxyModelCatalogBuilder.build(
+            openAIModels: openAIModels,
+            anthropicModels: [
+                CLIProxyModel(id: "claude-fable-5-dd-2-egami-tpg", ownedBy: "openai")
+            ],
+            geminiModels: [CLIProxyModel(id: "gpt-image-2", ownedBy: "google")]
+        )
+
+        try expect(snapshot.openAIModels == openAIModels, "OpenAI source whitespace was not preserved verbatim")
+        try expect(snapshot.entries.count == 1, "case or surrounding whitespace produced duplicate catalog entries")
+        try expect(snapshot.entries.first?.model.id == "GPT-IMAGE-2", "canonical display ID was not trimmed")
+    }
+
+    private static func testProviderResolutionPrefersOwnedBy() throws {
+        let explicitOpenAI = CLIProxyModel(
+            id: "claude-looking-route",
+            displayName: "Gemini Looking Name",
+            ownedBy: "openai"
+        )
+        try expect(
+            CLIProxyModelBrandResolver.providerID(for: explicitOpenAI) == "openai",
+            "owned_by did not take precedence when resolving the model brand"
+        )
+
+        let explicitGoogle = CLIProxyModel(id: "gpt-looking-model", ownedBy: "google")
+        try expect(
+            CLIProxyModelBrandResolver.providerID(for: explicitGoogle) == "gemini",
+            "Google owned_by did not take precedence over the canonical model ID"
+        )
+
+        let explicitXAI = CLIProxyModel(id: "vendor-model", ownedBy: "xai")
+        try expect(
+            CLIProxyModelBrandResolver.providerID(for: explicitXAI) == "xai",
+            "xAI owned_by did not resolve to the xAI brand"
+        )
+
+        let grokFallback = CLIProxyModel(id: "grok-4-fast", ownedBy: "custom-router")
+        try expect(
+            CLIProxyModelBrandResolver.providerID(for: grokFallback) == "xai",
+            "Grok model ID did not resolve to the xAI brand"
+        )
+
+        let canonicalFallback = CLIProxyModel(id: "gpt-5", ownedBy: "antigravity")
+        try expect(
+            CLIProxyModelBrandResolver.providerID(for: canonicalFallback) == "openai",
+            "canonical model ID was not used after an unrecognized owned_by"
+        )
+
+        let displayFallback = CLIProxyModel(id: "vendor-alpha", displayName: "Claude Alpha")
+        try expect(
+            CLIProxyModelBrandResolver.providerID(for: displayFallback) == "claude",
+            "display name was not used as the final brand hint"
+        )
+    }
+
+    private static func testDisplayNameEnrichmentDoesNotChangeIdentity() throws {
+        let snapshot = CLIProxyModelCatalogBuilder.build(
+            openAIModels: [CLIProxyModel(id: "gpt-5", ownedBy: "openai")],
+            anthropicModels: [
+                CLIProxyModel(
+                    id: "claude-fable-5-dd-5-tpg",
+                    displayName: "GPT 5",
+                    ownedBy: "openai"
+                )
+            ],
+            geminiModels: nil
+        )
+        guard let entry = snapshot.entries.first else {
+            throw RegressionFailure("metadata enrichment catalog unexpectedly had no entries")
+        }
+        try expect(entry.model.id == "gpt-5", "display metadata changed the canonical model identity")
+        try expect(entry.model.displayName == "GPT 5", "richer display metadata was not retained")
+        try expect(entry.providerID == "openai", "enriched model resolved to the wrong provider brand")
+    }
+
+    private static func testUnknownCustomProviderUsesNeutralBrand() throws {
+        let model = CLIProxyModel(id: "acme-alpha", displayName: "Acme Alpha", ownedBy: "acme")
+        try expect(
+            CLIProxyModelBrandResolver.providerID(for: model) == "cliproxyapi",
+            "unknown custom provider did not use the neutral CPA brand"
+        )
+    }
+
+    private static func testInvalidClaudeAliasIsNotDecoded() throws {
+        let wrongCase = "Claude-fable-5-dd-o4-tpg"
+        try expect(
+            CLIProxyModelIdentity.canonicalID(for: wrongCase, protocol: .anthropic) == wrongCase,
+            "non-exact Anthropic alias prefix was decoded"
+        )
+
+        let emptyPayload = CLIProxyModelIdentity.anthropicCompatibilityPrefix
+        try expect(
+            CLIProxyModelIdentity.canonicalID(for: emptyPayload, protocol: .anthropic) == emptyPayload,
+            "empty Anthropic alias payload was decoded"
+        )
+
+        let validAliasOnWrongAPI = "claude-fable-5-dd-o4-tpg"
+        try expect(
+            CLIProxyModelIdentity.canonicalID(for: validAliasOnWrongAPI, protocol: .openAI) == validAliasOnWrongAPI,
+            "Anthropic alias was decoded outside the Anthropic API format"
+        )
+    }
+
+    private static func testThinkingSuffixIsPreserved() throws {
+        let routeID = "claude-fable-5-dd-o4-tpg(high)"
+        try expect(
+            CLIProxyModelIdentity.canonicalID(for: routeID, protocol: .anthropic) == "gpt-4o(high)",
+            "Anthropic compatibility alias lost its thinking suffix"
+        )
     }
 
     private static func testSettingsThreeWayMerge() throws {
@@ -700,12 +889,52 @@ struct CLIProxyUpdaterRegression {
             catalogAfterRestart.openAIModels.contains(where: { $0.id.contains("regression-model") }),
             "protocol catalog changed the OpenAI model source used for managed distribution"
         )
+        let regressionOpenAIRouteIDs = catalogAfterRestart.openAIModels
+            .map(\.id)
+            .filter { $0.lowercased().contains("regression-model") }
         try expect(
-            catalogAfterRestart.entries.contains(where: {
-                $0.model.id.contains("regression-model") && $0.protocols.contains(.openAI)
-            }),
-            "protocol catalog did not merge the OpenAI model view"
+            !regressionOpenAIRouteIDs.isEmpty,
+            "live OpenAI model view did not expose a regression route ID"
         )
+        for openAIRouteID in Set(regressionOpenAIRouteIDs) {
+            let canonicalKey = CLIProxyModelIdentity.normalizedKey(for: openAIRouteID)
+            let matchingEntries = catalogAfterRestart.entries.filter {
+                CLIProxyModelIdentity.normalizedKey(for: $0.model.id) == canonicalKey
+            }
+            try expect(
+                matchingEntries.count == 1,
+                "one live OpenAI route resolved to \(matchingEntries.count) canonical entries: \(openAIRouteID)"
+            )
+            guard let regressionCatalogEntry = matchingEntries.first else {
+                throw RegressionFailure("live protocol catalog did not include route \(openAIRouteID)")
+            }
+            try expect(
+                regressionCatalogEntry.models(for: .openAI).contains(where: {
+                    CLIProxyModelIdentity.normalizedKey(for: $0.id) == canonicalKey
+                }),
+                "live catalog entry lost its OpenAI API route"
+            )
+
+            let liveAnthropicRoutes = regressionCatalogEntry.models(for: .anthropic)
+            try expect(
+                liveAnthropicRoutes.contains(where: {
+                    $0.id.hasPrefix(CLIProxyModelIdentity.anthropicCompatibilityPrefix)
+                }),
+                "live catalog did not preserve the Anthropic compatibility route ID"
+            )
+            try expect(
+                liveAnthropicRoutes.contains(where: {
+                    CLIProxyModelIdentity.normalizedKey(
+                        for: CLIProxyModelIdentity.canonicalID(for: $0.id, protocol: .anthropic)
+                    ) == canonicalKey
+                }),
+                "live Anthropic route did not resolve to the unified canonical model"
+            )
+            try expect(
+                regressionCatalogEntry.providerID != "claude",
+                "Anthropic API compatibility route overrode the live model provider brand"
+            )
+        }
         try expect(
             catalogAfterRestart.entries.allSatisfy { !$0.protocols.isEmpty },
             "protocol catalog produced an entry without a protocol"

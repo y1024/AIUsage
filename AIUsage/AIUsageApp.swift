@@ -96,7 +96,7 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     ) {
         // 标准驱动将自行展示（用户主动检查）时不点亮按钮，避免重复提示。
         guard !handleShowingUpdate else { return }
-        availableUpdateVersion = update.displayVersionString
+        publishAvailableUpdate(update)
     }
 
     func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
@@ -111,7 +111,7 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         sparkleLog.info("Found valid update: \(item.displayVersionString, privacy: .public)")
-        availableUpdateVersion = item.displayVersionString
+        publishAvailableUpdate(item)
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
@@ -121,6 +121,30 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         let ns = error as NSError
         sparkleLog.error("Updater aborted: \(ns.domain, privacy: .public) #\(ns.code, privacy: .public) — \(ns.localizedDescription, privacy: .public)")
+    }
+
+    /// Sparkle may resume a scheduled update session persisted by an older app
+    /// build. Never surface that stale item as an upgrade after the running app
+    /// has already moved past it.
+    private func publishAvailableUpdate(_ item: SUAppcastItem) {
+        guard let currentVersion = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleVersion"
+        ) as? String else {
+            availableUpdateVersion = item.displayVersionString
+            return
+        }
+        let comparison = SUStandardVersionComparator.default.compareVersion(
+            currentVersion,
+            toVersion: item.versionString
+        )
+        guard comparison == .orderedAscending else {
+            sparkleLog.info(
+                "Ignoring stale update item \(item.versionString, privacy: .public); running \(currentVersion, privacy: .public)"
+            )
+            availableUpdateVersion = nil
+            return
+        }
+        availableUpdateVersion = item.displayVersionString
     }
 }
 

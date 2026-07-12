@@ -71,9 +71,22 @@ jobs:
             -resolvePackageDependencies \
             -derivedDataPath build/DerivedData
 
+      - name: Run QuotaBackend tests
+        shell: bash
+        working-directory: QuotaBackend
+        run: swift test
+
+      - name: Run Claude proxy regression
+        shell: bash
+        run: ./scripts/run_claude_proxy_regression.sh
+
       - name: Run Claude Science auth proxy regression
         shell: bash
         run: ./scripts/run_science_auth_proxy_regression.sh
+
+      - name: Run CPA gateway regression
+        shell: bash
+        run: ./scripts/run_cliproxy_updater_regression.sh
 
       # Import the stable self-signed code signing certificate (issue #35).
       # Skipped automatically if the secret is absent, in which case the

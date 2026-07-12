@@ -100,29 +100,10 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         )
         async let geminiCatalogModels: [CLIProxyModel]? = try? await geminiModels()
         let openAIModels = try await availableModels()
-        var entries: [String: CLIProxyModelCatalogEntry] = [:]
-        var unavailable: Set<CLIProxyModelProtocol> = []
-
-        merge(openAIModels, protocol: .openAI, into: &entries)
-
-        if let anthropic = await anthropicModels {
-            merge(anthropic, protocol: .anthropic, into: &entries)
-        } else {
-            unavailable.insert(.anthropic)
-        }
-
-        if let gemini = await geminiCatalogModels {
-            merge(gemini, protocol: .gemini, into: &entries)
-        } else {
-            unavailable.insert(.gemini)
-        }
-
-        return CLIProxyModelCatalogSnapshot(
+        return CLIProxyModelCatalogBuilder.build(
             openAIModels: openAIModels,
-            entries: entries.values.sorted {
-                $0.model.id.localizedStandardCompare($1.model.id) == .orderedAscending
-            },
-            unavailableProtocols: unavailable
+            anthropicModels: await anthropicModels,
+            geminiModels: await geminiCatalogModels
         )
     }
 
@@ -358,39 +339,6 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         } catch {
             throw CLIProxyGatewayError.network(error.localizedDescription)
         }
-    }
-
-    private func merge(
-        _ models: [CLIProxyModel],
-        protocol modelProtocol: CLIProxyModelProtocol,
-        into entries: inout [String: CLIProxyModelCatalogEntry]
-    ) {
-        for model in models {
-            let key = model.id.lowercased()
-            if let existing = entries[key] {
-                entries[key] = CLIProxyModelCatalogEntry(
-                    model: preferredModel(existing.model, model),
-                    protocols: existing.protocols.union([modelProtocol])
-                )
-            } else {
-                entries[key] = CLIProxyModelCatalogEntry(model: model, protocols: [modelProtocol])
-            }
-        }
-    }
-
-    private func preferredModel(_ lhs: CLIProxyModel, _ rhs: CLIProxyModel) -> CLIProxyModel {
-        CLIProxyModel(
-            id: lhs.id,
-            displayName: nonBlank(lhs.displayName) ?? nonBlank(rhs.displayName),
-            type: nonBlank(lhs.type) ?? nonBlank(rhs.type),
-            ownedBy: nonBlank(lhs.ownedBy) ?? nonBlank(rhs.ownedBy)
-        )
-    }
-
-    private func nonBlank(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalized.isEmpty ? nil : normalized
     }
 
     private func requestData(

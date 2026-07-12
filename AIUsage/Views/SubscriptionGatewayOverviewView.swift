@@ -1,6 +1,50 @@
 import AppKit
 import SwiftUI
 
+private struct GatewayModelProviderGroup: Identifiable {
+    let id: String
+    let totalCount: Int
+    let models: [CLIProxyModelCatalogEntry]
+}
+
+private func gatewayModelProviderTitle(_ providerID: String) -> String {
+    switch providerID {
+    case "openai": L("OpenAI", "OpenAI")
+    case "claude": L("Anthropic", "Anthropic")
+    case "gemini": L("Google", "Google")
+    case "xai": L("xAI", "xAI")
+    case "kimi": L("Kimi", "Kimi")
+    case "minimax": L("MiniMax", "MiniMax")
+    default: L("Custom / other", "自定义 / 其他")
+    }
+}
+
+private func gatewayModelProviderSortOrder(_ providerID: String) -> Int {
+    switch providerID {
+    case "openai": 0
+    case "claude": 1
+    case "gemini": 2
+    case "xai": 3
+    case "kimi": 4
+    case "minimax": 5
+    default: 9
+    }
+}
+
+private func gatewayModelAPIDetail(_ modelProtocol: CLIProxyModelProtocol) -> String {
+    switch modelProtocol {
+    case .openAI:
+        L("Use this route ID with OpenAI-compatible clients. Available endpoints depend on the model and CPA route.",
+          "此路由 ID 用于 OpenAI 兼容客户端；实际可用端点取决于模型与 CPA 路由。")
+    case .anthropic:
+        L("Use with Anthropic Messages clients. CPA may require a compatibility route ID.",
+          "用于 Anthropic Messages 客户端；CPA 可能要求使用兼容路由 ID。")
+    case .gemini:
+        L("Use with Gemini native REST or Google GenAI clients.",
+          "用于 Gemini 原生 REST 或 Google GenAI 客户端。")
+    }
+}
+
 struct SubscriptionGatewayOverviewView: View {
     @ObservedObject var manager: CLIProxyGatewayManager
     @ObservedObject var runtime: CLIProxyRuntimeController
@@ -8,9 +52,10 @@ struct SubscriptionGatewayOverviewView: View {
     @ObservedObject private var navigation = CLIProxyGatewayNavigation.shared
     @State private var modelQuery = ""
     @State private var showAllModels = false
+    @State private var selectedModel: CLIProxyModelCatalogEntry?
 
     private let metricColumns = [GridItem(.adaptive(minimum: 210), spacing: 10)]
-    private let modelColumns = [GridItem(.adaptive(minimum: 245), spacing: 9)]
+    private let modelColumns = [GridItem(.adaptive(minimum: 300), spacing: 9)]
 
     var body: some View {
         ScrollView {
@@ -34,7 +79,7 @@ struct SubscriptionGatewayOverviewView: View {
                     GatewayMetricCard(
                         title: L("Models", "模型"),
                         value: "\(manager.modelCatalog.count)",
-                        detail: L("reported by CPA now", "CPA 当前动态上报"),
+                        detail: L("unique models available now", "当前可用的去重模型"),
                         systemImage: "square.stack.3d.up.fill",
                         tint: .purple
                     )
@@ -59,6 +104,9 @@ struct SubscriptionGatewayOverviewView: View {
             .frame(maxWidth: 1080, alignment: .leading)
             .padding(.horizontal, 24)
             .padding(.vertical, 22)
+        }
+        .sheet(item: $selectedModel) { entry in
+            GatewayModelDetailSheet(entry: entry)
         }
         .task(id: runtime.state.isRunning) {
             guard runtime.state.isRunning else { return }
@@ -161,7 +209,7 @@ struct SubscriptionGatewayOverviewView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(L("Live model catalog", "实时模型目录")).font(.headline)
+                        Text(L("CPA available models", "CPA 可用模型")).font(.headline)
                         Text(modelCatalogDetail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -169,7 +217,7 @@ struct SubscriptionGatewayOverviewView: View {
                     Spacer()
                     GatewayStatusPill(
                         text: runtime.state.isRunning
-                            ? L("\(manager.modelCatalog.count) live", "实时 \(manager.modelCatalog.count) 个")
+                            ? L("\(manager.modelCatalog.count) models", "\(manager.modelCatalog.count) 个模型")
                             : L("Offline", "未运行"),
                         color: runtime.state.isRunning ? .green : .secondary,
                         systemImage: runtime.state.isRunning ? "dot.radiowaves.left.and.right" : "circle"
@@ -188,7 +236,7 @@ struct SubscriptionGatewayOverviewView: View {
                 if manager.modelCatalog.count > 8 || !normalizedModelQuery.isEmpty {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField(L("Search model ID", "搜索模型 ID"), text: $modelQuery)
+                        TextField(L("Search model name or any API ID", "搜索模型名称或任一 API ID"), text: $modelQuery)
                             .textFieldStyle(.plain)
                     }
                     .padding(.horizontal, 10)
@@ -248,15 +296,35 @@ struct SubscriptionGatewayOverviewView: View {
                             : L("No model matches this search.", "没有匹配的模型。")
                     )
                 } else {
-                    LazyVGrid(columns: modelColumns, alignment: .leading, spacing: 9) {
-                        ForEach(visibleModels) { model in
-                            modelRow(model)
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(visibleModelGroups) { group in
+                            VStack(alignment: .leading, spacing: 9) {
+                                HStack(spacing: 8) {
+                                    GatewayProviderIcon(providerID: group.id, size: 24)
+                                    Text(gatewayModelProviderTitle(group.id))
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(L("\(group.totalCount) models", "\(group.totalCount) 个模型"))
+                                        .font(.caption2.weight(.semibold).monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3)
+                                        .background(Color.primary.opacity(0.055), in: Capsule())
+                                }
+                                LazyVGrid(columns: modelColumns, alignment: .leading, spacing: 9) {
+                                    ForEach(group.models) { model in
+                                        modelRow(model)
+                                    }
+                                }
+                            }
                         }
                     }
-                    if filteredModels.count > 10 && modelQuery.isEmpty {
+                    if hasCollapsedModelOverflow && normalizedModelQuery.isEmpty {
                         Button(showAllModels
                                ? L("Show fewer", "收起")
-                               : L("Show all \(filteredModels.count) models", "查看全部 \(filteredModels.count) 个模型")) {
+                               : L(
+                                    "Show all \(filteredModels.count) models",
+                                    "查看全部 \(filteredModels.count) 个模型"
+                               )) {
                             showAllModels.toggle()
                         }
                         .buttonStyle(.borderless)
@@ -268,43 +336,45 @@ struct SubscriptionGatewayOverviewView: View {
 
     private func modelRow(_ entry: CLIProxyModelCatalogEntry) -> some View {
         let model = entry.model
-        return HStack(spacing: 9) {
-            GatewayProviderIcon(providerID: modelProviderID(entry), size: 29)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.displayName ?? model.id)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                HStack(spacing: 5) {
-                    if model.displayName != nil {
-                        Text(model.id).font(.caption2.monospaced()).lineLimit(1)
-                    }
-                    if let ownedBy = model.ownedBy?.nilIfBlank {
-                        Text(model.displayName == nil ? ownedBy : "· \(ownedBy)")
-                            .font(.caption2)
-                    }
-                    if !entry.protocols.isEmpty {
-                        Spacer(minLength: 4)
-                        Text(protocolNames(entry.protocols))
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.blue)
-                            .lineLimit(1)
-                    }
+        return Button {
+            selectedModel = entry
+        } label: {
+            HStack(spacing: 10) {
+                GatewayProviderIcon(providerID: entry.providerID, size: 31)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.displayName?.nilIfBlank ?? model.id)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(model.id)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                .foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 4)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .background(Color.primary.opacity(0.028), in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.primary.opacity(0.028), in: RoundedRectangle(cornerRadius: 10))
+        .buttonStyle(.plain)
         .contextMenu {
-            Button(L("Copy model ID", "复制模型 ID")) {
+            Button(L("Copy canonical model ID", "复制规范模型 ID")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(model.id, forType: .string)
             }
+            Button(L("Show API-specific IDs", "查看各 API 专用 ID")) {
+                selectedModel = entry
+            }
         }
         .accessibilityElement(children: .combine)
+        .accessibilityHint(L("Shows the model IDs required by each compatible API.", "查看每种兼容 API 所需的模型 ID。"))
     }
 
     private func compactModelEmptyState(icon: String, text: String) -> some View {
@@ -412,21 +482,57 @@ struct SubscriptionGatewayOverviewView: View {
 
     private var filteredModels: [CLIProxyModelCatalogEntry] {
         let query = normalizedModelQuery
-        guard !query.isEmpty else { return manager.modelCatalog }
-        return manager.modelCatalog.filter { entry in
+        let models = manager.modelCatalog.filter { entry in
+            guard !query.isEmpty else { return true }
             let model = entry.model
-            return [model.id, model.displayName ?? "", model.ownedBy ?? "", model.type ?? ""]
+            let routeIDs = entry.routeIDs.values.flatMap { $0 }
+            return ([
+                model.id,
+                model.displayName ?? "",
+                model.ownedBy ?? "",
+                model.type ?? "",
+                gatewayModelProviderTitle(entry.providerID),
+                protocolNames(entry.protocols)
+            ] + routeIDs)
                 .joined(separator: " ")
                 .lowercased()
-                .contains(query) || protocolNames(entry.protocols).lowercased().contains(query)
+                .contains(query)
+        }
+        return models.sorted { lhs, rhs in
+            let lhsProvider = gatewayModelProviderSortOrder(lhs.providerID)
+            let rhsProvider = gatewayModelProviderSortOrder(rhs.providerID)
+            if lhsProvider != rhsProvider { return lhsProvider < rhsProvider }
+            let lhsTitle = lhs.model.displayName?.nilIfBlank ?? lhs.model.id
+            let rhsTitle = rhs.model.displayName?.nilIfBlank ?? rhs.model.id
+            return lhsTitle.localizedStandardCompare(rhsTitle) == .orderedAscending
         }
     }
 
-    private var visibleModels: [CLIProxyModelCatalogEntry] {
-        if !normalizedModelQuery.isEmpty {
-            return Array(filteredModels.prefix(50))
-        }
-        return showAllModels ? filteredModels : Array(filteredModels.prefix(10))
+    private var visibleModelGroups: [GatewayModelProviderGroup] {
+        Dictionary(grouping: filteredModels, by: \.providerID)
+            .map { providerID, models in
+                let visible = showAllModels || !normalizedModelQuery.isEmpty
+                    ? models
+                    : Array(models.prefix(4))
+                return GatewayModelProviderGroup(
+                    id: providerID,
+                    totalCount: models.count,
+                    models: visible
+                )
+            }
+            .sorted {
+                let lhsOrder = gatewayModelProviderSortOrder($0.id)
+                let rhsOrder = gatewayModelProviderSortOrder($1.id)
+                if lhsOrder != rhsOrder { return lhsOrder < rhsOrder }
+                return gatewayModelProviderTitle($0.id)
+                    .localizedStandardCompare(gatewayModelProviderTitle($1.id)) == .orderedAscending
+            }
+    }
+
+    private var hasCollapsedModelOverflow: Bool {
+        Dictionary(grouping: filteredModels, by: \.providerID)
+            .values
+            .contains { $0.count > 4 }
     }
 
     private var normalizedModelQuery: String {
@@ -455,20 +561,6 @@ struct SubscriptionGatewayOverviewView: View {
         )
     }
 
-    private func modelProviderID(_ entry: CLIProxyModelCatalogEntry) -> String {
-        if entry.protocols == [.anthropic] { return "claude" }
-        if entry.protocols == [.gemini] { return "gemini" }
-        let model = entry.model
-        let hint = [model.ownedBy, model.type, model.id]
-            .compactMap { $0 }
-            .joined(separator: " ")
-            .lowercased()
-        if hint.contains("anthropic") || hint.contains("claude") { return "claude" }
-        if hint.contains("gemini") || hint.contains("google") { return "gemini" }
-        if hint.contains("openai") || hint.contains("gpt") || hint.contains("codex") { return "codex" }
-        return "cliproxyapi"
-    }
-
     private func protocolNames(_ protocols: Set<CLIProxyModelProtocol>) -> String {
         protocols.sorted { $0.sortOrder < $1.sortOrder }.map(\.title).joined(separator: " · ")
     }
@@ -488,5 +580,99 @@ struct SubscriptionGatewayOverviewView: View {
             "\(access) · port \(runtime.settings.normalized.port)",
             "\(access) · 端口 \(runtime.settings.normalized.port)"
         )
+    }
+}
+
+private struct GatewayModelDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let entry: CLIProxyModelCatalogEntry
+
+    private var sortedProtocols: [CLIProxyModelProtocol] {
+        entry.protocols.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 13) {
+                GatewayProviderIcon(providerID: entry.providerID, size: 42)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.model.displayName?.nilIfBlank ?? entry.model.id)
+                        .font(.title3.weight(.semibold))
+                    Text(gatewayModelProviderTitle(entry.providerID))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L("Close", "关闭"))
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .foregroundStyle(Color.accentColor)
+                        Text(L(
+                            "CPA can expose one logical model under different route IDs. Choose the ID below that matches the API format used by your client.",
+                            "CPA 可能会为同一个逻辑模型提供不同的路由 ID。请按客户端实际使用的 API 格式选择下方对应 ID。"
+                        ))
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.callout)
+                    .padding(13)
+                    .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 11))
+
+                    GatewayCopyField(
+                        label: L("Canonical model ID", "规范模型 ID"),
+                        value: entry.model.id
+                    )
+
+                    ForEach(sortedProtocols) { modelProtocol in
+                        GatewayCard(padding: 14) {
+                            VStack(alignment: .leading, spacing: 11) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "arrow.triangle.branch")
+                                        .foregroundStyle(Color.accentColor)
+                                    Text(modelProtocol.title).font(.headline)
+                                    Spacer()
+                                    GatewayStatusPill(
+                                        text: L("Available", "可用"),
+                                        color: .green,
+                                        systemImage: "checkmark.circle.fill"
+                                    )
+                                }
+                                Text(gatewayModelAPIDetail(modelProtocol))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                let models = entry.models(for: modelProtocol)
+                                ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
+                                    GatewayCopyField(
+                                        label: models.count == 1
+                                            ? L("Model ID for this API", "该 API 使用的模型 ID")
+                                            : L("Model ID \(index + 1)", "模型 ID \(index + 1)"),
+                                        value: model.id,
+                                        wraps: true
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+            }
+        }
+        .frame(minWidth: 560, idealWidth: 640, maxWidth: 700,
+               minHeight: 460, idealHeight: 570, maxHeight: 680)
     }
 }

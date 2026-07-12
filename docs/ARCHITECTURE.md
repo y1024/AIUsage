@@ -2,7 +2,7 @@
 
 ## Overview
 
-AIUsage is a macOS-native SwiftUI application that monitors AI subscription quotas across multiple providers, with an integrated Claude Code proxy for using third-party models. The codebase consists of two main modules: the **AIUsage app** (SwiftUI frontend + state management) and the **QuotaBackend** SwiftPM package (provider engines, normalizers, proxy runtime).
+AIUsage is a macOS-native SwiftUI application that monitors AI subscription quotas across multiple providers, runs four native proxy tracks, and can manage the official CLIProxyAPI binary as a separately updatable CPA Gateway sidecar. The codebase consists of two main modules: the **AIUsage app** (SwiftUI frontend + state management, proxy and CPA lifecycle) and the **QuotaBackend** SwiftPM package (provider engines, normalizers, proxy runtime).
 
 ## Directory Structure
 
@@ -13,6 +13,7 @@ AIUsage/
 │   ├── AppState.swift            # Thin facade: UI navigation + coordinator references
 │   ├── AppSettings.swift         # UserDefaults-backed preferences (ObservableObject)
 │   ├── AccountStore.swift        # Account registry & credential management
+│   ├── CLIProxyGatewayModels.swift # CPA settings, auth, model catalog and per-API route identities
 │   ├── ProviderModels.swift      # App-side ProviderData, alerts, etc.
 │   ├── ProxyConfiguration.swift  # Proxy node config model (legacy, kept for compat) + NodeType / ProxyNodeFamily
 │   └── NodeProfile.swift         # File-based node profile (_metadata + full settings.json)
@@ -21,6 +22,11 @@ AIUsage/
 │   ├── SecureAccountVault.swift  # Account registry; folded into AccountCredentialStore's single keychain item (one-time migration)
 │   ├── SystemProxyDetector.swift # Detects macOS system proxy (Codex no_proxy fix)
 │   ├── CodexNoProxyFixer.swift   # Writes/removes managed no_proxy block in ~/.codex/.env
+│   ├── CLIProxyBinaryStore.swift # Versioned official CPA install, validation, activation and rollback
+│   ├── CLIProxyConfigStore.swift # Surgical config merge that preserves CPA/user-owned fields
+│   ├── CLIProxyManagementClient.swift # Typed loopback Management API and public model transport
+│   ├── CLIProxyRuntimeController.swift # Sidecar lifecycle, health, LAN addresses and batched logs
+│   ├── CLIProxyReleaseClient.swift # Official release discovery and asset selection
 │   ├── ProviderAuthManager.swift # Auth flow orchestration (slim router)
 │   └── ProviderAuth/
 │       ├── ProviderAuthTypes.swift
@@ -40,6 +46,7 @@ AIUsage/
 │   ├── ProxyViewModel.swift              # Proxy node lifecycle (dual track: Claude + Codex) & process management
 │   ├── CodexConfigManager.swift          # ~/.codex/config.toml surgical merge + backup/restore
 │   ├── NodeProfileStore.swift            # File-based profile CRUD (~/.config/aiusage/profiles/)
+│   ├── CLIProxyGatewayManager.swift       # CPA install/update, accounts, model catalog and proxy distribution
 │   └── ClaudeSettingsManager.swift       # ~/.claude/settings.json full write + backup/restore
 └── Views/
     ├── ContentView.swift           # NavigationSplitView shell; routes AppSection → detail view
@@ -47,6 +54,11 @@ AIUsage/
     ├── DashboardView.swift         # Main dashboard
     ├── ProviderCard.swift          # Rich quota card UI
     ├── ProvidersView.swift         # Subscriptions (.accounts) + API Providers (.apiProviders) — split of legacy "Providers"
+    ├── SubscriptionGatewayView.swift # CPA shell and overview/accounts/connections/settings navigation
+    ├── SubscriptionGatewayOverviewView.swift # Runtime summary and deduplicated live model catalog
+    ├── SubscriptionGatewayAccountsView.swift # OAuth/import/sync account pool workflows
+    ├── SubscriptionGatewayConnectionsView.swift # Managed app targets and local API setup details
+    ├── SubscriptionGatewaySettingsView.swift # Network, routing, plugins, versions and diagnostics
     ├── CallAnalyticsView.swift     # "Call Analytics" entry (proxy request inspection)
     ├── StatsHubView.swift          # "Usage Stats" entry (thin wrapper over ProxyStatsView)
     ├── ProxyManagementView.swift   # Proxy node list (family-filtered: .claude / .codex) + gesture drag-to-reorder
@@ -112,6 +124,8 @@ graph TD
     AppState --> AccountStore
     AppState --> RefreshCoordinator["ProviderRefreshCoordinator"]
     AppState --> ActivationManager["ProviderActivationManager"]
+    GatewayManager["CLIProxyGatewayManager"] --> GatewayRuntime["CLIProxyRuntimeController"]
+    GatewayManager --> AccountStore
 
     RefreshCoordinator --> AccountStore
     RefreshCoordinator --> AppSettings
@@ -127,8 +141,10 @@ graph TD
 | **AccountStore** | Account registry, credential lifecycle, normalization/dedup, Keychain persistence |
 | **ProviderRefreshCoordinator** | Refresh timers, `ProviderEngine` orchestration, local/remote fetch, data merging |
 | **ProviderActivationManager** | CLI active account detection (Codex/Gemini), auth file I/O |
+| **CLIProxyGatewayManager** | CPA release lifecycle, account-pool operations, canonical model catalog, provider plugin management and distribution into existing proxy tracks |
+| **CLIProxyRuntimeController** | CPA process/config/secret lifecycle, loopback health checks, optional LAN addresses and throttled diagnostic logs |
 
-All singletons forward `objectWillChange` to `AppState`, so views observing `@EnvironmentObject var appState` refresh automatically.
+The core provider singletons forward `objectWillChange` to `AppState`. CPA views observe `CLIProxyGatewayManager.shared` and `CLIProxyRuntimeController.shared` directly so frequent runtime/model updates do not invalidate the entire app shell.
 
 ## Data Flow: Provider Refresh
 
@@ -170,6 +186,7 @@ the two places.
 |------------------------|---------------------------|-------------|---------|
 | `.dashboard`            | Dashboard / 仪表盘          | `DashboardView` | ✅ always |
 | `.providerAccounts`     | Subscriptions / 订阅账号     | `ProvidersView(category: .accounts)` | hideable |
+| `.subscriptionGateway`  | CPA Gateway / CPA 网关       | `SubscriptionGatewayView` | hideable |
 | `.apiProviders`         | API Providers / API 提供商   | `ProvidersView(category: .apiProviders)` | hideable |
 | `.codexProxyManagement` | Codex Proxy / Codex 代理     | `CodexProxyManagementView` | hideable |
 | `.opencodeManagement`   | OpenCode Proxy / OpenCode 代理 | `OpenCodeManagementView` | hideable |
@@ -188,6 +205,22 @@ the two places.
   `AppSettings.hiddenSidebarSections` (UserDefaults). Hiding the current section falls back to Dashboard.
 - The macOS **menu-bar** surface (`MenuBarView`, status item) is a separate entry point that reuses the
   same `AppState` data and can deep-link back into these sections via `AppState.presentMainWindow(section:)`.
+
+## CPA Gateway Subsystem (v0.14+)
+
+Detailed lifecycle, security, account synchronization, model identity and UI decisions live in [CLIPROXYAPI_INTEGRATION_DESIGN.md](CLIPROXYAPI_INTEGRATION_DESIGN.md).
+
+CPA is a managed upstream gateway, not a replacement for the Codex, Claude Code, OpenCode or Claude Science proxy tracks. AIUsage installs signed/ad-hoc-validated official release assets into versioned directories, keeps the active version behind a `current` symlink, writes only owned config paths, and can promote or roll back CPA without an AIUsage update.
+
+The live model catalog intentionally separates three concepts:
+
+- **logical model** — the canonical row shown once in Overview;
+- **vendor brand** — resolved from model metadata/identity, never from the API format used to reach it;
+- **route ID** — the exact OpenAI, Anthropic or Gemini identifier shown in the model detail sheet.
+
+Known CPA compatibility aliases are collapsed into one logical entry while every protocol-specific route ID remains available. Account candidate discovery, compatibility checks and credential-file conversion run outside SwiftUI rendering; published snapshots are indexed in memory. CPA stdout/stderr is redacted off the main actor and published in 200 ms batches, removing the two high-frequency render invalidation paths that previously delayed top-level tab selection. Explicit full account reconciliation remains an asynchronous management operation rather than a render-time task.
+
+LAN mode binds the CPA data listener to all interfaces only after explicit opt-in. `remote-management.allow-remote` remains disabled, the management key is separate and never shown, and AIUsage itself always calls management and health endpoints through loopback.
 
 ## Proxy Subsystem
 
@@ -238,6 +271,8 @@ Claude Code / Codex 的用量统计、计费、缓存和归档口径见 [USAGE_A
 | `~/.config/opencode/opencode.json` 或 `opencode.jsonc` | OpenCode configuration; managed provider entries injected on activation. `$XDG_CONFIG_HOME` 优先；存在 `.jsonc` 时优先接管 `.jsonc`（JSONC 经 `JSONCSanitizer` 容错解析） |
 | `~/.config/opencode/opencode.json[c].aiusage.bak` | Backup of the OpenCode config before takeover (verbatim copy preserves comments/formatting; restored on deactivation) |
 | `~/.codex/.env` | Managed `no_proxy` block (loopback only) written when a system proxy is detected; removed on deactivation |
+| `~/Library/Application Support/AIUsage/CLIProxyAPI/` | CPA versioned binaries, `current` symlink, preserved `config.yaml`, auth directory, stable plugin data, settings and account-sync manifest |
+| **Keychain** (`CLIProxySecretStore`) | Separate CPA client and management keys; management key is never displayed or reused as a client credential |
 | `~/.codex/sessions/**/*.jsonl`, `~/.codex/archived_sessions/**/*.jsonl` | Codex non-proxy session logs (read-only token source for CodexCostProvider; overridable via `$CODEX_HOME`) |
 | `~/Library/Caches/AIUsage/codex-cost-file-cache-v*.json` | CodexCostFileScanCache — per-file scan results, keyed on size + mtime so reopened sessions skip re-parsing |
 | `~/.config/aiusage/usage-archive/codex-non-proxy-usage-v*.json` | CodexNonProxyUsageArchiveStore — frozen per-day non-proxy token totals; today is recomputed, previous days are immutable |
@@ -291,7 +326,8 @@ version is found. Clicking it runs the standard Sparkle flow (release notes → 
 
 Single GitHub Actions workflow (`.github/workflows/release.yml`):
 - **Trigger**: push tag `v*.*.*` or manual dispatch
-- **Steps**: checkout → validate version consistency (Info.plist + project.pbxproj + tag) → SPM resolve → build release → sign with Sparkle → upload DMG/ZIP → publish GitHub Release → update appcast.xml
+- **Regression gates**: QuotaBackend tests, Claude proxy regression, Claude Science auth regression, and the deterministic offline CPA updater/runtime regression
+- **Steps**: checkout → validate version consistency (Info.plist + project.pbxproj + tag) → SPM resolve → regression gates → build universal release → sign with Sparkle → upload DMG/ZIP → publish GitHub Release → update appcast.xml
 
 **Version must match in three places**: `Info.plist` (CFBundleShortVersionString + CFBundleVersion), `project.pbxproj` (MARKETING_VERSION), and Git tag.
 

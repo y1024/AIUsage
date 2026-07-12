@@ -441,9 +441,9 @@ nonisolated enum CLIProxyModelProtocol: String, Codable, CaseIterable, Hashable,
 
     var title: String {
         switch self {
-        case .openAI: "OpenAI"
-        case .anthropic: "Anthropic"
-        case .gemini: "Gemini"
+        case .openAI: "OpenAI API"
+        case .anthropic: "Anthropic API"
+        case .gemini: "Gemini API"
         }
     }
 
@@ -458,15 +458,257 @@ nonisolated enum CLIProxyModelProtocol: String, Codable, CaseIterable, Hashable,
 
 nonisolated struct CLIProxyModelCatalogEntry: Identifiable, Equatable, Sendable {
     let model: CLIProxyModel
-    let protocols: Set<CLIProxyModelProtocol>
+    private let modelsByProtocol: [CLIProxyModelProtocol: [CLIProxyModel]]
 
     var id: String { model.id }
+    var protocols: Set<CLIProxyModelProtocol> { Set(modelsByProtocol.keys) }
+    var providerID: String { CLIProxyModelBrandResolver.providerID(for: model) }
+    var routeIDs: [CLIProxyModelProtocol: [String]] {
+        modelsByProtocol.mapValues { $0.map(\.id) }
+    }
+
+    init(model: CLIProxyModel, protocols: Set<CLIProxyModelProtocol>) {
+        self.model = model
+        self.modelsByProtocol = Dictionary(
+            uniqueKeysWithValues: protocols.map { ($0, [model]) }
+        )
+    }
+
+    init(
+        model: CLIProxyModel,
+        modelsByProtocol: [CLIProxyModelProtocol: [CLIProxyModel]]
+    ) {
+        self.model = model
+        self.modelsByProtocol = modelsByProtocol
+    }
+
+    func models(for modelProtocol: CLIProxyModelProtocol) -> [CLIProxyModel] {
+        modelsByProtocol[modelProtocol] ?? []
+    }
+
+    func routeID(for modelProtocol: CLIProxyModelProtocol) -> String? {
+        models(for: modelProtocol).first?.id
+    }
 }
 
 nonisolated struct CLIProxyModelCatalogSnapshot: Equatable, Sendable {
     let openAIModels: [CLIProxyModel]
     let entries: [CLIProxyModelCatalogEntry]
     let unavailableProtocols: Set<CLIProxyModelProtocol>
+}
+
+/// Converts protocol-specific route IDs into one stable model identity.
+///
+/// CLIProxyAPI deliberately rewrites non-Claude model IDs in its Anthropic
+/// `/v1/models` response. The transformed ID is a client-facing route alias,
+/// not a distinct model. Keep the exact alias on the route while using the
+/// decoded value to merge the catalog.
+nonisolated enum CLIProxyModelIdentity {
+    static let anthropicCompatibilityPrefix = "claude-fable-5-dd-"
+
+    static func canonicalID(
+        for routeID: String,
+        protocol modelProtocol: CLIProxyModelProtocol
+    ) -> String {
+        let trimmed = routeID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard modelProtocol == .anthropic else {
+            if modelProtocol == .gemini, trimmed.hasPrefix("models/") {
+                return String(trimmed.dropFirst("models/".count))
+            }
+            return trimmed
+        }
+
+        let split = splitThinkingSuffix(trimmed)
+        guard split.base.hasPrefix(anthropicCompatibilityPrefix) else { return trimmed }
+        let payload = String(split.base.dropFirst(anthropicCompatibilityPrefix.count))
+        guard !payload.isEmpty else { return trimmed }
+
+        let decoded = reverseUnicodeScalars(payload)
+        return split.suffix.map { "\(decoded)(\($0))" } ?? decoded
+    }
+
+    static func normalizedKey(for canonicalID: String) -> String {
+        canonicalID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func splitThinkingSuffix(_ modelID: String) -> (base: String, suffix: String?) {
+        guard modelID.hasSuffix(")"),
+              let opening = modelID.lastIndex(of: "(") else {
+            return (modelID, nil)
+        }
+        let suffixStart = modelID.index(after: opening)
+        let suffixEnd = modelID.index(before: modelID.endIndex)
+        return (String(modelID[..<opening]), String(modelID[suffixStart..<suffixEnd]))
+    }
+
+    private static func reverseUnicodeScalars(_ value: String) -> String {
+        String(String.UnicodeScalarView(value.unicodeScalars.reversed()))
+    }
+}
+
+/// Resolves a model vendor for brand presentation without consulting the API
+/// format used to reach it. A compatibility route must never change the logo.
+nonisolated enum CLIProxyModelBrandResolver {
+    static func providerID(for model: CLIProxyModel) -> String {
+        if let provider = recognizedProvider(in: model.ownedBy) { return provider }
+        if let provider = recognizedProvider(in: model.id) { return provider }
+        if let provider = recognizedProvider(in: model.displayName) { return provider }
+        return "cliproxyapi"
+    }
+
+    private static func recognizedProvider(in value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return nil }
+
+        if normalized.contains("openai")
+            || normalized.contains("chatgpt")
+            || normalized.contains("gpt-")
+            || normalized.hasPrefix("gpt ")
+            || normalized.contains("codex")
+            || normalized.hasPrefix("o1")
+            || normalized.hasPrefix("o3")
+            || normalized.hasPrefix("o4")
+            || normalized.contains("dall-e") {
+            return "openai"
+        }
+        if normalized.contains("anthropic") || normalized.contains("claude") {
+            return "claude"
+        }
+        if normalized.contains("google")
+            || normalized.contains("gemini")
+            || normalized.contains("imagen")
+            || normalized.hasPrefix("veo") {
+            return "gemini"
+        }
+        if normalized == "xai"
+            || normalized == "x.ai"
+            || normalized.contains("x.ai")
+            || normalized.contains("grok") {
+            return "xai"
+        }
+        if normalized.contains("minimax") { return "minimax" }
+        if normalized.contains("kimi") || normalized.contains("moonshot") { return "kimi" }
+        return nil
+    }
+}
+
+/// Pure catalog construction used by both the live client and offline
+/// regression fixtures. `openAIModels` is intentionally returned byte-for-byte
+/// equivalent at the value level because it remains the managed distribution
+/// source for Responses-compatible clients.
+nonisolated enum CLIProxyModelCatalogBuilder {
+    private struct Accumulator {
+        var model: CLIProxyModel
+        var modelsByProtocol: [CLIProxyModelProtocol: [CLIProxyModel]]
+    }
+
+    static func build(
+        openAIModels: [CLIProxyModel],
+        anthropicModels: [CLIProxyModel]?,
+        geminiModels: [CLIProxyModel]?
+    ) -> CLIProxyModelCatalogSnapshot {
+        var entries: [String: Accumulator] = [:]
+        merge(openAIModels, protocol: .openAI, into: &entries)
+        if let anthropicModels {
+            merge(anthropicModels, protocol: .anthropic, into: &entries)
+        }
+        if let geminiModels {
+            merge(geminiModels, protocol: .gemini, into: &entries)
+        }
+
+        var unavailableProtocols = Set<CLIProxyModelProtocol>()
+        if anthropicModels == nil { unavailableProtocols.insert(.anthropic) }
+        if geminiModels == nil { unavailableProtocols.insert(.gemini) }
+
+        let catalogEntries = entries.values.map { accumulator in
+            CLIProxyModelCatalogEntry(
+                model: accumulator.model,
+                modelsByProtocol: accumulator.modelsByProtocol.mapValues { models in
+                    models.sorted {
+                        $0.id.localizedStandardCompare($1.id) == .orderedAscending
+                    }
+                }
+            )
+        }.sorted {
+            $0.model.id.localizedStandardCompare($1.model.id) == .orderedAscending
+        }
+
+        return CLIProxyModelCatalogSnapshot(
+            openAIModels: openAIModels,
+            entries: catalogEntries,
+            unavailableProtocols: unavailableProtocols
+        )
+    }
+
+    private static func merge(
+        _ models: [CLIProxyModel],
+        protocol modelProtocol: CLIProxyModelProtocol,
+        into entries: inout [String: Accumulator]
+    ) {
+        for rawModel in models {
+            let routeID = rawModel.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !routeID.isEmpty else { continue }
+
+            let canonicalID = CLIProxyModelIdentity.canonicalID(
+                for: routeID,
+                protocol: modelProtocol
+            )
+            let key = CLIProxyModelIdentity.normalizedKey(for: canonicalID)
+            guard !key.isEmpty else { continue }
+
+            let canonicalModel = CLIProxyModel(
+                id: canonicalID,
+                displayName: rawModel.displayName,
+                type: rawModel.type,
+                ownedBy: rawModel.ownedBy
+            )
+            let routeModel = CLIProxyModel(
+                id: routeID,
+                displayName: rawModel.displayName,
+                type: rawModel.type,
+                ownedBy: rawModel.ownedBy
+            )
+
+            if var existing = entries[key] {
+                existing.model = preferredModel(existing.model, canonicalModel)
+                var protocolModels = existing.modelsByProtocol[modelProtocol] ?? []
+                mergeRoute(routeModel, into: &protocolModels)
+                existing.modelsByProtocol[modelProtocol] = protocolModels
+                entries[key] = existing
+            } else {
+                entries[key] = Accumulator(
+                    model: canonicalModel,
+                    modelsByProtocol: [modelProtocol: [routeModel]]
+                )
+            }
+        }
+    }
+
+    private static func mergeRoute(_ route: CLIProxyModel, into models: inout [CLIProxyModel]) {
+        if let index = models.firstIndex(where: { $0.id == route.id }) {
+            models[index] = preferredModel(models[index], route)
+        } else {
+            models.append(route)
+        }
+    }
+
+    private static func preferredModel(_ lhs: CLIProxyModel, _ rhs: CLIProxyModel) -> CLIProxyModel {
+        CLIProxyModel(
+            id: lhs.id,
+            displayName: nonBlank(lhs.displayName) ?? nonBlank(rhs.displayName),
+            type: nonBlank(lhs.type) ?? nonBlank(rhs.type),
+            ownedBy: nonBlank(lhs.ownedBy) ?? nonBlank(rhs.ownedBy)
+        )
+    }
+
+    private static func nonBlank(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }
 }
 
 nonisolated struct CLIProxyPluginMetadata: Codable, Equatable, Sendable {

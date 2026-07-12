@@ -33,13 +33,14 @@ git status -sb
 
 ## 本地预检
 
-每次发版前至少跑这五步：
+每次发版前至少跑下面这些检查：
 
 ```bash
 cd QuotaBackend && swift test
 cd ..
 ./scripts/run_claude_proxy_regression.sh
 ./scripts/run_science_auth_proxy_regression.sh
+./scripts/run_cliproxy_updater_regression.sh
 xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release build CODE_SIGNING_ALLOWED=NO
 ./scripts/package-release.sh <version>
 ```
@@ -49,8 +50,15 @@ xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release bui
 - `swift test` 检查后端与包测试
 - `run_claude_proxy_regression.sh` 检查 Claude 代理主链路
 - `run_science_auth_proxy_regression.sh` 检查 Claude Science 的 HTTP、nonce、cookie 兼容与脱敏诊断
+- `run_cliproxy_updater_regression.sh` 离线检查 CPA 资产选择、摘要校验、受限解压、配置保持、版本提升与回滚
 - `xcodebuild ... Release` 提前暴露 Release-only 编译问题
 - `package-release.sh` 提前暴露本地打包问题
+
+CPA 网关相关的大版本或供应链改动还必须在本地增加官方完整资产回归；正式 CI 只跑确定性的离线用例，避免依赖会漂移的上游 latest release：
+
+```bash
+./scripts/run_cliproxy_updater_regression.sh --live
+```
 
 ## 标准发版
 
@@ -264,6 +272,9 @@ cd QuotaBackend && swift test
 cd ..
 ./scripts/run_claude_proxy_regression.sh
 ./scripts/run_science_auth_proxy_regression.sh
+./scripts/run_cliproxy_updater_regression.sh
+# CPA 网关大版本或供应链改动再执行：
+./scripts/run_cliproxy_updater_regression.sh --live
 xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release build CODE_SIGNING_ALLOWED=NO
 ./scripts/package-release.sh <version>
 git add <changed-files>

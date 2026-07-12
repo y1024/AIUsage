@@ -8,7 +8,7 @@
 
 <p align="center">
   Track quotas, costs, and accounts across 10+ AI providers.<br>
-  Built-in proxies for Claude Code, Codex, OpenCode and Claude Science — any OpenAI-compatible model.
+  Four native coding proxies, plus a managed CLIProxyAPI gateway that shares one subscription account pool across apps and API clients.
 </p>
 
 <p align="center">
@@ -43,6 +43,7 @@
 - [Features](#features)
 - [Preview](#preview)
 - [Install](#install)
+- [CPA Gateway](#cpa-gateway)
 - [Proxies](#proxies)
 - [Call Analytics](#call-analytics)
 - [Acknowledgements](#acknowledgements)
@@ -61,6 +62,7 @@
 | **Codex Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
 | **OpenCode Proxy** | Switch OpenCode across upstreams via a managed `opencode.json` block — OpenAI-compatible, Anthropic and Responses protocols, per-node usage attribution, per-model pricing and optional request logging |
 | **Claude Science Proxy** | Launch local Claude Science without a Claude subscription and route its inference to any third-party model; local virtual login and an isolated sandbox, with optional adoption so the double-clicked desktop app is login-free too — never touching your real credentials |
+| **CPA Gateway** | Run the official CLIProxyAPI as a managed local gateway: one OAuth account pool, live model discovery, multi-protocol APIs, optional LAN access, and one-click connections to Codex, Claude Code / Science, and OpenCode |
 | **Global Proxy** | One fixed local endpoint per agent — hot-swap the active upstream node with zero CLI restart, per-node cost attribution, and automatic cross-track port arbitration |
 | **Unified API Providers** | Configure one upstream (Base URL, format, key, model library/pricing) once and distribute it to Codex / Claude / OpenCode at once; linked nodes inherit from the master and sync on change, with per-field local overrides |
 | **Call Analytics** | Count MCP / Skill / tool calls across Claude Code, Codex & OpenCode from local session logs — Top-N rankings, daily trend, and per-app zero-call ("zombie" skill/MCP) detection; read-only, zero instrumentation |
@@ -122,9 +124,26 @@ Download `.dmg` or `.zip` from the [Releases](https://github.com/sylearn/AIUsage
 
 Universal Binary — runs natively on both Apple Silicon and Intel Macs (macOS 14+).
 
+## CPA Gateway
+
+> **New in v0.14.0** · Powered by the official [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) release.
+
+CPA Gateway turns subscription accounts into one managed local API surface. AIUsage downloads, verifies, starts, updates, and can roll back CLIProxyAPI independently, so a CPA update does not require a new AIUsage release.
+
+| Capability | What it does |
+| --- | --- |
+| **Unified account pool** | Add CPA-native OAuth accounts, import auth JSON, configure compatible API-key upstreams, or explicitly copy supported AIUsage accounts into CPA |
+| **Four managed apps** | Connect Codex, OpenCode, Claude Code, and Claude Science through the existing AIUsage proxy tracks without replacing their native capabilities |
+| **Native client APIs** | Copy complete OpenAI Responses / Chat, Anthropic Messages, and Gemini endpoints from setup sheets, with legacy and advanced paths in the supported-route list |
+| **Unified model catalog** | Collapse known CPA protocol aliases into one logical model, show recognized vendor logos, and expose the exact model ID required by each OpenAI, Anthropic, or Gemini client in model details |
+| **Independent updates** | Install, verify, dry-run, promote, and roll back official CPA builds inside AIUsage while preserving runtime data and configuration |
+| **Safe network boundary** | Loopback-only by default; LAN access is explicit, keeps remote management disabled, separates the hidden management key, and makes AIUsage call management only through loopback |
+
+**Quick start:** Open AIUsage → CPA Gateway → install and start CPA → add an account → connect an AIUsage app or copy an endpoint for another client. See the [CPA Gateway architecture](docs/CLIPROXYAPI_INTEGRATION_DESIGN.md) for lifecycle, synchronization, routing, and security details.
+
 ## Proxies
 
-AIUsage ships four independent proxies — for **Claude Code**, **Codex (Codex CLI)**, **OpenCode** and **Claude Science** — each with node management, usage logging and a unified switcher.
+AIUsage ships four independent proxies — for **Claude Code**, **Codex (Codex CLI)**, **OpenCode** and **Claude Science** — each with node management, usage logging and a unified switcher. CPA Gateway can be selected as their shared managed upstream without replacing any native proxy capability.
 
 ### Claude Code Proxy
 
@@ -220,7 +239,9 @@ See which **MCP servers, skills and tools** you actually use. AIUsage parses the
 
 ## Acknowledgements
 
-Inspired by [`CodexBar`](https://github.com/steipete/CodexBar) and [`Quotio`](https://github.com/nguyenphutrong/quotio).
+CPA Gateway runs the official [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI) release as an optional, separately updated local sidecar. CLIProxyAPI remains an independent upstream project under its own license; see [Third-Party Notices](THIRD_PARTY_NOTICES.md).
+
+Product inspiration and implementation references include [`CodexBar`](https://github.com/steipete/CodexBar) and [`Quotio`](https://github.com/nguyenphutrong/quotio).
 
 ## Sponsor
 

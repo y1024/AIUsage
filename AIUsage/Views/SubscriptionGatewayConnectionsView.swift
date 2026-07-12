@@ -66,7 +66,9 @@ struct SubscriptionGatewayConnectionsView: View {
             .padding(.vertical, 22)
         }
         .onAppear {
-            selectedTargets = actualTargets
+            if selectedTargets != actualTargets {
+                selectedTargets = actualTargets
+            }
         }
         .sheet(item: $selectedProtocol) { endpoint in
             GatewayEndpointDetailSheet(
@@ -76,7 +78,7 @@ struct SubscriptionGatewayConnectionsView: View {
                 modelOptions: endpoint.requiresModel
                     ? manager.modelCatalog
                         .filter { $0.protocols.contains(.gemini) }
-                        .map(\.model)
+                        .flatMap { $0.models(for: .gemini) }
                     : []
             )
         }

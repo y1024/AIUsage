@@ -8,7 +8,7 @@
 
 <p align="center">
   额度、费用、多账号、代理切换，尽在掌控。<br>
-  内置 Claude Code、Codex、OpenCode、Claude Science 四代理，接入任意 OpenAI 兼容模型。
+  四套原生编程代理，加上一套受管 CLIProxyAPI 网关：一个订阅账号池，同时服务多个应用与 API 客户端。
 </p>
 
 <p align="center">
@@ -43,6 +43,7 @@
 - [功能](#功能)
 - [界面预览](#界面预览)
 - [安装](#安装)
+- [CPA 网关](#cpa-网关)
 - [代理](#代理)
 - [调用分析](#调用分析)
 - [致谢](#致谢)
@@ -61,6 +62,7 @@
 | **Codex 代理** | 把 Codex CLI 指向任意 OpenAI 兼容上游；订阅账号与 API 节点统一切换器，外科式合并 `config.toml` |
 | **OpenCode 代理** | 通过受管 `opencode.json` 块切换 OpenCode 上游——支持 OpenAI 兼容、Anthropic、Responses 三种协议，节点级用量归因、每模型定价、可选请求日志 |
 | **Claude Science 代理** | 免订阅启动本地 Claude Science，推理经代理走任意第三方模型；本地虚拟登录、独立沙箱，可选接管让双击桌面 app 也免登录，全程不碰真实凭证 |
+| **CPA 网关** | 把官方 CLIProxyAPI 作为受管本地网关运行：统一 OAuth 账号池、实时模型目录、多协议 API、可选局域网访问，并可一键接入 Codex、Claude Code / Science 与 OpenCode |
 | **全局代理** | 每套代理一个固定本地入口——运行时热切换激活上游节点、CLI 零重启，按节点归因费用，跨轨端口自动仲裁 |
 | **统一 API 提供商** | 一份上游配置（Base URL、接口格式、Key、模型库/定价）配好一次，即可一键分发到 Codex / Claude / OpenCode；链接节点继承主配置并随其变更同步，支持逐字段局部覆盖 |
 | **调用分析** | 解析 Claude Code、Codex、OpenCode 的本地会话日志，统计 MCP / 技能 / 工具调用次数 —— Top-N 排行、每日趋势、按应用的零调用（「僵尸技能/MCP」）检测；只读、零埋点 |
@@ -122,9 +124,26 @@
 
 Universal Binary —— Apple Silicon 与 Intel 芯片 Mac 均原生运行（macOS 14+）。
 
+## CPA 网关
+
+> **v0.14.0 新增** · 由官方 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 发布版提供网关能力。
+
+CPA 网关把订阅账号汇聚成一套受管本地 API。AIUsage 可以独立下载、校验、启动、更新和回滚 CLIProxyAPI，因此更新 CPA 不需要等待 AIUsage 发布新版本。
+
+| 能力 | 说明 |
+| --- | --- |
+| **统一账号池** | 添加 CPA 原生 OAuth 账号、导入 auth JSON、配置兼容 API Key 上游，或将支持的 AIUsage 账号显式复制到 CPA |
+| **托管四个应用** | 通过现有代理轨接入 Codex、OpenCode、Claude Code 与 Claude Science，完整保留各代理原有能力 |
+| **原生客户端 API** | 在接入详情中完整查看并复制 OpenAI Responses / Chat、Anthropic Messages 与 Gemini 接口，并在支持路由列表中查看 legacy 与高级路径 |
+| **统一模型目录** | 将已知 CPA 协议别名归并为一个逻辑模型，显示可识别厂商 Logo，并在模型详情中提供 OpenAI、Anthropic、Gemini 客户端各自需要的准确模型 ID |
+| **独立更新** | 在 AIUsage 内安装、校验、试运行、提升或回滚官方 CPA 版本，同时保留运行数据与配置 |
+| **安全网络边界** | 默认只允许本机访问；局域网访问需主动开启，远程管理策略保持关闭，管理密钥独立且不展示，AIUsage 只通过 loopback 调用管理接口 |
+
+**快速开始：** 打开 AIUsage → CPA 网关 → 安装并启动 CPA → 添加账号 → 接入 AIUsage 应用，或为其他客户端复制接口。生命周期、同步、路由与安全细节见 [CPA 网关架构文档](docs/CLIPROXYAPI_INTEGRATION_DESIGN.md)。
+
 ## 代理
 
-AIUsage 内置四套相互独立的代理 —— 分别面向 **Claude Code**、**Codex（Codex CLI）**、**OpenCode** 与 **Claude Science**，各自支持节点管理、用量记录与统一切换器。
+AIUsage 内置四套相互独立的代理 —— 分别面向 **Claude Code**、**Codex（Codex CLI）**、**OpenCode** 与 **Claude Science**，各自支持节点管理、用量记录与统一切换器。CPA 网关可以作为它们共同消费的受管上游，不会替代任何原生代理能力。
 
 ### Claude Code 代理
 
@@ -220,7 +239,9 @@ Claude Code 与 Codex 的用量、计费、缓存和归档细节见 [docs/USAGE_
 
 ## 致谢
 
-灵感参考自 [`CodexBar`](https://github.com/steipete/CodexBar) 与 [`Quotio`](https://github.com/nguyenphutrong/quotio)。
+CPA 网关会按需运行官方 [`router-for-me/CLIProxyAPI`](https://github.com/router-for-me/CLIProxyAPI) 发布版，并可独立更新。CLIProxyAPI 仍是采用其自身许可证的独立上游项目，详情见[第三方声明](THIRD_PARTY_NOTICES.md)。
+
+产品思路与实现参考包括 [`CodexBar`](https://github.com/steipete/CodexBar) 与 [`Quotio`](https://github.com/nguyenphutrong/quotio)。
 
 ## 赞助商
 

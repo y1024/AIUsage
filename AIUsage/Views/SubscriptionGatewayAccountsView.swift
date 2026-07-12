@@ -68,6 +68,8 @@ struct SubscriptionGatewayAccountsView: View {
     @State private var pendingForceSync: CLIProxyAccountSyncCandidate?
 
     var body: some View {
+        let groups = filteredGroups
+        let linkedCandidates = linkedCandidateByAuthFileName
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 errorBanners
@@ -86,11 +88,11 @@ struct SubscriptionGatewayAccountsView: View {
 
                 if !runtime.state.isRunning {
                     serviceStoppedState
-                } else if filteredGroups.isEmpty {
+                } else if groups.isEmpty {
                     emptyState
                 } else {
-                    ForEach(filteredGroups) { group in
-                        providerGroup(group)
+                    ForEach(groups) { group in
+                        providerGroup(group, linkedCandidates: linkedCandidates)
                     }
                 }
             }
@@ -240,7 +242,10 @@ struct SubscriptionGatewayAccountsView: View {
         }
     }
 
-    private func providerGroup(_ group: GatewayAccountGroup) -> some View {
+    private func providerGroup(
+        _ group: GatewayAccountGroup,
+        linkedCandidates: [String: CLIProxyAccountSyncCandidate]
+    ) -> some View {
         GatewayCard(padding: 0) {
             VStack(spacing: 0) {
                 HStack(spacing: 11) {
@@ -261,7 +266,11 @@ struct SubscriptionGatewayAccountsView: View {
 
                 ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
                     switch item {
-                    case .auth(let file): authRow(file)
+                    case .auth(let file):
+                        authRow(
+                            file,
+                            linkedCandidate: linkedCandidates[file.name.lowercased()]
+                        )
                     case .candidate(let candidate): candidateRow(candidate)
                     }
                     if index < group.items.count - 1 {
@@ -272,8 +281,10 @@ struct SubscriptionGatewayAccountsView: View {
         }
     }
 
-    private func authRow(_ file: CLIProxyAuthFile) -> some View {
-        let linkedCandidate = candidate(for: file)
+    private func authRow(
+        _ file: CLIProxyAuthFile,
+        linkedCandidate: CLIProxyAccountSyncCandidate?
+    ) -> some View {
         return HStack(spacing: 13) {
             GatewayProviderIcon(providerID: file.gatewayProviderID, size: 42)
             VStack(alignment: .leading, spacing: 4) {
@@ -582,15 +593,24 @@ struct SubscriptionGatewayAccountsView: View {
             .sorted { providerDisplayName($0.providerID).localizedStandardCompare(providerDisplayName($1.providerID)) == .orderedAscending }
     }
 
-    private func candidate(for file: CLIProxyAuthFile) -> CLIProxyAccountSyncCandidate? {
-        if let record = manager.syncRecords.first(where: {
-            $0.authFileName.caseInsensitiveCompare(file.name) == .orderedSame
-        }) {
-            return manager.syncCandidates.first { candidate in
-                candidate.providerId == record.providerId && candidate.credentialId == record.credentialId
+    private var linkedCandidateByAuthFileName: [String: CLIProxyAccountSyncCandidate] {
+        let candidatesByIdentity = manager.syncCandidates.reduce(
+            into: [String: CLIProxyAccountSyncCandidate]()
+        ) { result, candidate in
+            result["\(candidate.providerId.lowercased()):\(candidate.credentialId.lowercased())"] = candidate
+        }
+        var result: [String: CLIProxyAccountSyncCandidate] = [:]
+        for record in manager.syncRecords {
+            let identity = "\(record.providerId.lowercased()):\(record.credentialId.lowercased())"
+            if let candidate = candidatesByIdentity[identity] {
+                result[record.authFileName.lowercased()] = candidate
             }
         }
-        return manager.syncCandidates.first { manager.authFileName(for: $0) == file.name }
+        for candidate in manager.syncCandidates {
+            let fileName = manager.authFileName(for: candidate).lowercased()
+            if result[fileName] == nil { result[fileName] = candidate }
+        }
+        return result
     }
 
     private var readyCount: Int {
