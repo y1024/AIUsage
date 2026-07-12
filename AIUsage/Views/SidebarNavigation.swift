@@ -41,6 +41,9 @@ enum SidebarNavigation {
         SidebarNavItem(section: .providerAccounts, titleEn: "Subscriptions", titleZh: "订阅账号",
                        localizationKey: "nav.provider_accounts", icon: .system("person.2.crop.square.stack.fill"),
                        tint: .indigo, isHideable: true),
+        SidebarNavItem(section: .subscriptionGateway, titleEn: "Subscription Gateway", titleZh: "订阅网关",
+                       localizationKey: "nav.subscription_gateway", icon: .system("point.3.connected.trianglepath.dotted"),
+                       tint: .purple, isHideable: true),
         SidebarNavItem(section: .apiProviders, titleEn: "API Providers", titleZh: "API 提供商",
                        localizationKey: "nav.api_providers", icon: .system("shippingbox.fill"),
                        tint: .teal, isHideable: true)

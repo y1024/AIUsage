@@ -14,6 +14,7 @@ struct ProviderCard: View {
     @EnvironmentObject var activationManager: ProviderActivationManager
     @EnvironmentObject var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var cpaGateway = CLIProxyGatewayManager.shared
     @State private var isHovered = false
     @State private var showingDetail = false
     @State private var showingNoteEditor = false
@@ -74,6 +75,10 @@ struct ProviderCard: View {
 
                         if shouldShowStatusBadge {
                             statusBadge
+                        }
+
+                        if let candidate = cpaSyncCandidate, cpaGateway.isSynced(candidate) {
+                            badge(text: "CPA", tint: .indigo)
                         }
                     }
                 }
@@ -228,6 +233,28 @@ struct ProviderCard: View {
                 }
             }
 
+            if let candidate = cpaSyncCandidate {
+                Divider()
+                if cpaGateway.runtime.state.isRunning, case .compatible = candidate.compatibility {
+                    Button {
+                        Task { await cpaGateway.syncAccount(candidate) }
+                    } label: {
+                        Label(
+                            cpaGateway.isSynced(candidate)
+                                ? L("Resync to CPA", "重新同步到 CPA")
+                                : L("Sync Copy to CPA", "同步副本到 CPA"),
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                } else {
+                    Button {
+                        appState.presentMainWindow(section: .subscriptionGateway)
+                    } label: {
+                        Label(L("Open CPA Gateway", "打开 CPA 网关"), systemImage: "point.3.connected.trianglepath.dotted")
+                    }
+                }
+            }
+
             if let account = footerAccountLabel {
                 Button {
                     copyToPasteboard(account)
@@ -346,6 +373,16 @@ struct ProviderCard: View {
 
     private var canActivateProvider: Bool {
         activationManager.canActivateProvider(provider.providerId) && accountEntry != nil
+    }
+
+    private var cpaSyncCandidate: CLIProxyAccountSyncCandidate? {
+        guard let entry = accountEntry,
+              let credentialID = entry.storedAccount?.credentialId else { return nil }
+        return cpaGateway.syncCandidate(
+            providerId: entry.providerId,
+            label: entry.accountPrimaryLabel,
+            credentialId: credentialID
+        )
     }
 
     private var isActiveProviderAccount: Bool {

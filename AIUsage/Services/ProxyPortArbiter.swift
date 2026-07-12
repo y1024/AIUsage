@@ -37,6 +37,7 @@ enum ProxyPortArbiter {
         ProxyViewModel.shared.runningProxyPortOwners()
             + OpenCodeProxyRuntime.shared.runningPortOwners()
             + GlobalProxyRuntime.all.flatMap { $0.runningPortOwners() }
+            + [CLIProxyRuntimeController.shared.runningPortOwner()].compactMap { $0 }
     }
 
     /// 若 `wantedPorts` 中任一端口已被「其它正在运行的代理」占用，返回首个冲突命中；否则 nil。

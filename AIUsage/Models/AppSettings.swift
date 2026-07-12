@@ -8,6 +8,8 @@ enum AppSection: String, Hashable {
     case dashboard
     /// 订阅账号：监控登录类账号（Claude / Codex / Cursor 等）的订阅额度与用量。
     case providerAccounts
+    /// 订阅网关：管理官方 CLIProxyAPI sidecar、版本更新与多订阅账号池。
+    case subscriptionGateway
     /// API 提供商：统一上游配置，分发到三套代理。
     case apiProviders
     case costTracking

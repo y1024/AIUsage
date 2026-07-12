@@ -186,6 +186,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 恢复本地透传进程（opencode.json 指向本地端口，进程不在则 OpenCode 请求失败）。
         _ = OpenCodeNodeStore.shared
 
+        // CPA 是独立 sidecar：仅在用户开启自动启动且已安装时恢复。运行时会记录受管 PID，
+        // 下次启动只清理路径与参数都严格匹配的孤儿，不会终止未知进程。
+        Task { @MainActor in
+            await CLIProxyGatewayManager.shared.runtime.startIfConfigured()
+        }
+
         if UserDefaults.standard.bool(forKey: DefaultsKey.hideDockIcon) {
             NSApp.setActivationPolicy(.accessory)
         }
@@ -234,6 +240,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // quit / Cmd-Q / Sparkle 更新等路径并不可靠触发（实测不触发），崩溃 / 被强杀更没有任何
     // App 侧钩子能兜底。改由 helper（QuotaServer）自带「父进程死亡看门狗」保证随 App 一起退出，
     // 不留占端口的孤儿——见 QuotaBackend 的 ParentWatchdog；残留孤儿则由下次启动的 reap 兜底。
+
+    func applicationWillTerminate(_ notification: Notification) {
+        CLIProxyGatewayManager.shared.runtime.stopSynchronouslyForTermination()
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard !flag else { return true }
@@ -386,6 +396,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func quit() {
+        CLIProxyGatewayManager.shared.runtime.stopSynchronouslyForTermination()
         NSApplication.shared.terminate(nil)
     }
 }
