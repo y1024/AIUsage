@@ -248,9 +248,10 @@ struct ProviderCard: View {
                     }
                 } else {
                     Button {
+                        CLIProxyGatewayNavigation.shared.showAccounts()
                         appState.presentMainWindow(section: .subscriptionGateway)
                     } label: {
-                        Label(L("Open CPA Gateway", "打开 CPA 网关"), systemImage: "point.3.connected.trianglepath.dotted")
+                        Label(L("Open CPA Accounts", "打开 CPA 账号"), systemImage: "person.2")
                     }
                 }
             }

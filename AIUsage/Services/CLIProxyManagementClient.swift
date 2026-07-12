@@ -3,7 +3,54 @@ import Foundation
 nonisolated struct CLIProxyManagementClient: Sendable {
     private struct FilesResponse: Decodable { let files: [CLIProxyAuthFile] }
     private struct ModelsResponse: Decodable { let models: [CLIProxyModel] }
+    private struct PublicModelsResponse: Decodable { let data: [CLIProxyModel] }
+    private struct GeminiModelsResponse: Decodable {
+        struct Model: Decodable {
+            let name: String
+            let displayName: String?
+        }
+        let models: [Model]
+    }
     private struct APIErrorResponse: Decodable { let error: String? }
+    private struct PluginsResponse: Decodable {
+        let pluginsEnabled: Bool
+        let plugins: [CLIProxyPlugin]
+
+        enum CodingKeys: String, CodingKey {
+            case plugins
+            case pluginsEnabled = "plugins_enabled"
+        }
+    }
+    private struct PluginStoreResponse: Decodable {
+        let pluginsEnabled: Bool
+        let plugins: [CLIProxyPluginStoreEntry]
+
+        enum CodingKeys: String, CodingKey {
+            case plugins
+            case pluginsEnabled = "plugins_enabled"
+        }
+    }
+    private struct PluginInstallResponse: Decodable {
+        let status: String
+        let restartRequired: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case status
+            case restartRequired = "restart_required"
+        }
+    }
+    private struct OpenAICompatResponse: Decodable {
+        let providers: [CLIProxyOpenAICompatibleProvider]
+
+        enum CodingKeys: String, CodingKey {
+            case providers = "openai-compatibility"
+        }
+    }
+    private struct AuthFileFieldsRequest: Encodable {
+        let name: String
+        let note: String
+        let priority: Int
+    }
 
     let baseURL: URL
     let managementKey: String
@@ -13,6 +60,15 @@ nonisolated struct CLIProxyManagementClient: Sendable {
     func listAuthFiles() async throws -> [CLIProxyAuthFile] {
         let response: FilesResponse = try await request(method: "GET", path: "v0/management/auth-files")
         return response.files
+    }
+
+    func downloadAuthFile(name: String) async throws -> Data {
+        try Self.validateAuthFileName(name)
+        return try await requestData(
+            method: "GET",
+            path: "v0/management/auth-files/download",
+            query: [URLQueryItem(name: "name", value: name)]
+        )
     }
 
     func models(forAuthFile name: String) async throws -> [CLIProxyModel] {
@@ -25,12 +81,49 @@ nonisolated struct CLIProxyManagementClient: Sendable {
     }
 
     func availableModels() async throws -> [CLIProxyModel] {
-        var request = URLRequest(url: baseURL.appendingPathComponent("v1/models"), timeoutInterval: 15)
-        request.setValue("Bearer \(clientAPIKey)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        try validate(response: response, data: data)
-        struct List: Decodable { let data: [CLIProxyModel] }
-        return try decode(List.self, from: data).data
+        try await publicModels(
+            path: "v1/models",
+            headers: ["Authorization": "Bearer \(clientAPIKey)"]
+        )
+    }
+
+    /// Returns the three protocol-specific model views exposed by CPA. The
+    /// OpenAI list remains separate because it is the only list that should be
+    /// written into AIUsage's Responses-compatible managed provider.
+    func modelCatalog() async throws -> CLIProxyModelCatalogSnapshot {
+        async let anthropicModels: [CLIProxyModel]? = try? await publicModels(
+            path: "v1/models",
+            headers: [
+                "X-Api-Key": clientAPIKey,
+                "Anthropic-Version": "2023-06-01"
+            ]
+        )
+        async let geminiCatalogModels: [CLIProxyModel]? = try? await geminiModels()
+        let openAIModels = try await availableModels()
+        var entries: [String: CLIProxyModelCatalogEntry] = [:]
+        var unavailable: Set<CLIProxyModelProtocol> = []
+
+        merge(openAIModels, protocol: .openAI, into: &entries)
+
+        if let anthropic = await anthropicModels {
+            merge(anthropic, protocol: .anthropic, into: &entries)
+        } else {
+            unavailable.insert(.anthropic)
+        }
+
+        if let gemini = await geminiCatalogModels {
+            merge(gemini, protocol: .gemini, into: &entries)
+        } else {
+            unavailable.insert(.gemini)
+        }
+
+        return CLIProxyModelCatalogSnapshot(
+            openAIModels: openAIModels,
+            entries: entries.values.sorted {
+                $0.model.id.localizedStandardCompare($1.model.id) == .orderedAscending
+            },
+            unavailableProtocols: unavailable
+        )
     }
 
     func setDisabled(_ disabled: Bool, name: String) async throws {
@@ -45,7 +138,24 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         )
     }
 
+    func patchAuthFileFields(name: String, note: String, priority: Int) async throws {
+        try Self.validateAuthFileName(name)
+        let body = try JSONEncoder().encode(
+            AuthFileFieldsRequest(
+                name: name,
+                note: note.trimmingCharacters(in: .whitespacesAndNewlines),
+                priority: priority
+            )
+        )
+        let _: EmptyResponse = try await request(
+            method: "PATCH",
+            path: "v0/management/auth-files/fields",
+            body: body
+        )
+    }
+
     func deleteAuthFile(name: String) async throws {
+        try Self.validateAuthFileName(name)
         let _: EmptyResponse = try await request(
             method: "DELETE",
             path: "v0/management/auth-files",
@@ -54,10 +164,7 @@ nonisolated struct CLIProxyManagementClient: Sendable {
     }
 
     func uploadAuthFile(data: Data, name: String) async throws {
-        guard name.lowercased().hasSuffix(".json"),
-              name == URL(fileURLWithPath: name).lastPathComponent else {
-            throw CLIProxyGatewayError.configuration("invalid auth file name")
-        }
+        try Self.validateAuthFileName(name)
         let _: EmptyResponse = try await request(
             method: "POST",
             path: "v0/management/auth-files",
@@ -67,9 +174,123 @@ nonisolated struct CLIProxyManagementClient: Sendable {
     }
 
     func beginOAuth(_ provider: CLIProxyOAuthProvider) async throws -> CLIProxyOAuthSession {
+        try await beginOAuth(endpoint: provider.endpoint)
+    }
+
+    func beginPluginOAuth(providerID: String) async throws -> CLIProxyOAuthSession {
+        let normalized = try safePathComponent(providerID)
+        return try await beginOAuth(endpoint: "\(normalized)-auth-url")
+    }
+
+    func listPlugins() async throws -> (enabled: Bool, plugins: [CLIProxyPlugin]) {
+        let response: PluginsResponse = try await request(method: "GET", path: "v0/management/plugins")
+        return (response.pluginsEnabled, response.plugins)
+    }
+
+    func listPluginStore() async throws -> (enabled: Bool, plugins: [CLIProxyPluginStoreEntry]) {
+        let response: PluginStoreResponse = try await request(method: "GET", path: "v0/management/plugin-store")
+        return (response.pluginsEnabled, response.plugins)
+    }
+
+    @discardableResult
+    func installPlugin(id: String, sourceID: String?) async throws -> Bool {
+        let safeID = try safePathComponent(id)
+        let response: PluginInstallResponse = try await request(
+            method: "POST",
+            path: "v0/management/plugin-store/\(safeID)/install",
+            query: sourceID.flatMap { value in
+                let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                return normalized.isEmpty ? nil : [URLQueryItem(name: "source", value: normalized)]
+            } ?? []
+        )
+        return response.restartRequired ?? false
+    }
+
+    func setPluginEnabled(id: String, enabled: Bool) async throws {
+        let safeID = try safePathComponent(id)
+        let body = try JSONEncoder().encode(["enabled": enabled])
+        let _: EmptyResponse = try await request(
+            method: "PATCH",
+            path: "v0/management/plugins/\(safeID)/enabled",
+            body: body
+        )
+    }
+
+    func addOpenAICompatibleProvider(_ provider: CLIProxyOpenAICompatibleProvider) async throws {
+        try await mutateOpenAICompatibleProviders { providers in
+            guard !providers.contains(where: {
+                (($0["name"] as? String) ?? "").caseInsensitiveCompare(provider.name) == .orderedSame
+            }) else {
+                throw CLIProxyGatewayError.configuration("an OpenAI-compatible provider with this name already exists")
+            }
+            let encoded = try JSONEncoder().encode(provider)
+            guard let raw = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+                throw CLIProxyGatewayError.invalidResponse("could not encode the OpenAI-compatible provider")
+            }
+            providers.append(raw)
+        }
+    }
+
+    func listOpenAICompatibleProviders() async throws -> [CLIProxyOpenAICompatibleProvider] {
+        let response: OpenAICompatResponse = try await request(
+            method: "GET",
+            path: "v0/management/openai-compatibility"
+        )
+        return response.providers
+    }
+
+    func setOpenAICompatibleProviderDisabled(name: String, disabled: Bool) async throws {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            throw CLIProxyGatewayError.configuration("OpenAI-compatible provider name is required")
+        }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "name": normalized,
+            "value": ["disabled": disabled]
+        ])
+        let _: EmptyResponse = try await request(
+            method: "PATCH",
+            path: "v0/management/openai-compatibility",
+            body: body
+        )
+    }
+
+    func deleteOpenAICompatibleProvider(name: String) async throws {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            throw CLIProxyGatewayError.configuration("OpenAI-compatible provider name is required")
+        }
+        let _: EmptyResponse = try await request(
+            method: "DELETE",
+            path: "v0/management/openai-compatibility",
+            query: [URLQueryItem(name: "name", value: normalized)]
+        )
+    }
+
+    private func mutateOpenAICompatibleProviders(
+        _ update: (inout [[String: Any]]) throws -> Void
+    ) async throws {
+        let data = try await requestData(method: "GET", path: "v0/management/openai-compatibility")
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var providers = root["openai-compatibility"] as? [[String: Any]] else {
+            throw CLIProxyGatewayError.invalidResponse("invalid OpenAI-compatible provider response")
+        }
+        try update(&providers)
+        guard JSONSerialization.isValidJSONObject(providers) else {
+            throw CLIProxyGatewayError.invalidResponse("OpenAI-compatible provider configuration is not valid JSON")
+        }
+        let body = try JSONSerialization.data(withJSONObject: providers, options: [.sortedKeys])
+        let _: EmptyResponse = try await request(
+            method: "PUT",
+            path: "v0/management/openai-compatibility",
+            body: body
+        )
+    }
+
+    private func beginOAuth(endpoint: String) async throws -> CLIProxyOAuthSession {
         try await request(
             method: "GET",
-            path: "v0/management/\(provider.endpoint)",
+            path: "v0/management/\(endpoint)",
             query: [URLQueryItem(name: "is_webui", value: "true")]
         )
     }
@@ -97,6 +318,88 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         headers: [String: String] = [:],
         body: Data? = nil
     ) async throws -> T {
+        let data = try await requestData(method: method, path: path, query: query, headers: headers, body: body)
+        if T.self == EmptyResponse.self, data.isEmpty { return EmptyResponse() as! T }
+        return try decode(T.self, from: data)
+    }
+
+    private func publicModels(path: String, headers: [String: String]) async throws -> [CLIProxyModel] {
+        let data = try await publicData(path: path, headers: headers)
+        return try decode(PublicModelsResponse.self, from: data).data
+    }
+
+    private func geminiModels() async throws -> [CLIProxyModel] {
+        let data = try await publicData(
+            path: "v1beta/models",
+            headers: ["X-Goog-Api-Key": clientAPIKey]
+        )
+        return try decode(GeminiModelsResponse.self, from: data).models.map { model in
+            let id = model.name.hasPrefix("models/")
+                ? String(model.name.dropFirst("models/".count))
+                : model.name
+            return CLIProxyModel(
+                id: id,
+                displayName: model.displayName,
+                type: "model",
+                ownedBy: "google"
+            )
+        }
+    }
+
+    private func publicData(path: String, headers: [String: String]) async throws -> Data {
+        var request = URLRequest(url: baseURL.appendingPathComponent(path), timeoutInterval: 15)
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        do {
+            let (data, response) = try await session.data(for: request)
+            try validate(response: response, data: data)
+            return data
+        } catch let error as CLIProxyGatewayError {
+            throw error
+        } catch {
+            throw CLIProxyGatewayError.network(error.localizedDescription)
+        }
+    }
+
+    private func merge(
+        _ models: [CLIProxyModel],
+        protocol modelProtocol: CLIProxyModelProtocol,
+        into entries: inout [String: CLIProxyModelCatalogEntry]
+    ) {
+        for model in models {
+            let key = model.id.lowercased()
+            if let existing = entries[key] {
+                entries[key] = CLIProxyModelCatalogEntry(
+                    model: preferredModel(existing.model, model),
+                    protocols: existing.protocols.union([modelProtocol])
+                )
+            } else {
+                entries[key] = CLIProxyModelCatalogEntry(model: model, protocols: [modelProtocol])
+            }
+        }
+    }
+
+    private func preferredModel(_ lhs: CLIProxyModel, _ rhs: CLIProxyModel) -> CLIProxyModel {
+        CLIProxyModel(
+            id: lhs.id,
+            displayName: nonBlank(lhs.displayName) ?? nonBlank(rhs.displayName),
+            type: nonBlank(lhs.type) ?? nonBlank(rhs.type),
+            ownedBy: nonBlank(lhs.ownedBy) ?? nonBlank(rhs.ownedBy)
+        )
+    }
+
+    private func nonBlank(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    private func requestData(
+        method: String,
+        path: String,
+        query: [URLQueryItem] = [],
+        headers: [String: String] = [:],
+        body: Data? = nil
+    ) async throws -> Data {
         var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw CLIProxyGatewayError.configuration("invalid Management API URL") }
@@ -109,10 +412,7 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         do {
             let (data, response) = try await session.data(for: request)
             try validate(response: response, data: data)
-            if T.self == EmptyResponse.self, data.isEmpty {
-                return EmptyResponse() as! T
-            }
-            return try decode(T.self, from: data)
+            return data
         } catch let error as CLIProxyGatewayError {
             throw error
         } catch {
@@ -136,6 +436,28 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         if T.self == EmptyResponse.self { return EmptyResponse() as! T }
         do { return try JSONDecoder().decode(T.self, from: data) }
         catch { throw CLIProxyGatewayError.invalidResponse(error.localizedDescription) }
+    }
+
+    private static func validateAuthFileName(_ name: String) throws {
+        guard !name.isEmpty,
+              name.utf8.count <= 240,
+              name.lowercased().hasSuffix(".json"),
+              name == URL(fileURLWithPath: name).lastPathComponent,
+              !name.contains("\\"),
+              !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw CLIProxyGatewayError.configuration("invalid auth file name")
+        }
+    }
+
+    private func safePathComponent(_ value: String) throws -> String {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, normalized.count <= 100,
+              normalized.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_.")).contains($0)
+              }) else {
+            throw CLIProxyGatewayError.configuration("invalid plugin provider identifier")
+        }
+        return normalized
     }
 }
 

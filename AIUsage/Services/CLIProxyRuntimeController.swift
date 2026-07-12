@@ -38,6 +38,18 @@ final class CLIProxyRuntimeController: ObservableObject {
 
     private var pidURL: URL { paths.root.appendingPathComponent("runtime.pid.json") }
     var baseURL: URL { URL(string: "http://127.0.0.1:\(settings.normalized.port)")! }
+    var detectedLANBaseURLs: [URL] {
+        detectedLANBaseURLs(port: settings.normalized.port)
+    }
+    func detectedLANBaseURLs(port: Int) -> [URL] {
+        Self.activePrivateIPv4Addresses().compactMap {
+            URL(string: "http://\($0):\(port)")
+        }
+    }
+    var lanBaseURLs: [URL] {
+        guard settings.normalized.allowLANAccess else { return [] }
+        return detectedLANBaseURLs
+    }
     var clientAPIKey: String? { secretStore.load()?.clientAPIKey }
     var managementKey: String? { secretStore.load()?.managementKey }
 
@@ -88,6 +100,14 @@ final class CLIProxyRuntimeController: ObservableObject {
         await restart()
     }
 
+    /// Persist and stabilize the managed config before `current` can move to a
+    /// different binary version. This is required even while CPA is stopped:
+    /// cleanup may otherwise delete an old version directory that still owns a
+    /// relative plugin directory before the next launch can migrate it.
+    func stabilizeConfigurationBeforeActivation() throws {
+        _ = try writeManagedConfiguration()
+    }
+
     func stopSynchronouslyForTermination() {
         shouldBeRunning = false
         guard let process, process.isRunning else {
@@ -112,7 +132,7 @@ final class CLIProxyRuntimeController: ObservableObject {
             id: "cliproxyapi-gateway",
             ports: [settings.normalized.port],
             track: "CLIProxyAPI",
-            label: L("Subscription Gateway", "订阅网关")
+            label: L("CPA Gateway", "CPA 网关")
         )
     }
 
@@ -132,16 +152,21 @@ final class CLIProxyRuntimeController: ObservableObject {
                     "\(conflict.track) / \(conflict.label)"
                 )
             }
-            guard Self.isLoopbackPortAvailable(normalized.port) else {
+            guard Self.isIPv4PortAvailable(normalized.port, bindHost: normalized.bindHost) else {
                 throw CLIProxyGatewayError.portInUse(normalized.port, "another local process")
             }
 
-            let secrets = try secretStore.loadOrCreate()
-            try configStore.writeRuntimeConfig(settings: normalized, secrets: secrets)
+            let secrets = try writeManagedConfiguration(settings: normalized)
             let process = Process()
             process.executableURL = binaryURL
             process.arguments = ["-config", paths.configURL.path]
             process.currentDirectoryURL = binaryURL.deletingLastPathComponent()
+            var environment = ProcessInfo.processInfo.environment
+            // CPA treats this environment variable as an explicit override
+            // that enables remote management. AIUsage always owns management
+            // through its separate config key, so never inherit the override.
+            environment.removeValue(forKey: "MANAGEMENT_PASSWORD")
+            process.environment = environment
 
             let output = Pipe()
             let errors = Pipe()
@@ -204,6 +229,17 @@ final class CLIProxyRuntimeController: ObservableObject {
         state = .stopped
     }
 
+    private func writeManagedConfiguration(
+        settings value: CLIProxyGatewaySettings? = nil
+    ) throws -> CLIProxySecrets {
+        let secrets = try secretStore.loadOrCreate()
+        try configStore.writeRuntimeConfig(
+            settings: (value ?? settings).normalized,
+            secrets: secrets
+        )
+        return secrets
+    }
+
     private func handleUnexpectedExit(status: Int32) {
         process = nil
         clearPIDRecord()
@@ -248,13 +284,32 @@ final class CLIProxyRuntimeController: ObservableObject {
         handle.readabilityHandler = { [weak self] file in
             let data = file.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            let redacted = text
-                .replacingOccurrences(of: secrets.managementKey, with: "[REDACTED]")
-                .replacingOccurrences(of: secrets.clientAPIKey, with: "[REDACTED]")
             Task { @MainActor [weak self] in
+                let redacted = Self.redactLog(text, secrets: secrets)
                 redacted.split(whereSeparator: \.isNewline).forEach { self?.appendLog(String($0)) }
             }
         }
+    }
+
+    private static func redactLog(_ text: String, secrets: CLIProxySecrets) -> String {
+        var redacted = text
+            .replacingOccurrences(of: secrets.managementKey, with: "[REDACTED]")
+            .replacingOccurrences(of: secrets.clientAPIKey, with: "[REDACTED]")
+        let patterns = [
+            #"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}"#,
+            #"(?i)(\b(?:access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|oauth[_-]?code|device[_-]?code|user[_-]?code)\b[\"']?\s*[:=]\s*[\"']?)[^\"'\s,;}]{4,}"#,
+            #"(?im)(\b(?:authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+"#
+        ]
+        for pattern in patterns {
+            guard let expression = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(redacted.startIndex..., in: redacted)
+            redacted = expression.stringByReplacingMatches(
+                in: redacted,
+                range: range,
+                withTemplate: "$1[REDACTED]"
+            )
+        }
+        return redacted
     }
 
     private func appendLog(_ line: String) {
@@ -319,7 +374,7 @@ final class CLIProxyRuntimeController: ObservableObject {
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
-    private static func isLoopbackPortAvailable(_ port: Int) -> Bool {
+    private static func isIPv4PortAvailable(_ port: Int, bindHost: String) -> Bool {
         guard (1...65_535).contains(port) else { return false }
         let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard descriptor >= 0 else { return false }
@@ -330,11 +385,65 @@ final class CLIProxyRuntimeController: ObservableObject {
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)
         address.sin_port = in_port_t(UInt16(port).bigEndian)
-        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        address.sin_addr = in_addr(s_addr: inet_addr(bindHost))
         return withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
             }
         }
+    }
+
+    private static func activePrivateIPv4Addresses() -> [String] {
+        var firstAddress: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&firstAddress) == 0, let firstAddress else { return [] }
+        defer { freeifaddrs(firstAddress) }
+
+        var candidates: [(interface: String, address: String)] = []
+        for pointer in sequence(first: firstAddress, next: { $0.pointee.ifa_next }) {
+            let interface = pointer.pointee
+            guard let socketAddress = interface.ifa_addr,
+                  socketAddress.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let flags = Int32(interface.ifa_flags)
+            guard flags & IFF_UP != 0, flags & IFF_LOOPBACK == 0 else { continue }
+
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let result = getnameinfo(
+                socketAddress,
+                socklen_t(socketAddress.pointee.sa_len),
+                &host,
+                socklen_t(host.count),
+                nil,
+                0,
+                NI_NUMERICHOST
+            )
+            guard result == 0 else { continue }
+            let address = String(cString: host)
+            guard isLocalNetworkIPv4(address) else { continue }
+            candidates.append((String(cString: interface.ifa_name), address))
+        }
+
+        let preferredInterfaces = ["en0", "en1"]
+        return candidates
+            .sorted { lhs, rhs in
+                let left = preferredInterfaces.firstIndex(of: lhs.interface) ?? preferredInterfaces.count
+                let right = preferredInterfaces.firstIndex(of: rhs.interface) ?? preferredInterfaces.count
+                return left == right ? lhs.interface < rhs.interface : left < right
+            }
+            .reduce(into: [String]()) { addresses, candidate in
+                if !addresses.contains(candidate.address) { addresses.append(candidate.address) }
+            }
+    }
+
+    private static func isLocalNetworkIPv4(_ address: String) -> Bool {
+        let parts = address.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        if parts[0] == 10 { return true }
+        if parts[0] == 172, (16...31).contains(parts[1]) { return true }
+        if parts[0] == 192, parts[1] == 168 { return true }
+        // RFC 6598 shared address space is commonly used by VPN/tailnet
+        // interfaces. Keep it as an explicit candidate instead of pretending
+        // every listed address belongs to a physical LAN.
+        if parts[0] == 100, (64...127).contains(parts[1]) { return true }
+        return false
     }
 }

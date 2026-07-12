@@ -9,10 +9,13 @@ struct ProviderIconView: View {
         self.size = size
     }
 
-    // Map provider id → asset name (openai covers codex)
+    // Map provider aliases to the matching brand asset.
     private var assetName: String {
         switch providerId {
         case "codex", "codex-cost": return "codex"
+        case "anthropic": return "claude"
+        case "gemini-cli": return "gemini"
+        case "github-copilot": return "copilot"
         default: return providerId
         }
     }
@@ -82,6 +85,7 @@ struct ProviderIconView: View {
         case "antigravity": return "atom"
         case "copilot": return "chevron.left.forwardslash.chevron.right"
         case "claude":  return "sparkles"
+        case "claude-science": return "atom"
         case "cursor":  return "cursorarrow.rays"
         case "gemini":  return "star.fill"
         case "kimi":    return "moon.stars.fill"
@@ -91,6 +95,10 @@ struct ProviderIconView: View {
         case "minimax": return "m.circle.fill"
         case "opencode": return "terminal.fill"
         case "warp":    return "terminal"
+        case "xai":     return "xmark"
+        case "vertex":  return "triangle.3.layers.3d"
+        case "qwen":    return "cloud.fill"
+        case "iflow":   return "arrow.triangle.branch"
         default:        return "cube.fill"
         }
     }
@@ -100,6 +108,7 @@ struct ProviderIconView: View {
         case "antigravity": return .cyan
         case "copilot": return .blue
         case "claude":  return .purple
+        case "claude-science": return .purple
         case "cursor":  return .green
         case "gemini":  return .orange
         case "kimi":    return Color(red: 0.09, green: 0.51, blue: 1.0)
@@ -109,6 +118,10 @@ struct ProviderIconView: View {
         case "minimax": return Color(red: 0.886, green: 0.087, blue: 0.494)
         case "opencode": return Color(red: 0.18, green: 0.83, blue: 0.75)
         case "warp":    return .pink
+        case "xai":     return .primary
+        case "vertex":  return .blue
+        case "qwen":    return .purple
+        case "iflow":   return .cyan
         default:        return .gray
         }
     }

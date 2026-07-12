@@ -161,7 +161,7 @@ struct ContentView: View {
                         .navigationTitle(L("Subscriptions", "订阅账号"))
                 case .subscriptionGateway:
                     SubscriptionGatewayView()
-                        .navigationTitle(L("Subscription Gateway", "订阅网关"))
+                        .navigationTitle(L("CPA Gateway", "CPA 网关"))
                 case .apiProviders:
                     ProvidersView(category: .apiProviders)
                         .navigationTitle(L("API Providers", "API 提供商"))
