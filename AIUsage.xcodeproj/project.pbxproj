@@ -144,6 +144,12 @@
 		C1CPA0132FD000A000B26789 /* CLIProxyManagementClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0122FD000A000B26789 /* CLIProxyManagementClient.swift */; };
 		C1CPA0152FD000B000B26789 /* THIRD_PARTY_NOTICES.md in Resources */ = {isa = PBXBuildFile; fileRef = C1CPA0142FD000B000B26789 /* THIRD_PARTY_NOTICES.md */; };
 		C1CPA0172FD000C000B26789 /* CLIProxyCredentialAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0162FD000C000B26789 /* CLIProxyCredentialAdapter.swift */; };
+		C1CPA0312FD0020000B26789 /* CLIProxyUpstreamCapability.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0302FD0020000B26789 /* CLIProxyUpstreamCapability.swift */; };
+		C1CPA0332FD0021000B26789 /* CLIProxyAuthImportPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0322FD0021000B26789 /* CLIProxyAuthImportPlanner.swift */; };
+		C1CPA0352FD0022000B26789 /* CLIProxyGatewayManager+Import.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0342FD0022000B26789 /* CLIProxyGatewayManager+Import.swift */; };
+		C1CPA0372FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0362FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift */; };
+		C1CPA0392FD0024000B26789 /* SubscriptionGatewayImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0382FD0024000B26789 /* SubscriptionGatewayImportSheet.swift */; };
+		C1CPA03B2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA03A2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift */; };
 		C1CG10012FB0001000B26789 /* CodexGlobalConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CG10002FB0001000B26789 /* CodexGlobalConfig.swift */; };
 		C1CX00012FB0000100B26789 /* CodexConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00002FB0000100B26789 /* CodexConfigManager.swift */; };
 		C1CX00032FB0000200B26789 /* CodexProxyManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CX00022FB0000200B26789 /* CodexProxyManagementView.swift */; };
@@ -323,6 +329,12 @@
 		C1CPA0182FD000D000B26789 /* SubscriptionGatewayComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayComponents.swift; sourceTree = "<group>"; };
 		C1CPA01A2FD000E000B26789 /* SubscriptionGatewayOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayOverviewView.swift; sourceTree = "<group>"; };
 		C1CPA01C2FD000F000B26789 /* SubscriptionGatewayAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayAccountsView.swift; sourceTree = "<group>"; };
+		C1CPA0302FD0020000B26789 /* CLIProxyUpstreamCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProxyUpstreamCapability.swift; sourceTree = "<group>"; };
+		C1CPA0322FD0021000B26789 /* CLIProxyAuthImportPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProxyAuthImportPlanner.swift; sourceTree = "<group>"; };
+		C1CPA0342FD0022000B26789 /* CLIProxyGatewayManager+Import.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CLIProxyGatewayManager+Import.swift"; sourceTree = "<group>"; };
+		C1CPA0362FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayAddUpstreamSheet.swift; sourceTree = "<group>"; };
+		C1CPA0382FD0024000B26789 /* SubscriptionGatewayImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayImportSheet.swift; sourceTree = "<group>"; };
+		C1CPA03A2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayAccountDetailSheet.swift; sourceTree = "<group>"; };
 		C1CPA01E2FD0010000B26789 /* SubscriptionGatewayConnectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayConnectionsView.swift; sourceTree = "<group>"; };
 		C1CPA0202FD0011000B26789 /* SubscriptionGatewaySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewaySettingsView.swift; sourceTree = "<group>"; };
 		C1CPA00C2FD0007000B26789 /* CLIProxySecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProxySecretStore.swift; sourceTree = "<group>"; };
@@ -401,6 +413,7 @@
 			isa = PBXGroup;
 			children = (
 				C1CPA0082FD0005000B26789 /* CLIProxyGatewayManager.swift */,
+				C1CPA0342FD0022000B26789 /* CLIProxyGatewayManager+Import.swift */,
 				A2B3C4D12F96001000A15674 /* ClaudeSettingsManager.swift */,
 				C1CX00002FB0000100B26789 /* CodexConfigManager.swift */,
 				C1NP00022F9C000200A15674 /* NodeProfileStore.swift */,
@@ -451,6 +464,8 @@
 			isa = PBXGroup;
 			children = (
 				C1CPA0002FD0001000B26789 /* CLIProxyGatewayModels.swift */,
+				C1CPA0302FD0020000B26789 /* CLIProxyUpstreamCapability.swift */,
+				C1CPA0322FD0021000B26789 /* CLIProxyAuthImportPlanner.swift */,
 				5EF87F002F8D0E9E002FE291 /* ProxyConfiguration.swift */,
 				B1GP00002F97002000A15674 /* GlobalProxyConfig.swift */,
 				C1GC00002FA0000100B26789 /* GlobalConfig.swift */,
@@ -527,6 +542,9 @@
 				C1CPA0182FD000D000B26789 /* SubscriptionGatewayComponents.swift */,
 				C1CPA01A2FD000E000B26789 /* SubscriptionGatewayOverviewView.swift */,
 				C1CPA01C2FD000F000B26789 /* SubscriptionGatewayAccountsView.swift */,
+				C1CPA0362FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift */,
+				C1CPA0382FD0024000B26789 /* SubscriptionGatewayImportSheet.swift */,
+				C1CPA03A2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift */,
 				C1CPA01E2FD0010000B26789 /* SubscriptionGatewayConnectionsView.swift */,
 				C1CPA0202FD0011000B26789 /* SubscriptionGatewaySettingsView.swift */,
 				5EF87F052F8D0EED002FE291 /* ProxyConfigEditorView.swift */,
@@ -792,6 +810,12 @@
 				C1CPA0112FD0009000B26789 /* CLIProxyRuntimeController.swift in Sources */,
 				C1CPA0132FD000A000B26789 /* CLIProxyManagementClient.swift in Sources */,
 				C1CPA0172FD000C000B26789 /* CLIProxyCredentialAdapter.swift in Sources */,
+				C1CPA0312FD0020000B26789 /* CLIProxyUpstreamCapability.swift in Sources */,
+				C1CPA0332FD0021000B26789 /* CLIProxyAuthImportPlanner.swift in Sources */,
+				C1CPA0352FD0022000B26789 /* CLIProxyGatewayManager+Import.swift in Sources */,
+				C1CPA0372FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift in Sources */,
+				C1CPA0392FD0024000B26789 /* SubscriptionGatewayImportSheet.swift in Sources */,
+				C1CPA03B2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift in Sources */,
 				5EFAD7732F87AFE700A15674 /* DashboardView.swift in Sources */,
 				5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */,
 				5EFHMP012F99002100A15674 /* DashboardView+Heatmap.swift in Sources */,
@@ -1110,7 +1134,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.14.1;
+				MARKETING_VERSION = 0.14.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1142,7 +1166,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.14.1;
+				MARKETING_VERSION = 0.14.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
