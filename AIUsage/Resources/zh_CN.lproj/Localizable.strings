@@ -1199,7 +1199,7 @@
 "AIUsage/Views/SettingsView.swift::Version" = "版本";
 
 /* Views/SettingsView.swift */
-"AIUsage/Views/SettingsView.swift::Your AI Quota Command Center" = "您的 AI 额度指挥中心";
+"AIUsage/Views/SettingsView.swift::Your AI workspace" = "你的 AI 工作台";
 
 /* Views/WebLoginView.swift */
 "AIUsage/Views/WebLoginView.swift::Cancel" = "取消";

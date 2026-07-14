@@ -202,7 +202,7 @@ struct SettingsView: View {
                 Text("AIUsage")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
 
-                Text(L("Your AI Quota Command Center", "您的 AI 额度指挥中心"))
+                Text(L("Your AI workspace", "你的 AI 工作台"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
