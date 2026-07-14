@@ -133,6 +133,7 @@ struct StatusBarItemView: View {
 
     private var fallbackIcon: some View {
         Image("MenuBarIcon")
+            .renderingMode(.template)
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: 18, height: 18)
