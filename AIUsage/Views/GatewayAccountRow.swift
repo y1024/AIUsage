@@ -14,7 +14,10 @@ struct GatewayAccountRow: View {
     let onRequestSync: (CLIProxyAccountSyncCandidate) -> Void
     let onSetEnabled: (Bool) -> Void
     let onSetSyncMode: (CLIProxyAccountSyncCandidate, CLIProxyAccountSyncMode) -> Void
+    let onAddToSubscription: () -> Void
     let onDelete: () -> Void
+    /// Codex 等可导入订阅侧的账号为 true；已存在时由父视图决定是否仍展示（通常仍展示，点了提示已存在）。
+    var showsAddToSubscription: Bool = false
 
     private var planText: String? {
         GatewayAccountListLogic.planBadgeText(file: file, identity: identity)
@@ -110,6 +113,15 @@ struct GatewayAccountRow: View {
                 selected: syncMode == .keepUpdated
             ) {
                 onSetSyncMode(linkedCandidate, .keepUpdated)
+            }
+        }
+        if showsAddToSubscription {
+            Divider()
+            Button(action: onAddToSubscription) {
+                Label(
+                    L("Add to Subscription Accounts", "添加到订阅账号"),
+                    systemImage: "person.badge.plus"
+                )
             }
         }
         Divider()
@@ -237,6 +249,15 @@ struct GatewayAccountRow: View {
                     ) {
                         onSetSyncMode(linkedCandidate, .keepUpdated)
                     }
+                }
+            }
+            if showsAddToSubscription {
+                Divider()
+                Button(action: onAddToSubscription) {
+                    Label(
+                        L("Add to Subscription Accounts", "添加到订阅账号"),
+                        systemImage: "person.badge.plus"
+                    )
                 }
             }
             Divider()

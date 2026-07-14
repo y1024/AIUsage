@@ -158,6 +158,7 @@
 		C1CPA0312FD0020000B26789 /* CLIProxyUpstreamCapability.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0302FD0020000B26789 /* CLIProxyUpstreamCapability.swift */; };
 		C1CPA0332FD0021000B26789 /* CLIProxyAuthImportPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0322FD0021000B26789 /* CLIProxyAuthImportPlanner.swift */; };
 		C1CPA0352FD0022000B26789 /* CLIProxyGatewayManager+Import.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0342FD0022000B26789 /* CLIProxyGatewayManager+Import.swift */; };
+		C1CPA0412FD0025000B26789 /* CLIProxyGatewayManager+SubscriptionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0402FD0025000B26789 /* CLIProxyGatewayManager+SubscriptionBridge.swift */; };
 		C1CPA0372FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0362FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift */; };
 		C1CPA0392FD0024000B26789 /* SubscriptionGatewayImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0382FD0024000B26789 /* SubscriptionGatewayImportSheet.swift */; };
 		C1CPA03B2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA03A2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift */; };
@@ -355,6 +356,7 @@
 		C1CPA0302FD0020000B26789 /* CLIProxyUpstreamCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProxyUpstreamCapability.swift; sourceTree = "<group>"; };
 		C1CPA0322FD0021000B26789 /* CLIProxyAuthImportPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProxyAuthImportPlanner.swift; sourceTree = "<group>"; };
 		C1CPA0342FD0022000B26789 /* CLIProxyGatewayManager+Import.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CLIProxyGatewayManager+Import.swift"; sourceTree = "<group>"; };
+		C1CPA0402FD0025000B26789 /* CLIProxyGatewayManager+SubscriptionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CLIProxyGatewayManager+SubscriptionBridge.swift"; sourceTree = "<group>"; };
 		C1CPA0362FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayAddUpstreamSheet.swift; sourceTree = "<group>"; };
 		C1CPA0382FD0024000B26789 /* SubscriptionGatewayImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayImportSheet.swift; sourceTree = "<group>"; };
 		C1CPA03A2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayAccountDetailSheet.swift; sourceTree = "<group>"; };
@@ -438,6 +440,7 @@
 			children = (
 				C1CPA0082FD0005000B26789 /* CLIProxyGatewayManager.swift */,
 				C1CPA0342FD0022000B26789 /* CLIProxyGatewayManager+Import.swift */,
+				C1CPA0402FD0025000B26789 /* CLIProxyGatewayManager+SubscriptionBridge.swift */,
 				A2B3C4D12F96001000A15674 /* ClaudeSettingsManager.swift */,
 				C1CX00002FB0000100B26789 /* CodexConfigManager.swift */,
 				C1NP00022F9C000200A15674 /* NodeProfileStore.swift */,
@@ -852,6 +855,7 @@
 				C1CPA0312FD0020000B26789 /* CLIProxyUpstreamCapability.swift in Sources */,
 				C1CPA0332FD0021000B26789 /* CLIProxyAuthImportPlanner.swift in Sources */,
 				C1CPA0352FD0022000B26789 /* CLIProxyGatewayManager+Import.swift in Sources */,
+				C1CPA0412FD0025000B26789 /* CLIProxyGatewayManager+SubscriptionBridge.swift in Sources */,
 				C1CPA0372FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift in Sources */,
 				C1CPA0392FD0024000B26789 /* SubscriptionGatewayImportSheet.swift in Sources */,
 				C1CPA03B2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift in Sources */,
@@ -1177,13 +1181,14 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = AIUsage/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "AIUsage Debug";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.14.7;
-				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
+				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop.debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

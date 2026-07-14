@@ -36,7 +36,16 @@ public final class AccountCredentialStore: @unchecked Sendable {
     // store 的数据以 auxiliary blob 折叠进同一条目，使全 App 只保留一个 Keychain
     // 条目、至多一次"始终允许"授权。历史布局的迁移与清理全部封装在
     // `LegacyKeychainCutover`，本类正常路径不含任何旧逻辑。
-    private static let service = "com.aiusage.desktop.providerCredentials"
+    //
+    // 正式版固定 service；Debug（独立 bundle）与测试宿主用各自 service，避免 Agent
+    // Debug 与正式安装共用同一账号库。
+    private static let service: String = {
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.aiusage.desktop"
+        if bundleID == "com.aiusage.desktop" {
+            return "com.aiusage.desktop.providerCredentials"
+        }
+        return "\(bundleID).providerCredentials"
+    }()
     private static let credentialVaultAccount = "__credential_vault_v2__"
     private static let managedAuthImportsPathComponent = "/Library/Application Support/AIUsage/AuthImports/"
     private static let keychainAccessibility = kSecAttrAccessibleAfterFirstUnlock
@@ -278,10 +287,30 @@ public final class AccountCredentialStore: @unchecked Sendable {
         // One-time cutover from every historical Keychain layout. Gated by a
         // sentinel stored in the vault's auxiliary, so after the first successful
         // run no legacy item is ever read again.
+        //
+        // 仅正式 Bundle（com.aiusage.desktop）可执行 cutover：其 purge 目标是正式
+        // Keychain 服务名。Debug / 测试宿主若跑同一逻辑，会误扫正式库旧条目。
         if cachedAuxiliary[LegacyKeychainCutover.sentinelAuxiliaryKey] == nil {
-            return performLegacyCutoverUnsafe()
+            let bundleID = Bundle.main.bundleIdentifier ?? ""
+            if bundleID == "com.aiusage.desktop" {
+                return performLegacyCutoverUnsafe()
+            }
+            markLegacyCutoverSkippedForNonProductionUnsafe()
         }
         return dict
+    }
+
+    /// Debug / 非生产宿主：只在本进程自己的 vault 里记 sentinel，绝不 collect/purge 正式 Keychain。
+    private func markLegacyCutoverSkippedForNonProductionUnsafe() {
+        cachedAuxiliary[LegacyKeychainCutover.sentinelAuxiliaryKey] = Data([1])
+        do {
+            try writeVaultUnsafe(encodeCurrentVaultUnsafe())
+        } catch {
+            cachedAuxiliary.removeValue(forKey: LegacyKeychainCutover.sentinelAuxiliaryKey)
+            credentialLog.error(
+                "Non-production cutover skip deferred (vault write failed): \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     /// Fold any data still living in legacy Keychain layouts into the canonical

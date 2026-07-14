@@ -17,6 +17,7 @@ struct SubscriptionGatewayAccountsView: View {
     @State private var selectedDetail: CLIProxyAuthFile?
     @State private var pendingForceSync: CLIProxyAccountSyncCandidate?
     @State private var upstreamSection: GatewayUpstreamSection = .oauth
+    @State private var subscriptionBridgeNotice: String?
 
     var body: some View {
         let syncStates = GatewayAccountListLogic.syncStatesByAuthFileName(manager: manager)
@@ -31,6 +32,26 @@ struct SubscriptionGatewayAccountsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 errorBanners
+                if let subscriptionBridgeNotice {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "person.badge.plus")
+                            .foregroundStyle(.secondary)
+                        Text(subscriptionBridgeNotice)
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button {
+                            self.subscriptionBridgeNotice = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
+                }
                 GatewaySectionTitle(
                     title: L("Account center", "账号中心"),
                     subtitle: L("Upstreams already in CPA. Use Add Upstream in the top bar.", "已在 CPA 中的上游。添加请用顶部「添加上游」。")
@@ -323,7 +344,11 @@ struct SubscriptionGatewayAccountsView: View {
                         onSetSyncMode: { candidate, mode in
                             Task { await manager.setSyncMode(candidate, mode: mode) }
                         },
-                        onDelete: { pendingDeletion = file }
+                        onAddToSubscription: {
+                            Task { await addToSubscription(file) }
+                        },
+                        onDelete: { pendingDeletion = file },
+                        showsAddToSubscription: file.gatewayProviderID.lowercased() == "codex"
                     )
                     if index < group.files.count - 1 {
                         Divider().padding(.leading, 56)
@@ -339,6 +364,31 @@ struct SubscriptionGatewayAccountsView: View {
             pendingForceSync = candidate
         default:
             Task { await manager.syncAccount(candidate) }
+        }
+    }
+
+    private func addToSubscription(_ file: CLIProxyAuthFile) async {
+        let outcome = await CLIProxyGatewayManager.shared.addAuthFileToSubscriptionAccounts(file)
+        await MainActor.run {
+            switch outcome {
+            case .added(let name):
+                subscriptionBridgeNotice = L(
+                    "Added \(name) to Subscription Accounts.",
+                    "已将 \(name) 添加到订阅账号。"
+                )
+            case .alreadyPresent(let name):
+                subscriptionBridgeNotice = L(
+                    "\(name) is already in Subscription Accounts.",
+                    "\(name) 已在订阅账号中，无需重复添加。"
+                )
+            case .unsupported:
+                subscriptionBridgeNotice = L(
+                    "This provider can’t be added to Subscription Accounts from CPA yet.",
+                    "该服务商暂不支持从 CPA 添加到订阅账号。"
+                )
+            case .failed(let message):
+                subscriptionBridgeNotice = message
+            }
         }
     }
 

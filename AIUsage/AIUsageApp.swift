@@ -18,7 +18,7 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     /// 发现的新版本号（`displayVersionString`）。非空 → 左下角浮现更新按钮。
     @Published private(set) var availableUpdateVersion: String?
 
-    private var updaterController: SPUStandardUpdaterController!
+    private var updaterController: SPUStandardUpdaterController?
     /// 上次静默探测的时间，对「同一个 SparkleController 实例期间反复触发探测」做最小间隔节流：
     /// 既覆盖关窗→重开、切应用回来等场景，又避免被 SwiftUI 视图反复 appear/disappear 时打爆 appcast。
     private var lastLaunchProbeAt: Date?
@@ -28,11 +28,18 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
 
     override init() {
         super.init()
+        // Debug 独立 bundle 不跑 Sparkle，避免误更到正式包或污染生产更新通道。
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        guard !bundleID.hasSuffix(".debug") else {
+            sparkleLog.notice("Sparkle disabled for debug bundle")
+            return
+        }
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: self,
             userDriverDelegate: self
         )
+        guard let updaterController else { return }
         let updater = updaterController.updater
         updater.publisher(for: \.canCheckForUpdates)
             .assign(to: &$canCheckForUpdates)
@@ -59,6 +66,7 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
     /// 启动 / 主窗口重新可见 / 应用切回前台时调用：不弹任何 UI，发现新版本则点亮更新按钮。
     /// 距离上次探测不足 `launchProbeMinInterval` 时直接跳过。
     func startLaunchUpdateProbeIfNeeded() {
+        guard let updaterController else { return }
         if let last = lastLaunchProbeAt,
            Date().timeIntervalSince(last) < Self.launchProbeMinInterval {
             return
@@ -70,11 +78,11 @@ final class SparkleController: NSObject, ObservableObject, SPUUpdaterDelegate, S
 
     /// 用户主动点击「检查更新」或左下角更新按钮：走 Sparkle 标准更新流程。
     func checkForUpdates() {
-        updaterController.updater.checkForUpdates()
+        updaterController?.updater.checkForUpdates()
     }
 
     func setAutoCheckEnabled(_ enabled: Bool) {
-        updaterController.updater.automaticallyChecksForUpdates = enabled
+        updaterController?.updater.automaticallyChecksForUpdates = enabled
     }
 
     // MARK: - SPUStandardUserDriverDelegate (温和提醒)

@@ -135,6 +135,11 @@ class AppState: ObservableObject {
 
         accountStore.bootstrapFromDisk(providerCatalogOrder: Self.providerCatalogItems.map(\.id))
 
+        // 补回 AuthImports 中尚未进入订阅列表的 Codex（已存在 / 永久删除则跳过）。
+        Task { @MainActor in
+            await CLIProxyGatewayManager.shared.backfillSubscriptionAccountsFromAuthImportsIfNeeded()
+        }
+
         refreshCoordinator.configure(
             selectedProviderIds: { [weak self] in self?.selectedProviderIds ?? [] },
             providerCatalogIds: { Self.providerCatalogItems.map(\.id) },
