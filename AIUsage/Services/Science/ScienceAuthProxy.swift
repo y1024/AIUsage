@@ -2,16 +2,16 @@ import Foundation
 import Network
 import os.log
 
-// MARK: - Science Auth Proxy（接管模式下的 8765 反向代理）
-// 让【双击 Claude Science.app / 浏览器打开 http://localhost:8765】都免登录。
+// MARK: - Science Auth / Catalog Proxy（两种模式共用的公开反向代理）
+// 沙箱模式监听用户配置的公开端口；接管模式监听 8765。两者都注入本地会话并直接提供当前模型目录。
 //
 // 背景：Claude Science daemon 用一次性 nonce 换取 operon 会话 cookie（operon_auth / operon_csrf）来鉴权，
 // nonce 消费后 cookie 才生效；且 cookie 绑定 daemon 本次启动的签名密钥，daemon 重启即失效。桌面 app 附着到
 // 已存在 daemon 时只会打开裸链接 → 落到 /login。本 build 又封死了 require_token=false，无法从配置关闭鉴权。
 //
-// 方案：真实 daemon 跑在内部端口（14411），本代理占用对外的 8765，做透明反代并给每个请求注入一份【当前有效】
-// 的 operon 会话 cookie（自己通过 daemon.sock 铸 nonce → 换 cookie 得来），于是 app/浏览器无论打开 / 还是
-// /login 都被判为已登录。daemon 重启导致 cookie 失效时（上游 401 / 302→/login）自动重铸并重试。
+// 方案：daemon 只跑内部端口（接管 14411 / 沙箱 14412），本代理占用公开端口，做透明反代并给每个请求
+// 注入一份【当前有效】的 operon 会话 cookie（自己通过 daemon.sock 铸 nonce → 换 cookie 得来），于是浏览器
+// 无论打开 / 还是 /login 都被判为已登录。daemon 重启导致 cookie 失效时自动重铸并重试。
 //
 // 安全边界：仅监听回环（127.0.0.1 + ::1）；只转发到本机内部 daemon；cookie 只在本机内存缓存，不落盘、不进日志。
 // 与推理链路（QuotaServer, 14402 端口）完全分离——本代理只管 Science 的 Web/WS 会话鉴权。
@@ -70,6 +70,7 @@ final class ScienceAuthProxy: @unchecked Sendable {
     private var _dataDir = ""
     private var _cookies: ScienceSessionCookies?
     private var _lastAuthFailure: ScienceAuthFailure?
+    private var _modelCatalog: ScienceModelCatalog?
     private var _running = false
 
     private init() {}
@@ -81,11 +82,19 @@ final class ScienceAuthProxy: @unchecked Sendable {
     /// 启动反代：占用 listenPort（回环），把流量转发到内部 daemon upstreamPort，用 dataDir/daemon.sock 铸 cookie。
     /// 幂等：已在相同参数上运行则忽略；参数变化则先停再起。
     /// 关键：等主监听（IPv4）真正 bind 到 .ready 才返回；端口被占用等 bind 失败即抛错（不再静默成功）。
-    func start(listenPort: Int, upstreamPort: Int, dataDir: String) async throws {
+    func start(
+        listenPort: Int,
+        upstreamPort: Int,
+        dataDir: String,
+        modelCatalog: ScienceModelCatalog? = nil
+    ) async throws {
         let alreadyRunning = stateLock.withLock {
             _running && _listenPort == listenPort && _upstreamPort == upstreamPort && _dataDir == dataDir
         }
-        if alreadyRunning { return }
+        if alreadyRunning {
+            stateLock.withLock { _modelCatalog = modelCatalog }
+            return
+        }
         stop()
 
         stateLock.withLock {
@@ -94,6 +103,7 @@ final class ScienceAuthProxy: @unchecked Sendable {
             _dataDir = dataDir
             _cookies = nil
             _lastAuthFailure = nil
+            _modelCatalog = modelCatalog
             _running = true
         }
 
@@ -177,9 +187,16 @@ final class ScienceAuthProxy: @unchecked Sendable {
             _running = false
             _cookies = nil
             _lastAuthFailure = nil
+            _modelCatalog = nil
             return l
         }
         old.forEach { $0.cancel() }
+    }
+
+    /// Hot-swap only the UI catalog. The daemon, auth session and listener stay
+    /// alive; the next settings-page request observes the new node immediately.
+    func updateModelCatalog(_ catalog: ScienceModelCatalog?) {
+        stateLock.withLock { _modelCatalog = catalog }
     }
 
     /// 建监听并等待其到达 .ready（或 .failed 抛错）后才返回，确保「返回即已 bind」。
@@ -225,6 +242,7 @@ final class ScienceAuthProxy: @unchecked Sendable {
     // MARK: - Cookie 铸造（nonce → operon 会话 cookie）
 
     private var cookies: ScienceSessionCookies? { stateLock.withLock { _cookies } }
+    private var modelCatalog: ScienceModelCatalog? { stateLock.withLock { _modelCatalog } }
     private var upstreamPort: Int { stateLock.withLock { _upstreamPort } }
     private var dataDir: String { stateLock.withLock { _dataDir } }
 
@@ -453,6 +471,14 @@ final class ScienceAuthProxy: @unchecked Sendable {
             return
         }
 
+        // The model catalog contains no credentials and is sourced only from
+        // the active AIUsage node. Intercept the final Science API rather than
+        // its internal upstream fetch so node switches bypass daemon caches.
+        if req.method == "GET", req.pathOnly == "/api/models", let catalog = modelCatalog {
+            await Self.send(conn, data: Self.modelCatalogResponse(catalog))
+            return
+        }
+
         // 读取请求体（若有 Content-Length）。
         var body = leftover
         if let len = req.contentLength, body.count < len {
@@ -536,7 +562,7 @@ final class ScienceAuthProxy: @unchecked Sendable {
         var lines = "\(req.method) \(req.path) HTTP/1.1\r\n"
         let port = upstreamPort
         // 内部 daemon 用「同源」校验（CORS + WS）：只放行【自身监听端口】的 origin，
-        // 浏览器发来的 origin 是对外的 8765 → 会被判「forbidden origin / origin not allowed」。
+        // 浏览器发来的 origin 是公开反代端口 → 会被判「forbidden origin / origin not allowed」。
         // 故把 Origin / Referer 改写成 daemon 自身 origin，让其视为同源放行。
         let upstreamOrigin = "http://localhost:\(port)"
         // 原样保留除 host / cookie / origin / referer / connection（普通请求）外的所有头；WS 保留 connection/upgrade。

@@ -1,7 +1,9 @@
 import Foundation
+import Network
 import os.log
 import QuotaBackend
 import QuotaServerCore
+import Darwin
 
 private let startupLog = Logger(subsystem: "com.aiusage.quotaserver", category: "Startup")
 
@@ -70,7 +72,17 @@ if ProcessInfo.processInfo.environment["ENABLE_HTTPS"] == "1",
 }
 
 let server = QuotaHTTPServer(host: host, port: port, proxyConfig: proxyConfig, codexConfig: codexConfig, openCodeConfig: openCodeConfig, httpsConfig: httpsConfig)
-try await server.run()
+do {
+    try await server.run()
+} catch {
+    // 顶层未捕获的 async throw 会走 swift_errorInMain/SIGTRAP，宿主只能看到“无法连接服务器”。
+    // 改为稳定、无秘密的 stderr 契约，由 App 精确区分端口冲突与其它启动失败。
+    let category = QuotaServerStartupDiagnostics.category(for: error)
+    let message = QuotaServerStartupDiagnostics.singleLine(error.localizedDescription)
+    fputs("AIUSAGE_STARTUP_ERROR category=\(category) message=\(message)\n", stderr)
+    startupLog.error("QuotaServer startup failed category=\(category, privacy: .public): \(message, privacy: .public)")
+    exit(EXIT_FAILURE)
+}
 
 private func parseArgs() -> [String: String] {
     var result: [String: String] = [:]

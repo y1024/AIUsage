@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import os.log
+import Darwin
 
 // MARK: - Global Proxy Runtime
 // 管理某条轨「全局统一代理」的常驻 QuotaServer 进程。与每节点独立进程不同：本进程在固定端口长期存活，
@@ -15,6 +16,7 @@ private let globalProxyRuntimeLog = Logger(subsystem: "com.aiusage.desktop", cat
 enum GlobalProxyRuntimeError: LocalizedError {
     case quotaServerNotFound
     case startFailed(String)
+    case portInUse(Int)
     case portInUseByNode(Int, String, String)
     case adminUnreachable(String)
     case adminRejected(Int)
@@ -26,6 +28,11 @@ enum GlobalProxyRuntimeError: LocalizedError {
             return AppSettings.shared.t("QuotaServer executable not found.", "未找到 QuotaServer 可执行文件。")
         case .startFailed(let reason):
             return AppSettings.shared.t("Failed to start the global proxy: \(reason)", "启动全局代理失败：\(reason)")
+        case .portInUse(let port):
+            return AppSettings.shared.t(
+                "Port \(port) is already in use by another process. Stop that process or choose another global proxy port.",
+                "端口 \(port) 已被其它进程占用。请关闭占用进程，或修改全局代理端口。"
+            )
         case .portInUseByNode(let port, let track, let name):
             return AppSettings.shared.t(
                 "Port \(port) is already in use by node \"\(name)\" under the \(track) proxy. Change the global proxy port, or stop that node first.",
@@ -81,6 +88,7 @@ final class GlobalProxyRuntime: ObservableObject {
     private var process: Process?
     private var adminKey: String?
     private var listenPort = GlobalProxyConfig.defaultCodexPort
+    private var startGeneration: UInt64 = 0
 
     private static let startupTimeout: TimeInterval = 6
     private static let probeIntervalNanos: UInt64 = 250_000_000
@@ -103,15 +111,28 @@ final class GlobalProxyRuntime: ObservableObject {
     /// 启动常驻全局代理进程。`env` 由各轨适配器构造（上游 / client key / PROXY_TARGET 等）；
     /// 本类注入 admin key 与初始 node_id。端口冲突走跨轨仲裁 fail-loud；启动后等待 /health 就绪。
     func start(port: Int, bindHost: String, env baseEnv: [String: String], nodeId: String, nodeName: String) async throws {
-        if isProcessRunning { stop() }
+        startGeneration &+= 1
+        let generation = startGeneration
+        if isProcessRunning { await stopAndWaitForExit() }
+        guard generation == startGeneration else { throw CancellationError() }
 
         if let conflict = ProxyPortArbiter.conflict(forPorts: [port], excluding: ownerId) {
             throw GlobalProxyRuntimeError.portInUseByNode(conflict.port, conflict.track, conflict.label)
         }
 
-        guard let executablePath = await QuotaServerLocator.find() else {
-            throw GlobalProxyRuntimeError.quotaServerNotFound
+        // 仲裁只知道当前 App 管理的实例；外部进程或上次崩溃遗留 helper 还需要系统级复核。
+        do {
+            try await ProxyProcessInspector.shared.killStaleProcesses(
+                port: port,
+                currentProcessIdentifier: ProcessInfo.processInfo.processIdentifier
+            )
+        } catch {
+            globalProxyRuntimeLog.error("Failed to inspect stale QuotaServer processes on port \(port, privacy: .public): \(String(describing: error), privacy: .public)")
         }
+        if await ProxyProcessInspector.shared.isPortOccupied(port) {
+            throw GlobalProxyRuntimeError.portInUse(port)
+        }
+        guard generation == startGeneration else { throw CancellationError() }
 
         let admin = UUID().uuidString
         var environment = ProcessInfo.processInfo.environment
@@ -119,22 +140,22 @@ final class GlobalProxyRuntime: ObservableObject {
         environment["GLOBAL_PROXY_ADMIN_KEY"] = admin
         environment["GLOBAL_PROXY_NODE_ID"] = nodeId
 
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: executablePath)
-        proc.arguments = ["--host", bindHost, "--port", "\(port)"]
-        proc.environment = environment
-
         let capturedTrack = track
-        let outputPipe = Pipe()
-        proc.standardOutput = outputPipe
-        proc.standardError = outputPipe
-        outputPipe.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let output = String(data: data, encoding: .utf8), !output.isEmpty,
-                  output.contains("PROXY_LOG:") else { return }
-            for line in output.split(separator: "\n") {
+        guard let healthURL = URL(string: "http://127.0.0.1:\(port)/health") else {
+            throw GlobalProxyRuntimeError.startFailed("invalid health URL")
+        }
+
+        let launchResult: QuotaServerLaunchResult
+        do {
+            launchResult = try await QuotaServerLauncher.launch(
+                arguments: ["--host", bindHost, "--port", "\(port)"],
+                environment: environment,
+                healthURL: healthURL,
+                startupTimeout: Self.startupTimeout,
+                probeIntervalNanos: Self.probeIntervalNanos
+            ) { line in
                 guard line.hasPrefix("PROXY_LOG:"),
-                      let jsonStart = line.firstIndex(of: Character("{")) else { continue }
+                      let jsonStart = line.firstIndex(of: Character("{")) else { return }
                 let jsonStr = String(line[jsonStart...])
                 Task { @MainActor in
                     // OpenCode 轨：归因到 OpenCodeProxyRuntime（节点卡片/统计/热力图同源、按节点定价算成本）。
@@ -147,16 +168,22 @@ final class GlobalProxyRuntime: ObservableObject {
                     }
                 }
             }
-        }
-
-        do {
-            try proc.run()
+        } catch QuotaServerStartupError.executableNotFound {
+            throw GlobalProxyRuntimeError.quotaServerNotFound
+        } catch QuotaServerStartupError.portInUse(let occupiedPort, _) {
+            throw GlobalProxyRuntimeError.portInUse(occupiedPort)
         } catch {
             throw GlobalProxyRuntimeError.startFailed(error.localizedDescription)
         }
+        let proc = launchResult.process
+        guard generation == startGeneration else {
+            await QuotaServerLauncher.terminateOwnedProcess(proc)
+            throw CancellationError()
+        }
 
         proc.terminationHandler = { [capturedTrack] p in
-            globalProxyRuntimeLog.notice("Global proxy (\(capturedTrack.rawValue, privacy: .public)) exited code=\(p.terminationStatus, privacy: .public)")
+            Logger(subsystem: "com.aiusage.desktop", category: "GlobalProxyRuntime")
+                .notice("Global proxy (\(capturedTrack.rawValue, privacy: .public)) exited code=\(p.terminationStatus, privacy: .public)")
             Task { @MainActor in
                 let runtime = GlobalProxyRuntime.instance(for: capturedTrack)
                 if runtime.process === p {
@@ -172,18 +199,16 @@ final class GlobalProxyRuntime: ObservableObject {
         self.activeNodeId = nodeId
         self.activeNodeName = nodeName
 
-        do {
-            try await waitForHealth(port: port, process: proc)
-        } catch {
-            stop()
-            throw error
-        }
-
         self.isRunning = true
         globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) started on \(bindHost, privacy: .public):\(port, privacy: .public) pid=\(proc.processIdentifier, privacy: .public) node=\(nodeId, privacy: .public)")
     }
 
     func stop() {
+        startGeneration &+= 1
+        stopCurrentProcess()
+    }
+
+    private func stopCurrentProcess() {
         if let proc = process, proc.isRunning {
             proc.terminate()
         }
@@ -191,6 +216,29 @@ final class GlobalProxyRuntime: ObservableObject {
         adminKey = nil
         isRunning = false
         globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) stopped")
+    }
+
+    /// `Process.terminate()` 只发信号，不保证监听端口已释放。重启前显式等待，
+    /// 超时后仅强制结束自己持有的子进程，消除 stop→start 竞态。
+    private func stopAndWaitForExit() async {
+        guard let ownedProcess = process else {
+            stopCurrentProcess()
+            return
+        }
+        stopCurrentProcess()
+
+        let deadline = Date().addingTimeInterval(1.5)
+        while ownedProcess.isRunning, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        if ownedProcess.isRunning {
+            globalProxyRuntimeLog.notice("Force-stopping QuotaServer pid=\(ownedProcess.processIdentifier, privacy: .public) after termination timeout")
+            kill(ownedProcess.processIdentifier, SIGKILL)
+            let killDeadline = Date().addingTimeInterval(0.5)
+            while ownedProcess.isRunning, Date() < killDeadline {
+                try? await Task.sleep(nanoseconds: 25_000_000)
+            }
+        }
     }
 
     // MARK: - Hot Switch
@@ -231,31 +279,4 @@ final class GlobalProxyRuntime: ObservableObject {
         globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) hot-switched to node \(nodeId, privacy: .public)")
     }
 
-    // MARK: - Helpers
-
-    private func waitForHealth(port: Int, process: Process) async throws {
-        let deadline = Date().addingTimeInterval(Self.startupTimeout)
-        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else {
-            throw GlobalProxyRuntimeError.startFailed("invalid health url")
-        }
-        var lastError = "health check timed out"
-        repeat {
-            if !process.isRunning {
-                throw GlobalProxyRuntimeError.startFailed("process exited with code \(process.terminationStatus)")
-            }
-            do {
-                var request = URLRequest(url: url, timeoutInterval: 1)
-                request.httpMethod = "GET"
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
-                    return
-                }
-                lastError = "health endpoint returned a non-2xx status"
-            } catch {
-                lastError = error.localizedDescription
-            }
-            try? await Task.sleep(nanoseconds: Self.probeIntervalNanos)
-        } while Date() < deadline
-        throw GlobalProxyRuntimeError.startFailed(lastError)
-    }
 }

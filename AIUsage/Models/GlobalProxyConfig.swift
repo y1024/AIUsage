@@ -66,9 +66,13 @@ struct GlobalProxyConfig: Codable, Equatable {
     static let defaultClaudePort = 14400
     static let defaultOpenCodePort = 14401
     // Science 轨端口全部落在 AIUsage 自有的 144xx 端口族（区别于其它同类工具，避免撞常用端口）：
-    // 代理端口 14402、沙箱监听 14410、接管内部 daemon 14411；对外唯一例外是 8765（桌面 app 硬编码默认端口）。
+    // 代理端口 14402、沙箱公开入口 14410、接管内部 daemon 14411、沙箱内部 daemon 14412；
+    // 对外唯一例外是 8765（桌面 app 硬编码默认端口）。
     static let defaultSciencePort = 14402
     static let defaultScienceListenPort = 14410
+    /// 默认沙箱的内部 daemon 端口。浏览器只访问 `defaultScienceListenPort`，
+    /// `ScienceAuthProxy` 在二者之间反代并提供即时模型目录。
+    static let defaultScienceSandboxInternalPort = 14412
     // 假账号邮箱缺省值：以 `.invalid`（RFC 2606 保留顶级域，永不可解析）保证是不可路由假账号，带 AIUsage 标识。
     static let defaultSandboxEmail = "aiusage@cslocal.invalid"
     // 接管真实实例模式下 Science 对外固定端口（= 桌面 app 默认端口）：由本地反向代理（ScienceAuthProxy）占用，

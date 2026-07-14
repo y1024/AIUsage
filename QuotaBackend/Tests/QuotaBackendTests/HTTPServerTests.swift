@@ -1,8 +1,27 @@
 import XCTest
+import Network
 @testable import QuotaBackend
 @testable import QuotaServerCore
 
 final class HTTPServerTests: XCTestCase {
+
+    func testStartupDiagnosticsClassifiesAddressInUseWithoutGuessingSignals() {
+        XCTAssertEqual(
+            QuotaServerStartupDiagnostics.category(for: NWError.posix(.EADDRINUSE)),
+            "port_in_use"
+        )
+        XCTAssertEqual(
+            QuotaServerStartupDiagnostics.category(for: NWError.posix(.ECONNREFUSED)),
+            "startup_failure"
+        )
+    }
+
+    func testStartupDiagnosticsSerializesOneLine() {
+        XCTAssertEqual(
+            QuotaServerStartupDiagnostics.singleLine("first\nsecond\r\nthird\tvalue"),
+            "first second  third value"
+        )
+    }
 
     // MARK: - Request Parsing Tests
 

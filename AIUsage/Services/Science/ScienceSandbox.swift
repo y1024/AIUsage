@@ -2,9 +2,10 @@ import Foundation
 import os.log
 
 // MARK: - Science Sandbox（隔离沙箱运行 Claude Science）
-// 用【独立 HOME + 独立 data-dir + 独立端口】启动一个隔离的 Claude Science，配合虚拟登录
-// （ScienceVirtualLogin）与本地复用代理（QuotaServer）。推理经 ANTHROPIC_BASE_URL 导去代理，
-// 全程零真实 Anthropic 凭证。对齐 CSswitch 的 launch/stop 脚本，但用原生 Swift 实现，无 node/python。
+// 用【独立 HOME + 独立 data-dir + 独立内部端口】启动一个隔离的 Claude Science，配合虚拟登录
+// （ScienceVirtualLogin）与本地复用代理（QuotaServer）。浏览器经 ScienceAuthProxy 的公开端口访问，
+// 推理经 ANTHROPIC_BASE_URL 导去代理，全程零真实 Anthropic 凭证。对齐 CSswitch 的 launch/stop
+// 脚本，但用原生 Swift 实现，无 node/python。
 //
 // 铁律护栏（见项目规则 · 与 CSswitch CLAUDE.md 一致）：
 //   - 绝不碰真实 ~/.claude-science；data-dir 恒在沙箱 HOME 之下。
@@ -145,9 +146,16 @@ enum ScienceSandbox {
 
     /// 停止沙箱 Science（只停沙箱 data-dir 的守护，绝不影响真实实例 8765）。
     static func stop(paths: ScienceSandboxPaths) throws {
-        guard isInstalled else { return }
         guard FileManager.default.fileExists(atPath: paths.dataDir) else { return }
         try guardDataDir(paths)
+
+        // The detached daemon can outlive an uninstalled/moved app bundle. In
+        // that case the official stop command is unavailable; use the strict
+        // managed-lock PID + exact --data-dir guard instead of leaving it behind.
+        guard isInstalled else {
+            _ = ScienceManagedDaemonStopper.stopFromManagedLock(dataDir: paths.dataDir)
+            return
+        }
 
         var env = ProcessInfo.processInfo.environment
         env["HOME"] = paths.home
@@ -162,40 +170,16 @@ enum ScienceSandbox {
         do {
             try proc.run()
         } catch {
-            throw ScienceSandboxError.stopFailed(error.localizedDescription)
+            let fallback = ScienceManagedDaemonStopper.stopFromManagedLock(dataDir: paths.dataDir)
+            if fallback == .refused {
+                throw ScienceSandboxError.stopFailed(error.localizedDescription)
+            }
+            return
         }
         proc.waitUntilExit()
-    }
-
-    /// 向沙箱守护请求一个新的单次登录链接（`claude-science url`；含会话令牌，~3 分钟过期）。
-    /// 直接开裸地址（127.0.0.1:port）会被判「会话过期」，必须用守护铸的带令牌链接。失败返回 nil。
-    static func loginURL(paths: ScienceSandboxPaths) -> String? {
-        guard isInstalled else { return nil }
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: ScienceSandboxPaths.scienceBinary)
-        proc.arguments = ["url", "--data-dir", paths.dataDir]
-        var env = ProcessInfo.processInfo.environment
-        env["HOME"] = paths.home
-        proc.environment = env
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        proc.standardOutput = outPipe
-        proc.standardError = errPipe
-        do {
-            try proc.run()
-        } catch {
-            sandboxLog.error("claude-science url spawn failed: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-        _ = errPipe.fileHandleForReading.readDataToEndOfFile()
-        proc.waitUntilExit()
-        guard proc.terminationStatus == 0,
-              let out = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              out.hasPrefix("http") else {
-            return nil
-        }
-        return out
+        // `stop` may return before the detached child has fully exited. The
+        // same strict guard is safe and idempotent when the lock already went.
+        _ = ScienceManagedDaemonStopper.stopFromManagedLock(dataDir: paths.dataDir)
     }
 
     /// 健康检查：轮询沙箱 Science 的 /health，直至就绪或超时。

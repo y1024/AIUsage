@@ -55,6 +55,10 @@ extension QuotaHTTPServer {
         let smallModel: String
         let maxOutputTokens: Int?
         let enableModelAliasMapping: Bool?
+        /// Science-only active node catalog. Optional keeps older app payloads
+        /// and the normal Claude Code hot-switch contract compatible.
+        let availableModels: [String]?
+        let defaultModel: String?
         /// passthrough 模式下无条件改写入站 model 为该真实模型（OpenCode anthropic 接口用）。
         let forcedModel: String?
     }

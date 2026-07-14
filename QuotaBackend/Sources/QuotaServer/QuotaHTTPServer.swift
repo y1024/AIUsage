@@ -16,6 +16,26 @@ enum QuotaHTTPServerError: LocalizedError {
     }
 }
 
+/// QuotaServer executable 与宿主 App 之间的启动错误契约。
+/// 只输出单行、无环境变量的诊断，避免顶层 async throw 退化成 SIGTRAP crash report。
+public enum QuotaServerStartupDiagnostics {
+    public static func category(for error: Error) -> String {
+        if let networkError = error as? NWError,
+           case .posix(let code) = networkError,
+           code == .EADDRINUSE {
+            return "port_in_use"
+        }
+        return "startup_failure"
+    }
+
+    public static func singleLine(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+    }
+}
+
 // MARK: - Lightweight HTTP Server
 // Uses Network.framework (no external dependencies) to serve the same JSON API
 // as the original Node.js backend.
@@ -40,6 +60,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
     let host: String
     let port: Int
+    private let startupToken: String?
     let engine = ProviderEngine()
     var httpsConfig: HTTPSConfig?
     private let lifecycleQueue = DispatchQueue(label: "com.aiusage.quotaserver.lifecycle")
@@ -146,6 +167,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     func applyClaudeUpstream(_ update: ClaudeUpstreamUpdate) -> Bool {
         let mode: ProxyMode = update.mode == "passthrough" ? .anthropicPassthrough : .openaiConvert
         guard !update.baseURL.isEmpty, !update.apiKey.isEmpty else { return false }
+        let currentConfig = proxyConfig
 
         let newConfig = ClaudeProxyConfiguration(
             enabled: true,
@@ -160,6 +182,10 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             smallModel: update.smallModel.isEmpty ? "gpt-3.5-turbo" : update.smallModel,
             maxOutputTokens: update.maxOutputTokens,
             enableModelAliasMapping: mode == .anthropicPassthrough && (update.enableModelAliasMapping ?? false),
+            availableModels: update.availableModels ?? currentConfig?.availableModels ?? [],
+            defaultModel: update.defaultModel ?? currentConfig?.defaultModel,
+            exposeScienceModelCatalog: currentConfig?.exposeScienceModelCatalog ?? false,
+            preferExactCatalogModels: currentConfig?.preferExactCatalogModels ?? false,
             forcedModel: mode == .anthropicPassthrough ? update.forcedModel : nil
         )
 
@@ -214,7 +240,8 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         proxyConfig: ClaudeProxyConfiguration? = nil,
         codexConfig: CodexProxyConfiguration? = nil,
         openCodeConfig: OpenCodeProxyConfiguration? = nil,
-        httpsConfig: HTTPSConfig? = nil
+        httpsConfig: HTTPSConfig? = nil,
+        startupToken: String? = nil
     ) {
         self.host = host
         self.port = port
@@ -223,6 +250,8 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         self.httpsConfig = httpsConfig
 
         let env = ProcessInfo.processInfo.environment
+        self.startupToken = startupToken
+            ?? env["AIUSAGE_STARTUP_TOKEN"].flatMap { $0.isEmpty ? nil : $0 }
         self.globalProxyAdminKey = env["GLOBAL_PROXY_ADMIN_KEY"].flatMap { $0.isEmpty ? nil : $0 }
         self.fixedCodexClientKey = codexConfig?.expectedClientKey
         self.fixedClaudeClientKey = proxyConfig?.expectedClientKey
@@ -492,18 +521,24 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         switch (request.method, path) {
         case ("GET", "/health"), ("GET", "/api/health"):
             let generatedAt = SharedFormatters.iso8601String(from: Date())
-            return jsonResponse(
-                [
-                    "ok": true,
-                    "generatedAt": generatedAt
-                ],
-                headers: corsHeaders
-            )
+            var payload: [String: Any] = [
+                "ok": true,
+                "generatedAt": generatedAt,
+            ]
+            if let startupToken { payload["instanceToken"] = startupToken }
+            return jsonResponse(payload, headers: corsHeaders)
 
         // MARK: - Claude Proxy Endpoints
 
         case ("POST", "/v1/messages"):
             return await handleMessagesEndpoint(request: request, headers: corsHeaders)
+
+        case ("GET", "/v1/models") where proxyConfig?.exposeScienceModelCatalog == true:
+            return handleScienceModelsEndpoint(
+                request: request,
+                queryItems: queryItems,
+                headers: corsHeaders
+            )
 
         // MARK: - Global Proxy Admin (hot-swap upstream)
 

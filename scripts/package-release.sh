@@ -88,6 +88,9 @@ DMG_PATH="$OUTPUT_DIR/${APP_NAME}-${VERSION}-macOS.dmg"
 DMG_STAGING_DIR="$WORK_DIR/dmg-root"
 APP_STAGING_ROOT="$WORK_DIR/app-staging"
 APP_PATH="$APP_STAGING_ROOT/$APP_NAME.app"
+HELPER_PATH="$APP_PATH/Contents/Helpers/QuotaServer"
+LEGACY_HELPER_DIR="$APP_PATH/Contents/Resources/Helpers"
+LEGACY_HELPER_PATH="$LEGACY_HELPER_DIR/QuotaServer"
 
 if [[ ! -d "$SOURCE_APP_PATH" ]]; then
   echo "Expected app bundle not found at $SOURCE_APP_PATH" >&2
@@ -100,6 +103,14 @@ mkdir -p "$APP_STAGING_ROOT"
 echo "Creating sanitized app bundle staging copy..."
 ditto --norsrc --noextattr --noqtn --noacl "$SOURCE_APP_PATH" "$APP_PATH"
 strip_bundle_detritus "$APP_PATH"
+
+# Defensive migration cleanup for incremental DerivedData produced before the
+# helper moved into the standard nested-code directory.
+if [[ -e "$LEGACY_HELPER_PATH" || -L "$LEGACY_HELPER_PATH" ]]; then
+  echo "Removing stale legacy helper copy from Contents/Resources/Helpers..."
+  rm -f "$LEGACY_HELPER_PATH"
+  rmdir "$LEGACY_HELPER_DIR" 2>/dev/null || true
+fi
 
 echo "Injecting custom Sparkle localization strings..."
 SPARKLE_RES=$(find "$APP_PATH/Contents/Frameworks" -path "*/Sparkle.framework/*/Resources" -type d 2>/dev/null | head -1)
@@ -135,7 +146,11 @@ verify_universal() {
 
 echo "Verifying Universal binary slices..."
 verify_universal "$APP_PATH/Contents/MacOS/$APP_NAME"
-verify_universal "$APP_PATH/Contents/Resources/Helpers/QuotaServer"
+verify_universal "$HELPER_PATH"
+if [[ -e "$LEGACY_HELPER_PATH" || -L "$LEGACY_HELPER_PATH" ]]; then
+  echo "ERROR: legacy helper copy still exists at $LEGACY_HELPER_PATH" >&2
+  exit 1
+fi
 
 # Signing identity:
 #   - When MACOS_SIGNING_IDENTITY is set (release builds in CI), sign with a
@@ -145,33 +160,64 @@ verify_universal "$APP_PATH/Contents/Resources/Helpers/QuotaServer"
 #   - Otherwise fall back to ad-hoc (local dev builds, or CI without the secret).
 SIGN_IDENTITY="${MACOS_SIGNING_IDENTITY:-}"
 SIGN_KEYCHAIN="${MACOS_SIGNING_KEYCHAIN:-}"
+CODESIGN_ARGS=(--force)
+if [[ -n "$SIGN_KEYCHAIN" ]]; then
+  CODESIGN_ARGS+=(--keychain "$SIGN_KEYCHAIN")
+fi
 
 if [[ -n "$SIGN_IDENTITY" ]]; then
-  echo "Signing ${APP_NAME}.app with stable identity (${SIGN_IDENTITY})..."
-  CODESIGN_ARGS=(--force --deep)
-  if [[ -n "$SIGN_KEYCHAIN" ]]; then
-    CODESIGN_ARGS+=(--keychain "$SIGN_KEYCHAIN")
-  fi
-  codesign "${CODESIGN_ARGS[@]}" -s "$SIGN_IDENTITY" "$APP_PATH"
+  HOST_SIGN_IDENTITY="$SIGN_IDENTITY"
+  echo "Using stable host signing identity (${SIGN_IDENTITY})."
 else
-  echo "Ad-hoc signing ${APP_NAME}.app (no MACOS_SIGNING_IDENTITY set)..."
-  codesign --force --deep -s - "$APP_PATH"
+  HOST_SIGN_IDENTITY="-"
+  echo "No MACOS_SIGNING_IDENTITY set; using ad-hoc identity for helper and app."
 fi
-codesign --verify --verbose "$APP_PATH" || true
+
+sign_with_host_identity() {
+  local target="$1"
+  codesign "${CODESIGN_ARGS[@]}" --sign "$HOST_SIGN_IDENTITY" "$target"
+}
+
+# The localization injection above changes Sparkle.framework's sealed
+# resources. Re-sign that modified nested bundle explicitly; keep --deep for
+# verification only, not recursive signing.
+if [[ -n "$SPARKLE_RES" && -d "$SPARKLE_RES" ]]; then
+  SPARKLE_FRAMEWORK="$(find "$APP_PATH/Contents/Frameworks" -maxdepth 2 -type d -name 'Sparkle.framework' -print -quit)"
+  if [[ -z "$SPARKLE_FRAMEWORK" ]]; then
+    echo "ERROR: Sparkle resources were modified but Sparkle.framework was not found." >&2
+    exit 1
+  fi
+  echo "Re-signing modified Sparkle.framework..."
+  sign_with_host_identity "$SPARKLE_FRAMEWORK"
+  codesign --verify --deep --strict --verbose=2 "$SPARKLE_FRAMEWORK"
+fi
+
+echo "Signing QuotaServer helper with the host identity..."
+sign_with_host_identity "$HELPER_PATH"
+codesign --verify --strict --verbose=2 "$HELPER_PATH"
+
+echo "Signing ${APP_NAME}.app after all nested code..."
+sign_with_host_identity "$APP_PATH"
+
+echo "Verifying nested helper and outer app signatures..."
+codesign --verify --strict --verbose=2 "$HELPER_PATH"
+codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 # Guarantee: when a stable identity was requested, the output MUST be
 # certificate-signed (designated requirement pins the cert). If it silently fell
 # back to ad-hoc, the Keychain "Always Allow" fix would be lost — so fail loudly
 # instead of shipping a build that re-prompts users on every update (issue #35).
 if [[ -n "$SIGN_IDENTITY" ]]; then
-  DESIGNATED_REQ="$(codesign -d -r- "$APP_PATH" 2>&1 || true)"
-  if ! echo "$DESIGNATED_REQ" | grep -qi 'certificate leaf'; then
-    echo "ERROR: stable signing was requested but the app is not certificate-signed." >&2
-    echo "Designated requirement:" >&2
-    echo "$DESIGNATED_REQ" >&2
-    exit 1
-  fi
-  echo "Verified stable certificate-pinned signature."
+  for SIGNED_TARGET in "$HELPER_PATH" "$APP_PATH"; do
+    DESIGNATED_REQ="$(codesign -d -r- "$SIGNED_TARGET" 2>&1 || true)"
+    if ! echo "$DESIGNATED_REQ" | grep -qi 'certificate leaf'; then
+      echo "ERROR: stable signing was requested but $SIGNED_TARGET is not certificate-signed." >&2
+      echo "Designated requirement:" >&2
+      echo "$DESIGNATED_REQ" >&2
+      exit 1
+    fi
+  done
+  echo "Verified stable certificate-pinned signatures for helper and app."
 fi
 
 rm -f "$ZIP_PATH" "$DMG_PATH"

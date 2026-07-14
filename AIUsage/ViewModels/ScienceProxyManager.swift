@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import AppKit
 import os.log
+import QuotaBackend
 
 // MARK: - Science Proxy Manager
 // 编排「Claude Science 代理」轨：一键开始 = 起代理（复用 GlobalProxyRuntime.science）→ 确保虚拟登录
@@ -41,8 +42,27 @@ final class ScienceProxyManager: ObservableObject {
     var sandboxHome: String { ScienceSandboxPaths.make().home }
     /// 是否接管真实实例（双击桌面 app 也免登录）。
     var adoptReal: Bool { config.effectiveAdoptReal }
-    /// 当前实际监听端口（接管真实实例 = 8765，否则沙箱端口）。
-    var listenPort: Int { config.effectiveScienceListenPort }
+    /// 浏览器实际访问的公开端口。两种模式都由 `ScienceAuthProxy` 监听。
+    var listenPort: Int { endpointPlan.publicPort }
+
+    /// 浏览器永远只接触公开反代；daemon 留在独立内部端口。
+    /// 这样 sandbox 与 adopt 共用同一条即时 `/api/models` 与免登录链路。
+    private var endpointPlan: ScienceProxyEndpointPlan {
+        if config.effectiveAdoptReal {
+            return ScienceProxyEndpointPlan(
+                mode: .adopt,
+                publicPort: GlobalProxyConfig.realInstancePort,
+                daemonPort: GlobalProxyConfig.realInstanceInternalPort,
+                dataDir: ScienceRealAdopt.adoptDataDir
+            )
+        }
+        return ScienceProxyEndpointPlan(
+            mode: .sandbox,
+            publicPort: config.effectiveSciencePort,
+            daemonPort: GlobalProxyConfig.defaultScienceSandboxInternalPort,
+            dataDir: ScienceSandboxPaths.make().dataDir
+        )
+    }
 
     /// 可参与的上游节点（Claude 家族节点，与「Claude Code 代理」共享节点池）。
     func availableNodes() -> [GlobalProxyNodeRef] { adapter.availableNodes(config: config) }
@@ -50,6 +70,146 @@ final class ScienceProxyManager: ObservableObject {
     func node(for id: String?) -> GlobalProxyNodeRef? {
         guard let id else { return nil }
         return availableNodes().first { $0.id == id }
+    }
+
+    /// Build the Science picker from the node's authoritative Model Library &
+    /// Pricing collection. Legacy nodes with an empty library fall back to the
+    /// configured default and three tier mappings.
+    private func modelCatalog(for nodeId: String) -> ScienceModelCatalog? {
+        guard let node = ProxyViewModel.shared.configurations.first(where: {
+            $0.id == nodeId && ProxyNodeFamily.claude.contains($0.nodeType)
+        }) else { return nil }
+
+        var protocolCatalog = ScienceModelProtocolAdapter(
+            upstreamModels: node.modelLibrary.map(\.name),
+            requestedDefault: node.defaultModel
+        )
+        if protocolCatalog.models.isEmpty {
+            protocolCatalog = ScienceModelProtocolAdapter(
+                upstreamModels: [
+                    node.defaultModel,
+                    node.modelMapping.bigModel.name,
+                    node.modelMapping.middleModel.name,
+                    node.modelMapping.smallModel.name,
+                ],
+                requestedDefault: node.defaultModel
+            )
+        }
+        guard let defaultModelID = protocolCatalog.defaultModelID,
+              let defaultUpstream = protocolCatalog.defaultUpstreamModel else { return nil }
+
+        let models = protocolCatalog.models.map { model -> ScienceModelCatalog.Model in
+            return ScienceModelCatalog.Model(
+                id: model.id,
+                upstreamModel: model.upstreamModel,
+                displayName: model.displayName,
+                description: scienceModelDescription(node: node, upstreamModel: model.upstreamModel),
+                overflow: false
+            )
+        }
+        return ScienceModelCatalog(
+            nodeID: node.id,
+            nodeName: node.name,
+            models: models,
+            defaultModelID: defaultModelID,
+            defaultUpstreamModel: defaultUpstream
+        )
+    }
+
+    /// The node exists but no usable model catalog could be produced (empty
+    /// model library and blank default/tier mappings). Distinct from a deleted
+    /// node so the user knows to fix the node's model configuration.
+    private static func emptyCatalogMessage(nodeName: String) -> String {
+        AppSettings.shared.t(
+            "Node \"\(nodeName)\" has no usable models. Add models to its Model Library & Pricing (or set a default model) and try again.",
+            "节点「\(nodeName)」没有可用模型。请先在该节点的「模型库与定价」中添加模型（或设置默认模型）后重试。"
+        )
+    }
+
+    private func scienceModelDescription(node: ProxyConfiguration, upstreamModel: String) -> String {
+        guard let pricing = node.pricingForModel(upstreamModel),
+              pricing.inputPerMillion > 0 || pricing.outputPerMillion > 0 else {
+            return "AIUsage node · \(node.name)"
+        }
+        let symbol = pricing.currency == .usd ? "$" : "¥"
+        let input = Self.compactPrice(pricing.inputPerMillion)
+        let output = Self.compactPrice(pricing.outputPerMillion)
+        return "\(node.name) · \(symbol)\(input) input / \(symbol)\(output) output per 1M"
+    }
+
+    private static func compactPrice(_ value: Double) -> String {
+        String(format: "%.6g", value)
+    }
+
+    private func injectCatalog(_ catalog: ScienceModelCatalog, into environment: inout [String: String]) {
+        let upstreamModels = catalog.models.map(\.upstreamModel)
+        if let data = try? JSONEncoder().encode(upstreamModels),
+           let json = String(data: data, encoding: .utf8) {
+            environment["AIUSAGE_SCIENCE_MODELS_JSON"] = json
+        }
+        environment["AIUSAGE_SCIENCE_DEFAULT_MODEL"] = catalog.defaultUpstreamModel
+        environment["AIUSAGE_SCIENCE_MODEL_CATALOG"] = "1"
+        environment["AIUSAGE_SCIENCE_EXACT_MODELS"] = "1"
+    }
+
+    private func normalizePersistedSelections(
+        for catalog: ScienceModelCatalog,
+        dataDir: String
+    ) async throws -> ScienceSelectionNormalizer.Result {
+        let modelIDs = Set(catalog.models.map(\.id))
+        do {
+            return try await Self.runNormalization(dataDir: dataDir, modelIDs: modelIDs)
+        } catch let error as ScienceSelectionNormalizer.NormalizationError
+            where Self.isTransientDatabaseContention(error) {
+            // Hot-switch normalizes while the daemon still holds the database.
+            // One short backoff absorbs a daemon write transaction that
+            // outlives the normalizer's SQLite busy timeout.
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            return try await Self.runNormalization(dataDir: dataDir, modelIDs: modelIDs)
+        }
+    }
+
+    private static func runNormalization(
+        dataDir: String,
+        modelIDs: Set<String>
+    ) async throws -> ScienceSelectionNormalizer.Result {
+        try await Task.detached(priority: .utility) {
+            try ScienceSelectionNormalizer.normalize(
+                dataDir: dataDir,
+                currentModelIDs: modelIDs
+            )
+        }.value
+    }
+
+    private static func isTransientDatabaseContention(
+        _ error: ScienceSelectionNormalizer.NormalizationError
+    ) -> Bool {
+        guard case .database(let message) = error else { return false }
+        let value = message.lowercased()
+        return value.contains("database is locked") || value.contains("busy")
+    }
+
+    private func endpointValidationError(for plan: ScienceProxyEndpointPlan) -> String? {
+        let reservedInternalPorts = Set([
+            GlobalProxyConfig.realInstancePort,
+            GlobalProxyConfig.realInstanceInternalPort,
+            GlobalProxyConfig.defaultScienceSandboxInternalPort,
+        ])
+        switch plan.validationIssue(proxyPort: config.port, reservedPorts: reservedInternalPorts) {
+        case .duplicatePort:
+            return AppSettings.shared.t(
+                "Port conflict: the inference proxy (\(config.port)), Science entry (\(plan.publicPort)), and internal daemon (\(plan.daemonPort)) must use different ports.",
+                "端口冲突：推理代理（\(config.port)）、Science 入口（\(plan.publicPort)）和内部 daemon（\(plan.daemonPort)）必须使用不同端口。"
+            )
+        case .reservedPort:
+            let reserved = reservedInternalPorts.sorted().map(String.init).joined(separator: ", ")
+            return AppSettings.shared.t(
+                "The selected port is reserved by Claude Science. Use a different proxy/Science port (reserved: \(reserved)).",
+                "所选端口已被 Claude Science 内部链路保留。请更换代理或 Science 端口（保留：\(reserved)）。"
+            )
+        case nil:
+            return nil
+        }
     }
 
     // MARK: - Settings（仅停用态可改）
@@ -80,19 +240,38 @@ final class ScienceProxyManager: ObservableObject {
 
     // MARK: - Start / Stop / Switch
 
-    /// 一键开始：起代理 → 虚拟登录 → 启动沙箱 → （可选）开浏览器。
+    /// 一键开始：起推理代理 → 起内部 Science daemon → 起公开认证/目录反代 → （可选）开浏览器。
     func start(activeNodeId nodeId: String, openBrowserOnReady: Bool = true) async {
         guard !isBusy else { return }
-        guard scienceInstalled else {
-            operationError = ScienceSandboxError.scienceNotInstalled.errorDescription
-            return
-        }
         isBusy = true
         operationError = nil
         defer { isBusy = false }
 
-        guard let node = node(for: nodeId), var env = adapter.startEnv(config: config, nodeId: nodeId) else {
+        // restoreOnLaunch 进入时持久态仍是 enabled。先降为停用，只有完整公开链路
+        // 自探成功后再重新提交，保证任何早退/崩溃都不会留下“界面显示运行、实际已回滚”。
+        let wasPersistedAsEnabled = config.isEnabled
+        if wasPersistedAsEnabled {
+            config.isEnabled = false
+            persist()
+        }
+        let endpoints = endpointPlan
+
+        // Every start attempt begins from one known-empty stack. This also
+        // cleans detached daemon/lock leftovers before restore-time guards can
+        // return (missing app, deleted node, or invalid ports).
+        await teardownScienceStack(endpoints)
+        guard scienceInstalled else {
+            operationError = ScienceSandboxError.scienceNotInstalled.errorDescription
+            return
+        }
+
+        guard let node = node(for: nodeId),
+              var env = adapter.startEnv(config: config, nodeId: nodeId) else {
             operationError = AppSettings.shared.t("Selected node not found.", "未找到所选节点。")
+            return
+        }
+        guard let catalog = modelCatalog(for: nodeId) else {
+            operationError = Self.emptyCatalogMessage(nodeName: node.name)
             return
         }
         // Science 与 Claude Code 的关键差异：Science daemon 每次推理都带它自造的虚拟 OAuth Bearer，
@@ -100,114 +279,171 @@ final class ScienceProxyManager: ObservableObject {
         // Science 误报「session no longer valid」。因此这里剥掉 client key → 代理对入站鉴权放行、
         // 剥离并忽略 Science 的 Bearer，再注入节点真实上游 key（对齐 CSswitch 的 strip-and-ignore）。
         env.removeValue(forKey: "ANTHROPIC_API_KEY")
+        injectCatalog(catalog, into: &env)
+
+        if let validationError = endpointValidationError(for: endpoints) {
+            operationError = validationError
+            return
+        }
+        sandboxHealthy = false
+
+        // The daemon is stopped here, so normalize stale AIUsage transport
+        // aliases before SQLite is reopened. Schema/trigger guards fail closed;
+        // a failed migration never launches a partially compatible session.
+        do {
+            let result = try await normalizePersistedSelections(for: catalog, dataDir: endpoints.dataDir)
+            if result.normalizedFrameCount > 0 || result.skippedSchemaCount > 0 {
+                scienceMgrLog.info(
+                    "Science selection normalization: databases=\(result.databaseCount), normalized=\(result.normalizedFrameCount), skippedSchemas=\(result.skippedSchemaCount)"
+                )
+            }
+        } catch {
+            operationError = AppSettings.shared.t(
+                "Couldn't update saved Claude Science model selections: \(error.localizedDescription)",
+                "无法更新 Claude Science 已保存的模型选择：\(error.localizedDescription)"
+            )
+            scienceMgrLog.error("Science selection normalization failed: \(String(describing: error), privacy: .public)")
+            return
+        }
 
         // 与 Claude Code 每节点激活互斥性无关（Science 不写 settings.json），此处不接管任何 CLI 配置。
         // 1) 起代理进程（固定端口，复用 Claude 转换链路）。
         do {
             try await runtime.start(port: config.port, bindHost: config.bindAddress, env: env, nodeId: node.id, nodeName: node.name)
+        } catch is CancellationError {
+            // Superseded by a newer lifecycle operation on this runtime; the
+            // newer owner controls the stack, so exit without a raw error.
+            return
         } catch {
+            await teardownScienceStack(endpoints)
             operationError = error.localizedDescription
             scienceMgrLog.error("Failed to start Science proxy: \(String(describing: error), privacy: .public)")
             return
         }
 
-        // 2) 起 Science：接管真实实例（8765 反代 + 内部 14411 daemon）或隔离沙箱（14410）。
+        // 2) 两种模式都只在内部端口启动 daemon；浏览器入口稍后统一交给 ScienceAuthProxy。
         let proxyPort = config.port
-        let adopting = config.effectiveAdoptReal
-        // 接管态健康检查内部 daemon 端口（14411）；沙箱态检查沙箱端口。
-        let healthPort = adopting ? GlobalProxyConfig.realInstanceInternalPort : config.effectiveSciencePort
-        let sandboxListen = config.effectiveSciencePort
-        let adoptEmail = config.effectiveSandboxEmail
+        let email = config.effectiveSandboxEmail
         do {
-            if adopting {
+            if endpoints.adopting {
                 try await Task.detached(priority: .userInitiated) {
                     // 解耦版：清场（退桌面 app + 腾端口 + 删残留劫持锁）→ 独立 data-dir 起虚拟登录 daemon（内部端口）。
                     // 绝不碰真实 ~/.claude-science 凭证；仅劫持它的 operon.lock（运行期文件，停用即删）。
                     ScienceRealAdopt.prepareForAdopt()
-                    try ScienceRealAdopt.startInternalDaemon(proxyPort: proxyPort, email: adoptEmail)
+                    try ScienceRealAdopt.startInternalDaemon(proxyPort: proxyPort, email: email)
                 }.value
             } else {
                 let paths = ScienceSandboxPaths.make()
-                let email = config.effectiveSandboxEmail
                 try await Task.detached(priority: .userInitiated) {
+                    // 迁移旧版“daemon 直接监听公开端口”的残留实例，然后在专用内部端口重启。
+                    try? ScienceSandbox.stop(paths: paths)
                     try ScienceSandbox.prepare(paths: paths)
                     _ = try ScienceVirtualLogin.ensure(authDir: paths.dataDir, email: email, sandboxRoot: paths.home)
-                    try ScienceSandbox.launch(paths: paths, sciencePort: sandboxListen, proxyPort: proxyPort)
+                    try ScienceSandbox.launch(
+                        paths: paths,
+                        sciencePort: endpoints.daemonPort,
+                        proxyPort: proxyPort
+                    )
                 }.value
             }
         } catch {
-            runtime.stop()
+            await teardownScienceStack(endpoints)
             operationError = error.localizedDescription
             scienceMgrLog.error("Failed to launch Science: \(String(describing: error), privacy: .public)")
             return
         }
 
-        // 3) 健康检查（Science daemon 起来需要几秒）。
-        let healthy = await ScienceSandbox.waitForHealth(sciencePort: healthPort)
-        sandboxHealthy = healthy
-
-        // 3b) 接管态：daemon 必须就绪 → 起 8765 反代（bind 成功才算数）→ 劫持 lock → 自探 8765 返回已登录页。
-        //     任一步失败：拆反代 + 停内部 daemon + 还原真实登录 + 停代理，明确报错、绝不落激活态（免得又是「假成功」）。
-        if adopting {
-            guard healthy else {
-                await teardownAdopt()
-                runtime.stop()
-                operationError = AppSettings.shared.t(
+        // 3) 内部 daemon 必须健康；sandbox 不再允许“未就绪但仍落激活态”。
+        guard await ScienceSandbox.waitForHealth(sciencePort: endpoints.daemonPort) else {
+            await teardownScienceStack(endpoints)
+            operationError = endpoints.adopting
+                ? AppSettings.shared.t(
                     "The adopted Claude Science daemon didn't become healthy in time.",
                     "被接管的 Claude Science daemon 未能在预期时间内就绪。"
                 )
-                scienceMgrLog.error("Adopt aborted: internal daemon unhealthy on :\(healthPort)")
-                return
-            }
-            do {
-                try await ScienceAuthProxy.shared.start(
-                    listenPort: GlobalProxyConfig.realInstancePort,
-                    upstreamPort: GlobalProxyConfig.realInstanceInternalPort,
-                    dataDir: ScienceRealAdopt.adoptDataDir
-                )
-            } catch {
-                await teardownAdopt()
-                runtime.stop()
-                operationError = error.localizedDescription
-                scienceMgrLog.error("Adopt aborted: auth proxy startup failed: \(String(describing: error), privacy: .public)")
-                return
-            }
-            await Task.detached(priority: .userInitiated) { ScienceRealAdopt.hijackLock() }.value
+                : ScienceSandboxError.healthTimeout.errorDescription
+            scienceMgrLog.error("Science start aborted: internal daemon unhealthy on :\(endpoints.daemonPort)")
+            return
+        }
 
-            // 自探：反代对 GET / 注 cookie 后应直接返回 200（不跟随登录重定向）。
-            // 失败时附带脱敏的状态/Location/Content-Type/正文摘要，便于定位协议变化。
-            let probe = await ScienceAuthProxy.shared.probe(listenPort: GlobalProxyConfig.realInstancePort)
-            if !probe.succeeded {
-                await teardownAdopt()
-                runtime.stop()
-                let baseMessage = AppSettings.shared.t(
+        // 4) 公开入口统一由反代提供：注入本地会话、拦截最终 /api/models，并设置 no-store。
+        do {
+            try await ScienceAuthProxy.shared.start(
+                listenPort: endpoints.publicPort,
+                upstreamPort: endpoints.daemonPort,
+                dataDir: endpoints.dataDir,
+                modelCatalog: catalog
+            )
+        } catch {
+            await teardownScienceStack(endpoints)
+            operationError = error.localizedDescription
+            scienceMgrLog.error("Science start aborted: auth proxy startup failed: \(String(describing: error), privacy: .public)")
+            return
+        }
+
+        if endpoints.adopting {
+            await Task.detached(priority: .userInitiated) { ScienceRealAdopt.hijackLock() }.value
+        }
+
+        // 5) 从浏览器真正访问的公开端口自探，只有完整链路返回已登录页才落激活态。
+        let probe = await ScienceAuthProxy.shared.probe(listenPort: endpoints.publicPort)
+        guard probe.succeeded else {
+            await teardownScienceStack(endpoints)
+            let baseMessage = endpoints.adopting
+                ? AppSettings.shared.t(
                     "The login-free proxy on 8765 didn't serve a logged-in page. Aborted and restored your real login.",
                     "8765 免登录反代未能返回已登录页，已中止并还原真实登录。"
                 )
-                operationError = "\(baseMessage)\n\(probe.summary)"
-                scienceMgrLog.error("Adopt aborted: 8765 self-probe failed: \(probe.summary, privacy: .public)")
-                return
-            }
-            scienceMgrLog.info("Adopt verified: 8765 reverse proxy serving logged-in page")
+                : AppSettings.shared.t(
+                    "The sandbox Science entry didn't serve a logged-in page. Startup was rolled back.",
+                    "沙箱 Science 入口未能返回已登录页，已回滚本次启动。"
+                )
+            operationError = "\(baseMessage)\n\(probe.summary)"
+            scienceMgrLog.error("Science start aborted: public endpoint :\(endpoints.publicPort) self-probe failed: \(probe.summary, privacy: .public)")
+            return
         }
+        sandboxHealthy = true
 
-        // 4) 持久化激活态；就绪则开浏览器。
+        // 6) 持久化激活态；公开入口已通过自探，可直接打开裸地址。
         config.isEnabled = true
         config.activeNodeId = nodeId
         persist()
-        scienceMgrLog.info("Science proxy started (proxy=\(proxyPort), adoptReal=\(adopting), healthy=\(healthy))")
-        if healthy, openBrowserOnReady {
+        scienceMgrLog.info("Science proxy started (proxy=\(proxyPort), public=\(endpoints.publicPort), daemon=\(endpoints.daemonPort), adoptReal=\(endpoints.adopting))")
+        if openBrowserOnReady {
             openInBrowser()
         }
     }
 
-    /// 接管失败回滚：停 8765 反代 → 停独立 daemon + 删（被劫持的）真实 operon.lock。绝不动真实凭证。
-    private func teardownAdopt() async {
+    /// 统一回滚：先停公开反代，再按模式停止独立 daemon。只有 adopt 会删除被劫持的真实运行期 lock；
+    /// sandbox 始终只操作自己的 data-dir，绝不触碰真实 ~/.claude-science。
+    private func teardownScience(_ endpoints: ScienceProxyEndpointPlan) async {
         ScienceAuthProxy.shared.stop()
         await Task.detached(priority: .userInitiated) {
-            ScienceRealAdopt.stopAdoptedDaemon()
+            if endpoints.adopting {
+                ScienceRealAdopt.stopAdoptedDaemon()
+            } else {
+                try? ScienceSandbox.stop(paths: ScienceSandboxPaths.make())
+            }
         }.value
         sandboxHealthy = false
+    }
+
+    /// Idempotent full-stack teardown used by every startup rollback and
+    /// restore guard. Keeping runtime ownership beside endpoint teardown avoids
+    /// a detached daemon/lock surviving an early return.
+    private func teardownScienceStack(_ endpoints: ScienceProxyEndpointPlan) async {
+        await teardownScience(endpoints)
+        // A crash while the *other* mode was active can leave its detached
+        // daemon running (modes use distinct ports, so it would linger
+        // silently). The strict managed-lock stopper only ever touches
+        // AIUsage-owned data dirs, so sweeping here is safe and idempotent.
+        let otherModeDataDir = endpoints.adopting
+            ? ScienceManagedDaemonStopper.managedSandboxDataDir
+            : ScienceManagedDaemonStopper.managedAdoptDataDir
+        await Task.detached(priority: .utility) {
+            ScienceManagedDaemonStopper.stopFromManagedLock(dataDir: otherModeDataDir)
+        }.value
+        runtime.stop()
     }
 
     /// 热切换激活上游节点：进程不重启、Science 无感。
@@ -222,10 +458,17 @@ final class ScienceProxyManager: ObservableObject {
         operationError = nil
         defer { isBusy = false }
 
-        guard let node = node(for: nodeId), let payload = adapter.switchPayload(config: config, nodeId: nodeId) else {
+        guard let node = node(for: nodeId),
+              var payload = adapter.switchPayload(config: config, nodeId: nodeId) else {
             operationError = AppSettings.shared.t("Selected node not found.", "未找到所选节点。")
             return
         }
+        guard let catalog = modelCatalog(for: nodeId) else {
+            operationError = Self.emptyCatalogMessage(nodeName: node.name)
+            return
+        }
+        payload["availableModels"] = catalog.models.map(\.upstreamModel)
+        payload["defaultModel"] = catalog.defaultUpstreamModel
         do {
             try await runtime.switchUpstream(
                 payload: payload,
@@ -233,8 +476,27 @@ final class ScienceProxyManager: ObservableObject {
                 nodeId: node.id,
                 nodeName: node.name
             )
+            ScienceAuthProxy.shared.updateModelCatalog(catalog)
             config.activeNodeId = nodeId
             persist()
+
+            do {
+                let result = try await normalizePersistedSelections(
+                    for: catalog,
+                    dataDir: endpointPlan.dataDir
+                )
+                if result.normalizedFrameCount > 0 || result.skippedSchemaCount > 0 {
+                    scienceMgrLog.info(
+                        "Science hot-switch selection normalization: databases=\(result.databaseCount), normalized=\(result.normalizedFrameCount), skippedSchemas=\(result.skippedSchemaCount)"
+                    )
+                }
+            } catch {
+                operationError = AppSettings.shared.t(
+                    "The node switched, but saved Claude Science model selections couldn't be updated: \(error.localizedDescription)",
+                    "节点已切换，但无法更新 Claude Science 已保存的模型选择：\(error.localizedDescription)"
+                )
+                scienceMgrLog.error("Science hot-switch selection normalization failed: \(String(describing: error), privacy: .public)")
+            }
         } catch {
             operationError = error.localizedDescription
             scienceMgrLog.error("Failed to hot-switch Science node: \(String(describing: error), privacy: .public)")
@@ -248,32 +510,34 @@ final class ScienceProxyManager: ObservableObject {
         operationError = nil
         defer { isBusy = false }
 
-        let adopting = config.effectiveAdoptReal
-        let paths = ScienceSandboxPaths.make()
-        if adopting {
-            ScienceAuthProxy.shared.stop() // 先停 8765 反代
-        }
-        await Task.detached(priority: .userInitiated) {
-            if adopting {
-                // 停独立 daemon + 删（被劫持的）真实 operon.lock。绝不动真实凭证。
-                ScienceRealAdopt.stopAdoptedDaemon()
-            } else {
-                try? ScienceSandbox.stop(paths: paths)
-            }
-        }.value
-        runtime.stop()
-        sandboxHealthy = false
+        let endpoints = endpointPlan
+        await teardownScienceStack(endpoints)
         config.isEnabled = false
         persist()
-        scienceMgrLog.info("Science proxy stopped (adoptReal=\(adopting))")
+        scienceMgrLog.info("Science proxy stopped (adoptReal=\(endpoints.adopting))")
     }
 
     // MARK: - Launch Restore
 
     func restoreOnLaunch() async {
         guard config.isEnabled else { return }
-        guard AppSettings.shared.proxyAutoRestoreOnLaunch else { return }
+        let endpoints = endpointPlan
+        guard AppSettings.shared.proxyAutoRestoreOnLaunch else {
+            await teardownScienceStack(endpoints)
+            config.isEnabled = false
+            persist()
+            return
+        }
+        guard scienceInstalled else {
+            await teardownScienceStack(endpoints)
+            config.isEnabled = false
+            persist()
+            operationError = ScienceSandboxError.scienceNotInstalled.errorDescription
+            scienceMgrLog.notice("Science restore disabled because Claude Science is not installed")
+            return
+        }
         guard let nodeId = config.activeNodeId, node(for: nodeId) != nil else {
+            await teardownScienceStack(endpoints)
             scienceMgrLog.notice("Science proxy active node missing on launch; disabling")
             config.isEnabled = false
             persist()
@@ -284,27 +548,10 @@ final class ScienceProxyManager: ObservableObject {
 
     // MARK: - Browser / Sandbox utilities
 
-    /// 打开已登录的 Science。
-    /// - 接管态：直接开 http://localhost:8765/（反代给每个请求注入会话 cookie → 免登录）。
-    /// - 沙箱态：向守护要一个带会话令牌的单次链接（`claude-science url`）再开；失败回退裸地址。
+    /// 打开已登录的 Science。两种模式都访问公开反代；反代注入当前会话，
+    /// 因此不再依赖一次性 nonce URL，也不会绕过即时模型目录。
     func openInBrowser() {
-        if config.effectiveAdoptReal {
-            if let url = URL(string: "http://localhost:\(GlobalProxyConfig.realInstancePort)/") {
-                NSWorkspace.shared.open(url)
-            }
-            return
-        }
-        let paths = ScienceSandboxPaths.make()
-        let fallback = "http://127.0.0.1:\(config.effectiveScienceListenPort)"
-        Task { @MainActor in
-            let link = await Task.detached(priority: .userInitiated) {
-                ScienceSandbox.loginURL(paths: paths)
-            }.value
-            let target = link ?? fallback
-            if link == nil {
-                scienceMgrLog.notice("claude-science url unavailable; opening bare address")
-            }
-            guard let url = URL(string: target) else { return }
+        if let url = URL(string: "http://localhost:\(listenPort)/") {
             NSWorkspace.shared.open(url)
         }
     }

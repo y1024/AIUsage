@@ -1,13 +1,17 @@
 import Foundation
 import XCTest
 @testable import QuotaBackend
-import QuotaServerCore
+@testable import QuotaServerCore
 
 final class QuotaHTTPServerProxyIntegrationTests: XCTestCase {
 
     func testHealthEndpointReportsReady() async throws {
         let proxyPort = try findFreePort()
-        let server = QuotaHTTPServer(host: "127.0.0.1", port: proxyPort)
+        let server = QuotaHTTPServer(
+            host: "127.0.0.1",
+            port: proxyPort,
+            startupToken: "test-instance-token"
+        )
         try await server.start()
         defer { server.stop() }
 
@@ -19,6 +23,102 @@ final class QuotaHTTPServerProxyIntegrationTests: XCTestCase {
         )
         XCTAssertEqual(json["ok"] as? Bool, true)
         XCTAssertFalse((json["generatedAt"] as? String ?? "").isEmpty)
+        XCTAssertEqual(json["instanceToken"] as? String, "test-instance-token")
+    }
+
+    func testScienceModelsEndpointUsesActiveCatalogAndRequiresClientKey() async throws {
+        let proxyPort = try findFreePort()
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            bindPort: proxyPort,
+            mode: .openaiConvert,
+            upstreamBaseURL: "http://127.0.0.1:9",
+            upstreamAPIKey: "upstream-key",
+            expectedClientKey: "client-key",
+            availableModels: ["glm-5.2", "ZhipuAI/GLM-5.2"],
+            defaultModel: "glm-5.2",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true
+        )
+        let server = QuotaHTTPServer(host: "127.0.0.1", port: proxyPort, proxyConfig: config)
+        try await server.start()
+        defer { server.stop() }
+
+        let url = URL(string: "http://127.0.0.1:\(proxyPort)/v1/models?limit=1000")!
+        let (_, unauthorizedResponse) = try await URLSession.shared.data(from: url)
+        XCTAssertEqual((unauthorizedResponse as? HTTPURLResponse)?.statusCode, 401)
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer client-key", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let models = try XCTUnwrap(json["data"] as? [[String: Any]])
+        XCTAssertEqual(models.count, 2)
+        XCTAssertEqual(models[0]["id"] as? String, config.scienceDefaultModelID)
+        XCTAssertEqual(models[0]["display_name"] as? String, "glm-5.2")
+        XCTAssertEqual(models[1]["display_name"] as? String, "ZhipuAI/GLM-5.2")
+        XCTAssertEqual(models[0]["type"] as? String, "model")
+        XCTAssertEqual(json["has_more"] as? Bool, false)
+        XCTAssertEqual(json["first_id"] as? String, models[0]["id"] as? String)
+        XCTAssertEqual(json["last_id"] as? String, models[1]["id"] as? String)
+
+        var pagedRequest = URLRequest(url: URL(string: "http://127.0.0.1:\(proxyPort)/v1/models?limit=1")!)
+        pagedRequest.setValue("client-key", forHTTPHeaderField: "x-api-key")
+        let (pagedData, pagedResponse) = try await URLSession.shared.data(for: pagedRequest)
+        XCTAssertEqual((pagedResponse as? HTTPURLResponse)?.statusCode, 200)
+        let pagedJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: pagedData) as? [String: Any])
+        XCTAssertEqual((pagedJSON["data"] as? [[String: Any]])?.count, 1)
+        XCTAssertEqual(pagedJSON["has_more"] as? Bool, true)
+    }
+
+    func testScienceCatalogHotSwitchReplacesAliasesAndContainsStaleSelection() throws {
+        let initial = ClaudeProxyConfiguration(
+            enabled: true,
+            mode: .openaiConvert,
+            upstreamBaseURL: "http://127.0.0.1:9",
+            upstreamAPIKey: "old-key",
+            availableModels: ["old-default", "old-extra"],
+            defaultModel: "old-default",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true
+        )
+        let staleAlias = try XCTUnwrap(
+            initial.scienceCatalogModels.first { $0.upstreamModel == "old-extra" }?.id
+        )
+        let server = QuotaHTTPServer(host: "127.0.0.1", port: 4318, proxyConfig: initial)
+
+        let update = QuotaHTTPServer.ClaudeUpstreamUpdate(
+            nodeId: "new-node",
+            mode: "convert",
+            baseURL: "http://127.0.0.1:10",
+            apiKey: "new-key",
+            apiMode: "chat_completions",
+            bigModel: "new-default",
+            middleModel: "new-default",
+            smallModel: "new-default",
+            maxOutputTokens: nil,
+            enableModelAliasMapping: false,
+            availableModels: ["new-default", "new-extra"],
+            defaultModel: "new-default",
+            forcedModel: nil
+        )
+
+        XCTAssertTrue(server.applyClaudeUpstream(update))
+        let switched = try XCTUnwrap(server.proxyConfig)
+        XCTAssertEqual(switched.availableModels, ["new-default", "new-extra"])
+        XCTAssertTrue(switched.exposeScienceModelCatalog)
+        XCTAssertTrue(switched.preferExactCatalogModels)
+        XCTAssertEqual(switched.mapToUpstreamModel(staleAlias), "new-default")
+        XCTAssertEqual(
+            switched.mapToUpstreamModel(switched.scienceDefaultModelID ?? ""),
+            "new-default"
+        )
+        let currentAlias = try XCTUnwrap(
+            switched.scienceCatalogModels.first { $0.upstreamModel == "new-extra" }?.id
+        )
+        XCTAssertEqual(switched.mapToUpstreamModel(currentAlias), "new-extra")
     }
 
     func testMessagesEndpointRejectsInvalidClientKey() async throws {

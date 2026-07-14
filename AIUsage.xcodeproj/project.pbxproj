@@ -68,6 +68,8 @@
 		7A3790A33E2F7B1157812AA1 /* ScienceRealAdopt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C8773DDEF6B585EC2A61FE2 /* ScienceRealAdopt.swift */; };
 		AB01SCAP01F92000000A15674 /* ScienceAuthProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01SCAP02F92000000A15674 /* ScienceAuthProxy.swift */; };
 		AB01SCAP03F92000000A15674 /* ScienceAuthProxy+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01SCAP04F92000000A15674 /* ScienceAuthProxy+Helpers.swift */; };
+		AB01SCAP05F92000000A15674 /* ScienceSelectionNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01SCAP06F92000000A15674 /* ScienceSelectionNormalizer.swift */; };
+		AB01SCAP07F92000000A15674 /* ScienceManagedDaemonStopper.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01SCAP08F92000000A15674 /* ScienceManagedDaemonStopper.swift */; };
 		7EFAD0022F87AC7100A15674 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EFAD0012F87AC7100A15674 /* AppSettings.swift */; };
 		8307FB7ACC6E3DB155687D2A /* ScienceVirtualLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1605CC60CDCED105310339E /* ScienceVirtualLogin.swift */; };
 		A1ACCS022F92000000A15674 /* AccountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1ACCS012F92000000A15674 /* AccountStore.swift */; };
@@ -177,6 +179,7 @@
 		C1OE00082FB0002000B26789 /* OpenCodeManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */; };
 		C1OE000A2FB0002000B26789 /* OpenCodeNodeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */; };
 		C1OE000C2FB0002000B26789 /* QuotaServerLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */; };
+		C1QL00022FB0008000B26789 /* QuotaServerLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1QL00012FB0008000B26789 /* QuotaServerLauncher.swift */; };
 		C1OE000E2FB0002000B26789 /* OpenCodeProxyRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */; };
 		C1OE00122FB0003000B26789 /* ModelSuggestionField.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */; };
 		C1OE00142FB0004000B26789 /* OpenCodeNodeStatsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */; };
@@ -205,6 +208,8 @@
 		1C8773DDEF6B585EC2A61FE2 /* ScienceRealAdopt.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceRealAdopt.swift; sourceTree = "<group>"; };
 		AB01SCAP02F92000000A15674 /* ScienceAuthProxy.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceAuthProxy.swift; sourceTree = "<group>"; };
 		AB01SCAP04F92000000A15674 /* ScienceAuthProxy+Helpers.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ScienceAuthProxy+Helpers.swift"; sourceTree = "<group>"; };
+		AB01SCAP06F92000000A15674 /* ScienceSelectionNormalizer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceSelectionNormalizer.swift; sourceTree = "<group>"; };
+		AB01SCAP08F92000000A15674 /* ScienceManagedDaemonStopper.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceManagedDaemonStopper.swift; sourceTree = "<group>"; };
 		2A97BD3A13311949E62C066C /* ProxyStatsView+Distribution.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProxyStatsView+Distribution.swift"; sourceTree = "<group>"; };
 		2D613C7828C6DACECB0171A7 /* StatsDataAdapter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StatsDataAdapter.swift; sourceTree = "<group>"; };
 		5474125839BFE89230DB2B31 /* ProxyUsageArchive.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProxyUsageArchive.swift; sourceTree = "<group>"; };
@@ -370,6 +375,7 @@
 		C1OE00072FB0002000B26789 /* OpenCodeManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagementView.swift; sourceTree = "<group>"; };
 		C1OE00092FB0002000B26789 /* OpenCodeNodeEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeEditorView.swift; sourceTree = "<group>"; };
 		C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaServerLocator.swift; sourceTree = "<group>"; };
+		C1QL00012FB0008000B26789 /* QuotaServerLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaServerLauncher.swift; sourceTree = "<group>"; };
 		C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeProxyRuntime.swift; sourceTree = "<group>"; };
 		C1OE00112FB0003000B26789 /* ModelSuggestionField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSuggestionField.swift; sourceTree = "<group>"; };
 		C1OE00132FB0004000B26789 /* OpenCodeNodeStatsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeNodeStatsStore.swift; sourceTree = "<group>"; };
@@ -521,6 +527,7 @@
 				B1PA00002F97002000A15674 /* ProxyPortArbiter.swift */,
 				B1GP00102F97002000A15674 /* GlobalProxyRuntime.swift */,
 				C1OE000B2FB0002000B26789 /* QuotaServerLocator.swift */,
+				C1QL00012FB0008000B26789 /* QuotaServerLauncher.swift */,
 				C1OE00232FB0007000B26789 /* CCSwitchLocator.swift */,
 				C1OE000D2FB0002000B26789 /* OpenCodeProxyRuntime.swift */,
 				C1OE00192FB0004000B26789 /* OpenCodeConnectivityTester.swift */,
@@ -683,6 +690,8 @@
 				1C8773DDEF6B585EC2A61FE2 /* ScienceRealAdopt.swift */,
 				AB01SCAP02F92000000A15674 /* ScienceAuthProxy.swift */,
 				AB01SCAP04F92000000A15674 /* ScienceAuthProxy+Helpers.swift */,
+				AB01SCAP06F92000000A15674 /* ScienceSelectionNormalizer.swift */,
+				AB01SCAP08F92000000A15674 /* ScienceManagedDaemonStopper.swift */,
 			);
 			name = Science;
 			path = Science;
@@ -785,7 +794,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\nBUILD_CONFIG=debug\nif [ \"${CONFIGURATION}\" = \"Release\" ]; then\n  BUILD_CONFIG=release\nfi\nSWIFT_BIN=\"$(xcrun --find swift)\"\n# Build the helper for every slice the app itself is building, so a Universal\n# release (arm64 + x86_64) ships a QuotaServer that also runs on Intel Macs.\n# Debug builds keep ONLY_ACTIVE_ARCH=YES, so ARCHS is just the native arch.\nARCH_FLAGS=\"\"\nfor ARCH in ${ARCHS:-$(uname -m)}; do\n  ARCH_FLAGS=\"$ARCH_FLAGS --arch $ARCH\"\ndone\n\"$SWIFT_BIN\" build --package-path \"$SRCROOT/QuotaBackend\" --product QuotaServer -c \"$BUILD_CONFIG\" $ARCH_FLAGS\n# --arch changes the SwiftPM output directory; resolve it instead of hardcoding.\nBIN_DIR=\"$(\"$SWIFT_BIN\" build --package-path \"$SRCROOT/QuotaBackend\" --product QuotaServer -c \"$BUILD_CONFIG\" $ARCH_FLAGS --show-bin-path)\"\nHELPER_DIR=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/Helpers\"\nmkdir -p \"$HELPER_DIR\"\ncp \"$BIN_DIR/QuotaServer\" \"$HELPER_DIR/QuotaServer\"\nchmod +x \"$HELPER_DIR/QuotaServer\"\n";
+			shellScript = "/bin/bash \"$SRCROOT/scripts/build-quota-server-helper.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -863,6 +872,7 @@
 				C1OE001C2FB0004000B26789 /* OpenCodeManagementView+Toolbar.swift in Sources */,
 				C1OE000A2FB0002000B26789 /* OpenCodeNodeEditorView.swift in Sources */,
 				C1OE000C2FB0002000B26789 /* QuotaServerLocator.swift in Sources */,
+				C1QL00022FB0008000B26789 /* QuotaServerLauncher.swift in Sources */,
 				C1OE00242FB0007000B26789 /* CCSwitchLocator.swift in Sources */,
 				C1OE000E2FB0002000B26789 /* OpenCodeProxyRuntime.swift in Sources */,
 				C1OE00122FB0003000B26789 /* ModelSuggestionField.swift in Sources */,
@@ -979,6 +989,8 @@
 				7A3790A33E2F7B1157812AA1 /* ScienceRealAdopt.swift in Sources */,
 				AB01SCAP01F92000000A15674 /* ScienceAuthProxy.swift in Sources */,
 				AB01SCAP03F92000000A15674 /* ScienceAuthProxy+Helpers.swift in Sources */,
+				AB01SCAP05F92000000A15674 /* ScienceSelectionNormalizer.swift in Sources */,
+				AB01SCAP07F92000000A15674 /* ScienceManagedDaemonStopper.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1134,7 +1146,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.14.2;
+				MARKETING_VERSION = 0.14.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1166,7 +1178,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.14.2;
+				MARKETING_VERSION = 0.14.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

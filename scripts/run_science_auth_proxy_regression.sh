@@ -11,7 +11,10 @@ trap cleanup EXIT
 
 swiftc -parse-as-library \
   "$ROOT_DIR/AIUsage/Services/Science/ScienceAuthProxy+Helpers.swift" \
+  "$ROOT_DIR/AIUsage/Services/Science/ScienceManagedDaemonStopper.swift" \
+  "$ROOT_DIR/AIUsage/Services/Science/ScienceSelectionNormalizer.swift" \
   "$ROOT_DIR/scripts/ScienceAuthProxyRegression.swift" \
+  -lsqlite3 \
   -o "$WORK_DIR/science-auth-regression"
 
 "$WORK_DIR/science-auth-regression"

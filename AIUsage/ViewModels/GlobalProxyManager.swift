@@ -116,6 +116,10 @@ final class GlobalProxyManager: ObservableObject {
             config.activeNodeId = nodeId
             persist()
             globalProxyManagerLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) enabled with node \(nodeId, privacy: .public)")
+        } catch is CancellationError {
+            // Superseded by a newer lifecycle operation on this runtime; the
+            // newer owner controls the process, so exit without a raw error.
+            return
         } catch {
             runtime.stop()
             operationError = error.localizedDescription
@@ -196,6 +200,8 @@ final class GlobalProxyManager: ObservableObject {
             // CLI 配置在上次会话已写入并指向同端口；幂等重注入确保仍然有效。
             try adapter.activateCLIConfig(config)
             globalProxyManagerLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) restored on launch with node \(node.id, privacy: .public)")
+        } catch is CancellationError {
+            return
         } catch {
             globalProxyManagerLog.error("Failed to restore global proxy (\(self.track.rawValue, privacy: .public)) on launch: \(String(describing: error), privacy: .public)")
             operationError = error.localizedDescription

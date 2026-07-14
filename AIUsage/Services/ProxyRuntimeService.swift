@@ -7,7 +7,7 @@ import Darwin
 /// （Claude/Codex/OpenCode 三轨共用，统一并发语义）。
 ///
 /// 设计要点：
-/// - 只清理「本 App 的 QuotaServer helper」（按可执行名识别），绝不误杀占用同端口的外部进程。
+/// - 只清理当前 App 的 QuotaServer 子进程或 PPID==1 的孤儿，绝不误杀另一 App 实例或手工 helper。
 /// - SIGTERM → 复核端口 → 仍占用则升级 SIGKILL → 再复核，避免「发了信号但端口没真正释放」。
 /// - 端口被外部进程占用时不杀，交由上层给出清晰报错，而不是让新进程绑定失败后以 code 9 退出。
 actor ProxyProcessInspector {
@@ -24,12 +24,12 @@ actor ProxyProcessInspector {
 
     // MARK: - 端口回收（激活/启动前）
 
-    /// 尽力释放端口：仅针对本 App 的 QuotaServer helper，SIGTERM→复核→SIGKILL→复核。
-    /// 不动占用端口的外部进程（交由 `isPortOccupied` + 上层报错处理）。
+    /// 尽力释放端口：仅针对当前 App 的子 helper 或 PPID==1 的孤儿，SIGTERM→复核→SIGKILL→复核。
+    /// 不动另一 AIUsage 实例、手工 QuotaServer 或其它外部进程（交由上层报端口占用）。
     /// 保留原方法名与 `throws` 签名，OpenCode 轨道无需改动。
     func killStaleProcesses(port: Int, currentProcessIdentifier: Int32) throws {
         let ownHelpers = pids(onPort: port)
-            .filter { $0 != currentProcessIdentifier && isOwnHelper(pid: $0) }
+            .filter { isReapableHelper(pid: $0, currentProcessIdentifier: currentProcessIdentifier) }
         guard !ownHelpers.isEmpty else { return }
 
         for pid in ownHelpers {
@@ -40,7 +40,7 @@ actor ProxyProcessInspector {
 
         // SIGTERM 后端口仍被本 App helper 占用 → 升级 SIGKILL，避免孤儿进程拖死激活。
         let survivors = pids(onPort: port)
-            .filter { $0 != currentProcessIdentifier && isOwnHelper(pid: $0) }
+            .filter { isReapableHelper(pid: $0, currentProcessIdentifier: currentProcessIdentifier) }
         for pid in survivors {
             log.notice("Force-killing unresponsive proxy helper on port \(port, privacy: .public): pid=\(pid, privacy: .public)")
             kill(pid, SIGKILL)
@@ -131,6 +131,12 @@ actor ProxyProcessInspector {
         return (path as NSString).lastPathComponent == Self.helperExecutableName
     }
 
+    private func isReapableHelper(pid: Int32, currentProcessIdentifier: Int32) -> Bool {
+        guard pid != currentProcessIdentifier, isOwnHelper(pid: pid) else { return false }
+        let parent = parentPid(of: pid)
+        return parent == currentProcessIdentifier || parent == 1
+    }
+
     /// 枚举所有进程，筛出本 App 的 QuotaServer helper。
     private func ownHelperPids() -> [Int32] {
         let capacity = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
@@ -173,6 +179,7 @@ final class ProxyRuntimeService {
 
     private let settingsManager: ClaudeSettingsManager
     private var runningProcesses: [String: Process] = [:]
+    private var startGenerations: [String: UInt64] = [:]
 
     init(settingsManager: ClaudeSettingsManager? = nil) {
         self.settingsManager = settingsManager ?? ClaudeSettingsManager.shared
@@ -412,6 +419,8 @@ final class ProxyRuntimeService {
             runtimeLog.info("Proxy already running for node \(config.name, privacy: .public)")
             return
         }
+        let generation = (startGenerations[config.id] ?? 0) &+ 1
+        startGenerations[config.id] = generation
 
         // 跨轨端口仲裁：端口已被另一条正在运行的代理（Claude/Codex/OpenCode）占用时直接报错，
         // 必须在 killStaleProcesses 之前——否则会把对方这条活代理当作残留 helper 误杀。
@@ -500,129 +509,73 @@ final class ProxyRuntimeService {
             }
         }
 
-        guard let executablePath = await QuotaServerLocator.find() else {
-            runtimeLog.error("QuotaServer executable not found while starting node \(config.name, privacy: .public)")
-            throw ProxyRuntimeError.quotaServerNotFound
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = [
-            "--host", config.bindAddress,
-            "--port", "\(config.port)"
-        ]
-        process.environment = environment
-
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-
         let configId = config.id
         let configName = config.name
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
-            runtimeLog.debug("Proxy runtime output for \(configName, privacy: .public): \(output, privacy: .private)")
+        let healthHost = healthCheckHost(for: config.host)
+        let healthHostComponent = healthHost.contains(":") && !healthHost.hasPrefix("[")
+            ? "[\(healthHost)]"
+            : healthHost
+        guard let healthURL = URL(string: "http://\(healthHostComponent):\(config.port)/health") else {
+            throw ProxyRuntimeError.proxyStartFailed("invalid health URL")
+        }
 
-            // 高频 stdout 输出只在确认含 PROXY_LOG 标记时才做行拆分与解析，
-            // 避免代理流量高峰期对每块输出做无谓的全量字符串处理。
-            guard output.contains("PROXY_LOG:") else { return }
-
-            for line in output.split(separator: "\n") {
+        let launchResult: QuotaServerLaunchResult
+        do {
+            launchResult = try await QuotaServerLauncher.launch(
+                arguments: ["--host", config.bindAddress, "--port", "\(config.port)"],
+                environment: environment,
+                healthURL: healthURL,
+                startupTimeout: Self.proxyStartupTimeout,
+                probeIntervalNanos: Self.proxyStartupProbeIntervalNanos
+            ) { [weak self] line in
+                runtimeLog.debug("Proxy runtime output for \(configName, privacy: .public): \(line, privacy: .private)")
                 guard line.hasPrefix("PROXY_LOG:"),
-                      let jsonStart = line.firstIndex(of: Character("{")) else {
-                    continue
-                }
-
+                      let jsonStart = line.firstIndex(of: Character("{")) else { return }
                 let jsonStr = String(line[jsonStart...])
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.delegate?.proxyRuntimeService(self, didReceiveProxyLog: jsonStr, configId: configId)
                 }
             }
+        } catch QuotaServerStartupError.executableNotFound {
+            runtimeLog.error("QuotaServer executable not found while starting node \(config.name, privacy: .public)")
+            throw ProxyRuntimeError.quotaServerNotFound
+        } catch QuotaServerStartupError.portInUse(let occupiedPort, _) {
+            throw ProxyRuntimeError.proxyPortInUse(occupiedPort)
+        } catch {
+            runtimeLog.error("Failed to start proxy for node \(config.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            throw ProxyRuntimeError.proxyStartFailed(error.localizedDescription)
         }
 
-        do {
-            try process.run()
-            try await waitForProxyHealth(process: process, config: config)
-            runningProcesses[config.id] = process
-            runtimeLog.info(
-                "Proxy started for node \(config.name, privacy: .public) on \(config.displayURL, privacy: .public) pid=\(process.processIdentifier, privacy: .public)"
-            )
+        let process = launchResult.process
+        guard startGenerations[config.id] == generation else {
+            await QuotaServerLauncher.terminateOwnedProcess(process)
+            throw CancellationError()
+        }
+        runningProcesses[config.id] = process
+        runtimeLog.info(
+            "Proxy started for node \(config.name, privacy: .public) on \(config.displayURL, privacy: .public) pid=\(process.processIdentifier, privacy: .public)"
+        )
 
-            process.terminationHandler = { [weak self] proc in
-                runtimeLog.notice(
-                    "Proxy process exited for node \(config.name, privacy: .public) code=\(proc.terminationStatus, privacy: .public)"
-                )
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.runningProcesses.removeValue(forKey: config.id)
-                    self.delegate?.proxyRuntimeService(self, processDidTerminateFor: config.id)
-                }
+        process.terminationHandler = { [weak self] proc in
+            runtimeLog.notice(
+                "Proxy process exited for node \(config.name, privacy: .public) code=\(proc.terminationStatus, privacy: .public)"
+            )
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard self.runningProcesses[config.id] === proc else { return }
+                self.runningProcesses.removeValue(forKey: config.id)
+                self.delegate?.proxyRuntimeService(self, processDidTerminateFor: config.id)
             }
-        } catch {
-            if process.isRunning {
-                process.terminate()
-            }
-            runtimeLog.error("Failed to start proxy for node \(config.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            throw error is ProxyRuntimeError
-                ? error
-                : ProxyRuntimeError.proxyStartFailed(error.localizedDescription)
         }
     }
 
     private func stopProxy(_ config: ProxyConfiguration) {
+        startGenerations[config.id] = (startGenerations[config.id] ?? 0) &+ 1
         guard let process = runningProcesses[config.id] else { return }
         process.terminate()
         runningProcesses.removeValue(forKey: config.id)
         proxyRuntimeLog.info("Proxy stopped for node \(config.name, privacy: .public)")
-    }
-
-    private func waitForProxyHealth(process: Process, config: ProxyConfiguration) async throws {
-        let deadline = Date().addingTimeInterval(Self.proxyStartupTimeout)
-        var lastErrorDescription: String?
-
-        repeat {
-            if !process.isRunning {
-                throw ProxyRuntimeError.proxyStartFailed("process exited with code \(process.terminationStatus)")
-            }
-
-            do {
-                if try await probeProxyHealth(config: config) {
-                    return
-                }
-                lastErrorDescription = "health endpoint returned a non-2xx status"
-            } catch {
-                lastErrorDescription = error.localizedDescription
-            }
-
-            try await Task.sleep(nanoseconds: Self.proxyStartupProbeIntervalNanos)
-        } while Date() < deadline
-
-        if !process.isRunning {
-            throw ProxyRuntimeError.proxyStartFailed("process exited with code \(process.terminationStatus)")
-        }
-
-        if let lastErrorDescription {
-            throw ProxyRuntimeError.proxyStartFailed("health check timed out: \(lastErrorDescription)")
-        }
-        throw ProxyRuntimeError.proxyStartFailed("health check timed out")
-    }
-
-    private func probeProxyHealth(config: ProxyConfiguration) async throws -> Bool {
-        let host = healthCheckHost(for: config.host)
-        let hostComponent = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
-        guard let url = URL(string: "http://\(hostComponent):\(config.port)/health") else {
-            return false
-        }
-
-        var request = URLRequest(url: url, timeoutInterval: 1)
-        request.httpMethod = "GET"
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            return false
-        }
-        return (200..<300).contains(http.statusCode)
     }
 
     private func healthCheckHost(for configuredHost: String) -> String {

@@ -35,6 +35,15 @@ public struct ClaudeProxyConfiguration: Sendable {
     public let smallModel: String
     public let maxOutputTokens: Int?
     public let enableModelAliasMapping: Bool
+    /// Active node model ids made available to Claude Science. Empty for normal
+    /// Claude Code proxy processes, so `/v1/models` remains unexposed there.
+    public let availableModels: [String]
+    public let defaultModel: String?
+    public let exposeScienceModelCatalog: Bool
+    /// Science may retain a raw model id in browser storage. When enabled, an
+    /// exact active-catalog id wins over the legacy opus/sonnet/haiku mapping.
+    public let preferExactCatalogModels: Bool
+    private let scienceModelProtocol: ScienceModelProtocolAdapter
     /// 全局统一代理（OpenCode anthropic 接口）模式下，把入站请求体的 `model` 无条件改写为该真实上游模型名，
     /// 优先于三层别名映射。nil = 不强制（普通 Claude Code 轨）。
     public let forcedModel: String?
@@ -55,6 +64,10 @@ public struct ClaudeProxyConfiguration: Sendable {
         smallModel: String = "gpt-3.5-turbo",
         maxOutputTokens: Int? = nil,
         enableModelAliasMapping: Bool = false,
+        availableModels: [String] = [],
+        defaultModel: String? = nil,
+        exposeScienceModelCatalog: Bool = false,
+        preferExactCatalogModels: Bool = false,
         forcedModel: String? = nil,
         requestTimeout: TimeInterval = 60,
         customHeaders: [String: String] = [:],
@@ -74,6 +87,16 @@ public struct ClaudeProxyConfiguration: Sendable {
         self.smallModel = smallModel
         self.maxOutputTokens = maxOutputTokens
         self.enableModelAliasMapping = enableModelAliasMapping
+        let scienceModelProtocol = ScienceModelProtocolAdapter(
+            upstreamModels: availableModels,
+            requestedDefault: defaultModel
+        )
+        self.scienceModelProtocol = scienceModelProtocol
+        self.availableModels = scienceModelProtocol.models.map(\.upstreamModel)
+        let trimmedDefault = defaultModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.defaultModel = (trimmedDefault?.isEmpty == false) ? trimmedDefault : nil
+        self.exposeScienceModelCatalog = exposeScienceModelCatalog && !self.availableModels.isEmpty
+        self.preferExactCatalogModels = preferExactCatalogModels
         let trimmedForced = forcedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.forcedModel = (trimmedForced?.isEmpty == false) ? trimmedForced : nil
         self.requestTimeout = requestTimeout
@@ -95,6 +118,16 @@ public struct ClaudeProxyConfiguration: Sendable {
     }
 
     public func mapToUpstreamModel(_ requestModel: String) -> String {
+        if exposeScienceModelCatalog,
+           let resolved = scienceModelProtocol.resolveRequestModel(
+               requestModel,
+               acceptingRawUpstreamIDs: preferExactCatalogModels
+           ) {
+            return resolved
+        }
+        if preferExactCatalogModels, availableModels.contains(requestModel) {
+            return requestModel
+        }
         let normalized = requestModel.lowercased()
         if normalized.contains("opus") {
             return bigModel
@@ -106,6 +139,18 @@ public struct ClaudeProxyConfiguration: Sendable {
             return middleModel
         }
         return requestModel
+    }
+
+    public var effectiveCatalogDefault: String {
+        scienceModelProtocol.defaultUpstreamModel ?? middleModel
+    }
+
+    public var scienceCatalogModels: [ScienceModelProtocolAdapter.Model] {
+        scienceModelProtocol.models
+    }
+
+    public var scienceDefaultModelID: String? {
+        scienceModelProtocol.defaultModelID
     }
 
     public static func normalizeOpenAIBaseURL(_ url: String) -> String {
@@ -162,6 +207,14 @@ public struct ClaudeProxyConfiguration: Sendable {
     }
 
     public static func loadFromEnvironment() -> ClaudeProxyConfiguration? {
+        let environment = ProcessInfo.processInfo.environment
+        let catalogModels: [String] = environment["AIUSAGE_SCIENCE_MODELS_JSON"]
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONDecoder().decode([String].self, from: $0) }
+            ?? []
+        let catalogDefault = environment["AIUSAGE_SCIENCE_DEFAULT_MODEL"]
+        let exposeCatalog = environment["AIUSAGE_SCIENCE_MODEL_CATALOG"] == "1"
+        let preferExactCatalog = environment["AIUSAGE_SCIENCE_EXACT_MODELS"] == "1"
         let proxyModeStr = ProcessInfo.processInfo.environment["PROXY_MODE"] ?? "openai"
         let proxyMode: ProxyMode = proxyModeStr == "passthrough" ? .anthropicPassthrough : .openaiConvert
 
@@ -190,6 +243,10 @@ public struct ClaudeProxyConfiguration: Sendable {
                 middleModel: middleModel,
                 smallModel: smallModel,
                 enableModelAliasMapping: aliasMapping,
+                availableModels: catalogModels,
+                defaultModel: catalogDefault,
+                exposeScienceModelCatalog: exposeCatalog,
+                preferExactCatalogModels: preferExactCatalog,
                 forcedModel: forcedModel,
                 interceptor: enableRewrite ? AnyRouterInterceptor() : nil
             )
@@ -219,7 +276,11 @@ public struct ClaudeProxyConfiguration: Sendable {
             bigModel: bigModel,
             middleModel: middleModel,
             smallModel: smallModel,
-            maxOutputTokens: maxOutputTokens
+            maxOutputTokens: maxOutputTokens,
+            availableModels: catalogModels,
+            defaultModel: catalogDefault,
+            exposeScienceModelCatalog: exposeCatalog,
+            preferExactCatalogModels: preferExactCatalog
         )
     }
 }

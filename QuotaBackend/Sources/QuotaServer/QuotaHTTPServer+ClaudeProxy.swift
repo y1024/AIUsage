@@ -31,6 +31,63 @@ extension QuotaHTTPServer {
 
     // MARK: - Claude Proxy Handlers
 
+    /// Local Anthropic Models API backed by the active AIUsage node catalog.
+    /// It deliberately never reaches the upstream or returns credentials.
+    func handleScienceModelsEndpoint(
+        request: HTTPRequest,
+        queryItems: [String: String],
+        headers: [String: String]
+    ) -> HTTPResponse {
+        guard let config = proxyConfig, config.exposeScienceModelCatalog else {
+            return jsonResponse(["error": "Not found"], status: 404, headers: headers)
+        }
+
+        if let expectedKey = config.expectedClientKey, !expectedKey.isEmpty {
+            let supplied = request.headers["x-api-key"]
+                ?? request.headers["authorization"]?.replacingOccurrences(of: "Bearer ", with: "")
+            guard supplied == expectedKey else {
+                return claudeErrorResponse(
+                    type: "authentication_error",
+                    message: "Invalid API key",
+                    status: 401,
+                    headers: headers
+                )
+            }
+        }
+
+        let allModels = config.scienceCatalogModels
+        var lowerBound = allModels.startIndex
+        var upperBound = allModels.endIndex
+        if let afterID = queryItems["after_id"],
+           let index = allModels.firstIndex(where: { $0.id == afterID }) {
+            lowerBound = allModels.index(after: index)
+        }
+        if let beforeID = queryItems["before_id"],
+           let index = allModels.firstIndex(where: { $0.id == beforeID }) {
+            upperBound = index
+        }
+        if lowerBound > upperBound { lowerBound = upperBound }
+        let candidates = allModels[lowerBound..<upperBound]
+        let requestedLimit = queryItems["limit"].flatMap(Int.init) ?? 1_000
+        let limit = max(1, min(1_000, requestedLimit))
+        let models = Array(candidates.prefix(limit))
+        let data: [[String: Any]] = models.map { model in
+            [
+                "id": model.id,
+                "type": "model",
+                "display_name": model.displayName,
+                "created_at": "1970-01-01T00:00:00Z",
+            ]
+        }
+        var payload: [String: Any] = [
+            "data": data,
+            "has_more": candidates.count > models.count,
+        ]
+        if let first = models.first?.id { payload["first_id"] = first }
+        if let last = models.last?.id { payload["last_id"] = last }
+        return jsonResponse(payload, headers: headers)
+    }
+
     func handleEventLoggingEndpoint(request: HTTPRequest, headers: [String: String]) async -> HTTPResponse {
         httpLog.debug("→ POST /api/event_logging/batch (\(request.body.count) bytes)")
 

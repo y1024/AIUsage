@@ -29,10 +29,155 @@ final class ClaudeProxyConverterTests: XCTestCase {
         XCTAssertEqual(config.mapToUpstreamModel("claude-sonnet-4.5"), "gpt-4o")
         XCTAssertEqual(config.mapToUpstreamModel("claude-3-5-haiku-20241022"), "gpt-4o-mini")
         XCTAssertEqual(config.mapToUpstreamModel("claude-opus-4"), "gpt-4o")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-opus-4-8"), "gpt-4o")
         XCTAssertEqual(config.mapToUpstreamModel("sonnet"), "gpt-4o")
         XCTAssertEqual(config.mapToUpstreamModel("haiku"), "gpt-4o-mini")
         XCTAssertEqual(config.mapToUpstreamModel("opus"), "gpt-4o")
         XCTAssertEqual(config.mapToUpstreamModel("unknown"), "unknown")
+    }
+
+    func testScienceCatalogAliasesResolveToExactActiveNodeModels() throws {
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.openai.com",
+            upstreamAPIKey: "test-key",
+            bigModel: "legacy-big",
+            middleModel: "legacy-middle",
+            smallModel: "legacy-small",
+            availableModels: [
+                " glm-5.2 ",
+                "claude-sonnet-4-5",
+                "glm-5.2",
+                "bad\nmodel",
+            ],
+            defaultModel: "glm-5.2",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true
+        )
+
+        XCTAssertEqual(config.availableModels, ["glm-5.2", "claude-sonnet-4-5"])
+        XCTAssertTrue(config.exposeScienceModelCatalog)
+        XCTAssertEqual(
+            config.scienceCatalogModels.map(\.upstreamModel),
+            ["glm-5.2", "claude-sonnet-4-5"]
+        )
+        let defaultID = try XCTUnwrap(config.scienceDefaultModelID)
+        XCTAssertEqual(config.scienceCatalogModels.first?.id, defaultID)
+        XCTAssertEqual(config.scienceCatalogModels.first?.displayName, "glm-5.2")
+
+        let nativeClaudeAlias = try XCTUnwrap(
+            config.scienceCatalogModels.first { $0.upstreamModel == "claude-sonnet-4-5" }?.id
+        )
+        XCTAssertNotEqual(nativeClaudeAlias, defaultID)
+        XCTAssertEqual(config.mapToUpstreamModel(nativeClaudeAlias), "claude-sonnet-4-5")
+        XCTAssertEqual(config.mapToUpstreamModel(defaultID), "glm-5.2")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-sonnet-4-5"), "claude-sonnet-4-5")
+    }
+
+    func testPersistentDefaultSelectionMapsToCurrentDefaultWithoutAddingLegacyRows() {
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.openai.com",
+            upstreamAPIKey: "test-key",
+            bigModel: "legacy-big",
+            middleModel: "legacy-middle",
+            smallModel: "legacy-small",
+            availableModels: ["new-default"],
+            defaultModel: "new-default",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true
+        )
+
+        XCTAssertEqual(config.scienceCatalogModels.map(\.upstreamModel), ["new-default"])
+        XCTAssertEqual(config.scienceCatalogModels.map(\.id), ["claude-opus-4-8"])
+        XCTAssertEqual(config.mapToUpstreamModel("claude-aiusage-v1-old-node-deadbeef"), "new-default")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-opus-4-8"), "new-default")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-sonnet-5"), "legacy-middle")
+        XCTAssertEqual(config.mapToUpstreamModel("claude-haiku-4-5"), "legacy-small")
+    }
+
+    func testSciencePresentationNameAvoidsInternalMaskWithoutChangingRawRoutingID() {
+        let kebab = "codex-auto-review"
+        let guarded = ScienceModelProtocolAdapter.presentationName(for: kebab)
+        XCTAssertEqual(guarded, ScienceModelProtocolAdapter.presentationGuard + kebab)
+        XCTAssertEqual(
+            String(guarded.dropFirst(ScienceModelProtocolAdapter.presentationGuard.count)),
+            kebab
+        )
+        XCTAssertTrue(ScienceModelProtocolAdapter.presentationNameNeedsGuard("Claude gemini-pro-agent"))
+        XCTAssertTrue(ScienceModelProtocolAdapter.presentationNameNeedsGuard("Claude   gemini-pro-agent"))
+        XCTAssertTrue(ScienceModelProtocolAdapter.presentationNameNeedsGuard("🧪-model"))
+        XCTAssertFalse(ScienceModelProtocolAdapter.presentationNameNeedsGuard("gemini-3.1-flash"))
+        XCTAssertFalse(ScienceModelProtocolAdapter.presentationNameNeedsGuard("ZhipuAI/GLM-5.2"))
+        XCTAssertEqual(
+            ScienceModelProtocolAdapter.presentationName(for: "gpt-5.4"),
+            "gpt-5.4"
+        )
+
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.openai.com",
+            upstreamAPIKey: "test-key",
+            availableModels: [kebab],
+            defaultModel: kebab,
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true
+        )
+        XCTAssertEqual(config.availableModels, [kebab])
+        XCTAssertEqual(config.mapToUpstreamModel(config.scienceDefaultModelID ?? ""), kebab)
+        XCTAssertFalse(config.availableModels[0].contains(ScienceModelProtocolAdapter.presentationGuard))
+    }
+
+    func testScienceAliasIsDeterministicAndCaseSensitive() {
+        XCTAssertEqual(
+            ScienceModelProtocolAdapter.generatedSelectionID(for: "ZhipuAI/GLM-5.2"),
+            ScienceModelProtocolAdapter.generatedSelectionID(for: "ZhipuAI/GLM-5.2")
+        )
+        XCTAssertNotEqual(
+            ScienceModelProtocolAdapter.generatedSelectionID(for: "glm-5.2"),
+            ScienceModelProtocolAdapter.generatedSelectionID(for: "GLM-5.2")
+        )
+    }
+
+    func testRawCatalogIDThatLooksGeneratedStillRoutesExactly() {
+        let raw = "claude-aiusage-v1-upstream-owned-model"
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.openai.com",
+            upstreamAPIKey: "test-key",
+            availableModels: ["current-default", raw],
+            defaultModel: "current-default",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true
+        )
+
+        XCTAssertEqual(config.mapToUpstreamModel(raw), raw)
+    }
+
+    func testScienceDefaultBridgeDoesNotCollideWithRealNonDefaultOpusID() throws {
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.openai.com",
+            upstreamAPIKey: "test-key",
+            availableModels: ["current-default", "claude-opus-4-8"],
+            defaultModel: "current-default",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true
+        )
+
+        let realOpus = try XCTUnwrap(
+            config.scienceCatalogModels.first { $0.upstreamModel == "claude-opus-4-8" }
+        )
+        let defaultID = try XCTUnwrap(config.scienceDefaultModelID)
+        XCTAssertEqual(config.scienceCatalogModels.count, 2)
+        XCTAssertEqual(Set(config.scienceCatalogModels.map(\.id)).count, 2)
+        XCTAssertEqual(
+            config.scienceCatalogModels.map(\.upstreamModel),
+            ["current-default", "claude-opus-4-8"]
+        )
+        XCTAssertNotEqual(realOpus.id, defaultID)
+        XCTAssertEqual(config.mapToUpstreamModel(realOpus.id), "claude-opus-4-8")
+        XCTAssertEqual(config.mapToUpstreamModel(defaultID), "current-default")
     }
 
     func testConfigurationValidation() {

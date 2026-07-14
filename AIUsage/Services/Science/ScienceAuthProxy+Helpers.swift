@@ -2,6 +2,57 @@ import Foundation
 import Network
 import Darwin
 
+/// App-side snapshot of the active AIUsage node catalog. Protocol adaptation
+/// is completed before this value reaches the HTTP proxy.
+struct ScienceModelCatalog: Sendable, Equatable {
+    struct Model: Sendable, Equatable {
+        let id: String
+        let upstreamModel: String
+        let displayName: String
+        let description: String
+        let overflow: Bool
+    }
+
+    let nodeID: String
+    let nodeName: String
+    let models: [Model]
+    let defaultModelID: String
+    let defaultUpstreamModel: String
+}
+
+/// Mode-independent port/data-dir plan for the public Science entry and its
+/// private daemon. Kept as a value type so lifecycle code and regressions share
+/// the same collision rules.
+struct ScienceProxyEndpointPlan: Sendable, Equatable {
+    enum Mode: Sendable {
+        case sandbox
+        case adopt
+    }
+
+    enum ValidationIssue: Equatable {
+        case duplicatePort
+        case reservedPort
+    }
+
+    let mode: Mode
+    let publicPort: Int
+    let daemonPort: Int
+    let dataDir: String
+
+    var adopting: Bool { mode == .adopt }
+
+    func validationIssue(proxyPort: Int, reservedPorts: Set<Int>) -> ValidationIssue? {
+        guard Set([proxyPort, publicPort, daemonPort]).count == 3 else {
+            return .duplicatePort
+        }
+        if reservedPorts.contains(proxyPort)
+            || (mode == .sandbox && reservedPorts.contains(publicPort)) {
+            return .reservedPort
+        }
+        return nil
+    }
+}
+
 struct ScienceSessionCookie {
     let name: String
     let value: String
@@ -421,6 +472,31 @@ extension ScienceAuthProxy {
         var out = Data(head.utf8)
         out.append(body)
         return out
+    }
+
+    /// Final Claude Science `/api/models` response. Serving it at the auth
+    /// proxy avoids Science's five-minute successful cache and one-minute
+    /// negative cache, so an AIUsage node switch is visible immediately.
+    static func modelCatalogResponse(_ catalog: ScienceModelCatalog) -> Data {
+        let modelObjects: [[String: Any]] = catalog.models.map { model in
+            [
+                "id": model.id,
+                "name": model.displayName,
+                "description": model.description,
+                "overflow": model.overflow,
+            ]
+        }
+        let object: [String: Any] = [
+            "models": ["anthropic": modelObjects],
+            "default_model_id": catalog.defaultModelID,
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: object) else {
+            return plainResponse(status: 500, text: "Unable to encode model catalog")
+        }
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+        var response = Data(head.utf8)
+        response.append(body)
+        return response
     }
 
     // MARK: - NWConnection 异步收发

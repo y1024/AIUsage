@@ -153,8 +153,10 @@ final class OpenCodeProxyRuntime: ObservableObject {
             try await launch(instance: instance)
             instance.restartAttempts = 0
         } catch {
-            instances.removeValue(forKey: node.id)
-            managedNodeIds.remove(node.id)
+            if instances[node.id] === instance {
+                instances.removeValue(forKey: node.id)
+                managedNodeIds.remove(node.id)
+            }
             throw error
         }
     }
@@ -259,9 +261,8 @@ final class OpenCodeProxyRuntime: ObservableObject {
         } catch {
             openCodeProxyLog.error("Failed to inspect stale processes on port \(node.proxyPort, privacy: .public): \(String(describing: error), privacy: .public)")
         }
-
-        guard let executablePath = await QuotaServerLocator.find() else {
-            throw ProxyRuntimeError.quotaServerNotFound
+        if await ProxyProcessInspector.shared.isPortOccupied(node.proxyPort) {
+            throw ProxyRuntimeError.proxyPortInUse(node.proxyPort)
         }
 
         var environment = ProcessInfo.processInfo.environment
@@ -295,53 +296,49 @@ final class OpenCodeProxyRuntime: ObservableObject {
             if !clientKey.isEmpty { environment["ANTHROPIC_API_KEY"] = clientKey }
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = ["--host", "127.0.0.1", "--port", "\(node.proxyPort)"]
-        process.environment = environment
-
-        let outputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-
         let nodeId = node.id
         let inboundPath = "/v1" + node.protocolType.requestPath
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let output = String(data: data, encoding: .utf8), !output.isEmpty else { return }
-            guard output.contains("PROXY_LOG:") else { return }
+        guard let healthURL = URL(string: "http://127.0.0.1:\(node.proxyPort)/health") else {
+            throw ProxyRuntimeError.proxyStartFailed("invalid health URL")
+        }
 
-            for line in output.split(separator: "\n") {
+        let launchResult: QuotaServerLaunchResult
+        do {
+            launchResult = try await QuotaServerLauncher.launch(
+                arguments: ["--host", "127.0.0.1", "--port", "\(node.proxyPort)"],
+                environment: environment,
+                healthURL: healthURL,
+                startupTimeout: Self.startupTimeout,
+                probeIntervalNanos: Self.startupProbeIntervalNanos
+            ) { [weak self] line in
                 guard line.hasPrefix("PROXY_LOG:"),
-                      let jsonStart = line.firstIndex(of: Character("{")) else {
-                    continue
-                }
+                      let jsonStart = line.firstIndex(of: Character("{")) else { return }
                 let jsonStr = String(line[jsonStart...])
                 Task { @MainActor [weak self] in
                     self?.recordProxyLog(jsonStr, nodeId: nodeId, path: inboundPath)
                 }
             }
-        }
-
-        do {
-            try process.run()
-            try await waitForHealth(process: process, port: node.proxyPort)
+        } catch QuotaServerStartupError.executableNotFound {
+            throw ProxyRuntimeError.quotaServerNotFound
+        } catch QuotaServerStartupError.portInUse(let occupiedPort, _) {
+            throw ProxyRuntimeError.proxyPortInUse(occupiedPort)
         } catch {
-            if process.isRunning {
-                process.terminate()
-            }
             openCodeProxyLog.error("Failed to start OpenCode proxy for node \(node.displayName, privacy: .public): \(SensitiveDataRedactor.redactedMessage(for: error), privacy: .public)")
-            throw error is ProxyRuntimeError
-                ? error
-                : ProxyRuntimeError.proxyStartFailed(error.localizedDescription)
+            throw ProxyRuntimeError.proxyStartFailed(error.localizedDescription)
         }
 
+        let process = launchResult.process
+        guard instances[node.id] === instance else {
+            await QuotaServerLauncher.terminateOwnedProcess(process)
+            throw CancellationError()
+        }
         instance.process = process
         runningNodeIds.insert(node.id)
         openCodeProxyLog.info("OpenCode proxy started for node \(node.displayName, privacy: .public) on 127.0.0.1:\(node.proxyPort, privacy: .public) pid=\(process.processIdentifier, privacy: .public)")
 
         process.terminationHandler = { [weak self] proc in
-            openCodeProxyLog.notice("OpenCode proxy process exited code=\(proc.terminationStatus, privacy: .public)")
+            Logger(subsystem: "com.aiusage.desktop", category: "OpenCodeProxyRuntime")
+                .notice("OpenCode proxy process exited code=\(proc.terminationStatus, privacy: .public)")
             Task { @MainActor [weak self] in
                 self?.handleUnexpectedTermination(of: proc, nodeId: nodeId)
             }
@@ -603,38 +600,4 @@ final class OpenCodeProxyRuntime: ObservableObject {
         }
     }
 
-    // MARK: - Helpers
-
-    private func waitForHealth(process: Process, port: Int) async throws {
-        let deadline = Date().addingTimeInterval(Self.startupTimeout)
-        var lastErrorDescription: String?
-
-        repeat {
-            if !process.isRunning {
-                throw ProxyRuntimeError.proxyStartFailed("process exited with code \(process.terminationStatus)")
-            }
-
-            do {
-                if try await probeHealth(port: port) {
-                    return
-                }
-                lastErrorDescription = "health endpoint returned a non-2xx status"
-            } catch {
-                lastErrorDescription = error.localizedDescription
-            }
-
-            try await Task.sleep(nanoseconds: Self.startupProbeIntervalNanos)
-        } while Date() < deadline
-
-        throw ProxyRuntimeError.proxyStartFailed("health check timed out: \(lastErrorDescription ?? "unknown")")
-    }
-
-    private func probeHealth(port: Int) async throws -> Bool {
-        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return false }
-        var request = URLRequest(url: url, timeoutInterval: 1)
-        request.httpMethod = "GET"
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { return false }
-        return (200..<300).contains(http.statusCode)
-    }
 }
