@@ -20,6 +20,11 @@ struct ProvidersView: View {
     @State private var accountEditorTarget: ProviderEditorTarget?
     /// 顶部工具栏「新增 API 提供商」的触发信号（按钮在工具栏，编辑器在 APIProviderListView）。
     @State private var requestNewAPIProvider = false
+    @State private var isPageBatchManaging = false
+    @State private var pageSelectedAccountIDs: Set<String> = []
+    @State private var showPageBatchDeleteConfirm = false
+    @State private var showPageBatchHideConfirm = false
+
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -28,6 +33,9 @@ struct ProvidersView: View {
                 accountsChrome
                 Divider()
                 accountsBody
+                if isPageBatchManaging, !visibleAccountEntries.isEmpty {
+                    pageBatchActionBar
+                }
             } else {
                 Divider()
                 APIProviderListView(
@@ -41,6 +49,34 @@ struct ProvidersView: View {
         .sheet(item: $accountEditorTarget) { target in
             ProviderAccountEditorView(providerId: target.providerId)
                 .environmentObject(appState)
+        }
+        .onChange(of: searchText) { _, _ in prunePageSelectionToVisible() }
+        .onChange(of: selectedProviderFilter) { _, _ in prunePageSelectionToVisible() }
+        .onChange(of: statusFilter) { _, _ in prunePageSelectionToVisible() }
+        .alert(
+            L("Delete Selected Accounts", "删除选中的账号"),
+            isPresented: $showPageBatchDeleteConfirm
+        ) {
+            Button(L("Delete", "删除"), role: .destructive) {
+                performPageBatchDelete()
+            }
+            Button(L("Cancel", "取消"), role: .cancel) {}
+        } message: {
+            Text(SubscriptionAccountActionCopy.batchDeleteMessage(count: pageSelectedAccountIDs.count))
+        }
+        .alert(
+            L("Hide Selected Accounts", "隐藏选中的账号"),
+            isPresented: $showPageBatchHideConfirm
+        ) {
+            Button(L("Hide", "隐藏"), role: .destructive) {
+                performPageBatchHide()
+            }
+            Button(L("Cancel", "取消"), role: .cancel) {}
+        } message: {
+            Text(L(
+                "Hide \(pageSelectedAccountIDs.count) account(s) from monitoring? You can restore them from Hidden Accounts.",
+                "将隐藏 \(pageSelectedAccountIDs.count) 个账号；可在「已隐藏账号」中恢复。"
+            ))
         }
     }
 
@@ -187,7 +223,9 @@ struct ProvidersView: View {
                             group: group,
                             onAddAccount: {
                                 accountEditorTarget = ProviderEditorTarget(providerId: group.providerId)
-                            }
+                            },
+                            pageBatchManaging: isPageBatchManaging,
+                            pageSelection: $pageSelectedAccountIDs
                         )
                         .environmentObject(appState)
                     }
@@ -195,6 +233,96 @@ struct ProvidersView: View {
                 .padding()
             }
         }
+    }
+
+    private var visibleAccountEntries: [ProviderAccountEntry] {
+        SubscriptionAccountListLogic.allEntries(in: filteredGroups)
+    }
+
+    private var visibleAccountIDs: Set<String> {
+        Set(visibleAccountEntries.map(\.id))
+    }
+
+    private var allVisibleSelected: Bool {
+        let ids = visibleAccountIDs
+        return !ids.isEmpty && ids.isSubset(of: pageSelectedAccountIDs)
+    }
+
+    private var pageBatchActionBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                if allVisibleSelected {
+                    pageSelectedAccountIDs.subtract(visibleAccountIDs)
+                } else {
+                    pageSelectedAccountIDs.formUnion(visibleAccountIDs)
+                }
+            } label: {
+                Text(allVisibleSelected
+                     ? L("Deselect All Filtered", "取消全选筛选")
+                     : L("Select All Filtered", "全选当前筛选"))
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderless)
+
+            Text(L("Selected \(pageSelectedAccountIDs.count)", "已选 \(pageSelectedAccountIDs.count) 个"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button {
+                showPageBatchHideConfirm = true
+            } label: {
+                Label(
+                    L("Hide Selected (\(pageSelectedAccountIDs.count))", "隐藏选中 (\(pageSelectedAccountIDs.count))"),
+                    systemImage: "eye.slash"
+                )
+                .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .disabled(pageSelectedAccountIDs.isEmpty)
+
+            Button(role: .destructive) {
+                showPageBatchDeleteConfirm = true
+            } label: {
+                Label(
+                    L("Delete Selected (\(pageSelectedAccountIDs.count))", "删除选中 (\(pageSelectedAccountIDs.count))"),
+                    systemImage: "trash"
+                )
+                .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .disabled(pageSelectedAccountIDs.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(AppSurface.toolbar(colorScheme))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AppStroke.subtle(colorScheme))
+                .frame(height: 0.5)
+        }
+    }
+
+    private func prunePageSelectionToVisible() {
+        guard isPageBatchManaging else { return }
+        pageSelectedAccountIDs = pageSelectedAccountIDs.intersection(visibleAccountIDs)
+    }
+
+    private func performPageBatchDelete() {
+        let entries = visibleAccountEntries.filter { pageSelectedAccountIDs.contains($0.id) }
+        guard !entries.isEmpty else { return }
+        appState.deleteAccounts(entries)
+        pageSelectedAccountIDs.removeAll()
+        isPageBatchManaging = false
+    }
+
+    private func performPageBatchHide() {
+        let entries = visibleAccountEntries.filter { pageSelectedAccountIDs.contains($0.id) }
+        guard !entries.isEmpty else { return }
+        appState.hideAccounts(entries)
+        pageSelectedAccountIDs.removeAll()
+        isPageBatchManaging = false
     }
 
     private var serviceGroups: [ProviderAccountGroup] {
@@ -273,6 +401,28 @@ struct ProvidersView: View {
     private var accountToolbarActions: some View {
         HStack(spacing: 8) {
             Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isPageBatchManaging.toggle()
+                    if !isPageBatchManaging {
+                        pageSelectedAccountIDs.removeAll()
+                    }
+                }
+            } label: {
+                ProviderActionLabel(
+                    title: isPageBatchManaging
+                        ? L("Done", "完成")
+                        : L("Page Batch", "整页批量"),
+                    systemImage: isPageBatchManaging ? "checkmark" : "checklist"
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(flatEntries.isEmpty && !isPageBatchManaging)
+            .help(L(
+                "Select accounts across apps using the current filters",
+                "按当前筛选跨应用多选账号"
+            ))
+
+            Button {
                 appState.presentManageProviderPicker()
             } label: {
                 ProviderActionLabel(
@@ -281,6 +431,7 @@ struct ProvidersView: View {
                 )
             }
             .buttonStyle(.plain)
+            .disabled(isPageBatchManaging)
 
             if !hiddenAccounts.isEmpty {
                 Menu {
@@ -303,6 +454,7 @@ struct ProvidersView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(isPageBatchManaging)
             }
 
             Button {
@@ -320,6 +472,7 @@ struct ProvidersView: View {
                 )
             }
             .buttonStyle(.plain)
+            .disabled(isPageBatchManaging)
         }
     }
 

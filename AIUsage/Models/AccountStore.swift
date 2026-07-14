@@ -304,11 +304,32 @@ final class AccountStore: ObservableObject {
         onRestored(accountRegistry[index].providerId)
     }
 
-    /// Soft-hide: keep a tombstone so auto-discovery does not immediately re-add the account.
     func hideAccount(
         _ entry: ProviderAccountEntry,
         onPostRegistryChange: () -> Void
     ) {
+        hideAccounts([entry], onPostRegistryChange: onPostRegistryChange)
+    }
+
+    /// Soft-hide multiple accounts with a single registry persist.
+    func hideAccounts(
+        _ entries: [ProviderAccountEntry],
+        onPostRegistryChange: () -> Void
+    ) {
+        guard !entries.isEmpty else { return }
+
+        for entry in entries {
+            applyHideMutation(entry)
+        }
+
+        // Soft-hide keeps Keychain credentials; only suppress dashboard listing.
+        _ = normalizeAccountRegistryAgainstCredentials()
+        deduplicateAccountRegistry()
+        persistAccountRegistry()
+        onPostRegistryChange()
+    }
+
+    private func applyHideMutation(_ entry: ProviderAccountEntry) {
         let matchingIndices = matchingStoredAccountIndices(for: entry)
         if !matchingIndices.isEmpty {
             for index in matchingIndices {
@@ -336,12 +357,6 @@ final class AccountStore: ObservableObject {
         ) {
             accountRegistry.append(hiddenEntry)
         }
-
-        // Soft-hide keeps Keychain credentials; only suppress dashboard listing.
-        _ = normalizeAccountRegistryAgainstCredentials()
-        deduplicateAccountRegistry()
-        persistAccountRegistry()
-        onPostRegistryChange()
     }
 
     /// Permanent delete: remove linked Keychain credentials and suppress rediscovery.

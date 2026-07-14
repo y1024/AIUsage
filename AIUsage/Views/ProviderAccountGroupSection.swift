@@ -3,6 +3,9 @@ import SwiftUI
 struct ProviderAccountGroupSection: View {
     let group: ProviderAccountGroup
     let onAddAccount: () -> Void
+    /// 整页批量开启时，组内批量入口隐藏，勾选绑定到整页选择集。
+    var pageBatchManaging: Bool = false
+    var pageSelection: Binding<Set<String>>? = nil
 
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
@@ -10,6 +13,17 @@ struct ProviderAccountGroupSection: View {
     @State private var selectedForDeletion: Set<String> = []
     @State private var showBatchDeleteConfirm = false
     @State private var showBatchHideConfirm = false
+
+    private var isSelecting: Bool {
+        pageBatchManaging || isBatchManaging
+    }
+
+    private var activeSelection: Binding<Set<String>> {
+        if pageBatchManaging, let pageSelection {
+            return pageSelection
+        }
+        return $selectedForDeletion
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -67,7 +81,7 @@ struct ProviderAccountGroupSection: View {
                         }
                         .buttonStyle(.borderless)
 
-                        if !group.accounts.isEmpty {
+                        if !pageBatchManaging, !group.accounts.isEmpty {
                             Button {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     isBatchManaging.toggle()
@@ -90,6 +104,7 @@ struct ProviderAccountGroupSection: View {
                                 .font(.caption.weight(.semibold))
                         }
                         .buttonStyle(.borderless)
+                        .disabled(pageBatchManaging)
                     }
 
                     if let refreshedAt = refreshCoordinator.providerRefreshDate(for: group.providerId) {
@@ -113,7 +128,7 @@ struct ProviderAccountGroupSection: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 16)], spacing: 16) {
                     ForEach(group.accounts) { account in
-                        if isBatchManaging {
+                        if isSelecting {
                             batchSelectableCard(for: account)
                         } else {
                             accountCard(for: account)
@@ -122,8 +137,14 @@ struct ProviderAccountGroupSection: View {
                 }
             }
 
-            if isBatchManaging, !group.accounts.isEmpty {
+            if isBatchManaging, !pageBatchManaging, !group.accounts.isEmpty {
                 batchActionBar
+            }
+        }
+        .onChange(of: pageBatchManaging) { _, pageMode in
+            if pageMode {
+                isBatchManaging = false
+                selectedForDeletion.removeAll()
             }
         }
         .alert(
@@ -197,14 +218,11 @@ struct ProviderAccountGroupSection: View {
 
     @ViewBuilder
     private func batchSelectableCard(for account: ProviderAccountEntry) -> some View {
-        let isSelected = selectedForDeletion.contains(account.id)
+        let selection = activeSelection
+        let isSelected = selection.wrappedValue.contains(account.id)
         HStack(spacing: 0) {
             Button {
-                if isSelected {
-                    selectedForDeletion.remove(account.id)
-                } else {
-                    selectedForDeletion.insert(account.id)
-                }
+                toggleSelection(account.id)
             } label: {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
@@ -221,12 +239,18 @@ struct ProviderAccountGroupSection: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            if isSelected {
-                selectedForDeletion.remove(account.id)
-            } else {
-                selectedForDeletion.insert(account.id)
-            }
+            toggleSelection(account.id)
         }
+    }
+
+    private func toggleSelection(_ id: String) {
+        var next = activeSelection.wrappedValue
+        if next.contains(id) {
+            next.remove(id)
+        } else {
+            next.insert(id)
+        }
+        activeSelection.wrappedValue = next
     }
 
     private var batchActionBar: some View {
@@ -298,9 +322,7 @@ struct ProviderAccountGroupSection: View {
     private func performBatchHide() {
         let entriesToHide = group.accounts.filter { selectedForDeletion.contains($0.id) }
         guard !entriesToHide.isEmpty else { return }
-        for entry in entriesToHide {
-            appState.hideAccount(entry)
-        }
+        appState.hideAccounts(entriesToHide)
         selectedForDeletion.removeAll()
         isBatchManaging = false
     }

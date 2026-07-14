@@ -401,6 +401,13 @@ class AppState: ObservableObject {
         }
     }
 
+    func hideAccounts(_ entries: [ProviderAccountEntry]) {
+        accountStore.hideAccounts(entries) { [weak self] in
+            self?.refreshCoordinator.removeLiveProviders(matching: entries)
+            self?.refreshCoordinator.reapplyVisibleSortedProviders()
+        }
+    }
+
     func deleteAccounts(_ entries: [ProviderAccountEntry]) {
         accountStore.deleteAccounts(entries) { [weak self] in
             self?.refreshCoordinator.removeLiveProviders(matching: entries)
