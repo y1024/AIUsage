@@ -190,6 +190,8 @@ git push origin v<version> --force
 - Claude 代理相关回归必须每次发版前都跑
 - helper 必须位于标准 nested-code 路径 `AIUsage.app/Contents/Helpers/QuotaServer`；旧的 `Contents/Resources/Helpers/QuotaServer` 只作为历史迁移路径，发布包不得保留
 - helper 必须在外层 App 之前使用同一 identity 单独签名，并通过 `codesign --verify --strict`；`--deep` 只用于最终递归验证，不用于递归签名
+- **P0 · Sparkle 自动更新**：自签名且无 Apple Team ID 时，`Sparkle.framework` 内的 `Autoupdate` / `Updater.app` / `Installer.xpc` / `Downloader.xpc` **必须与外层 App 使用同一张稳定证书（同一 certificate leaf）**。只签外层 framework、或把这些工具留成 SPM 自带的 ad-hoc，会导致已安装版本更新时报 `An error occurred while running the updater`（0.14.3 回归）。打包脚本与 CI 会硬失败校验 Autoupdate leaf == App leaf。不要为了「对齐 Sparkle 官方 ad-hoc 偏好」而破坏这条自洽布局。
+- 外层 App 的 designated requirement 必须继续钉住稳定证书 leaf，否则钥匙串「始终允许」会在每次更新后失效（issue #35）
 
 ### 3. `appcast.xml` 的最终版本在远端
 
@@ -263,8 +265,8 @@ xcodebuild -project AIUsage.xcodeproj -scheme AIUsage -configuration Release \
 - `package-release.sh` 里 `xcodebuild` 的 destination 必须是 **`generic/platform=macOS`**。改回具体的 `platform=macOS` 会在 arm64 runner 上静默产出 arm64-only 包。
 - pbxproj 的「Build QuotaServer Helper」脚本按 Xcode 传入的 `ARCHS` 追加 `swift build --arch` 参数；Release（generic destination）产出双架构 helper，Debug 仍只编本机架构。注意 `--arch` 会把 SwiftPM 输出目录改到 `.build/apple/Products/<Config>/`，脚本用 `--show-bin-path` 动态解析，不要改回硬编码路径。
 - `package-release.sh` 的 `verify_universal` 用 `lipo -archs` 校验主程序和 QuotaServer 都包含 arm64 + x86_64，缺一个切片直接 `exit 1`。不要删这段校验。
-- `package-release.sh` 在 staging 完成后按 inside-out 顺序重签被本地化修改的 Sparkle framework、签 `Contents/Helpers/QuotaServer`、最后签外层 App；helper 和 App 共用 `MACOS_SIGNING_IDENTITY`，两者的 strict 校验都是硬失败。
-- release workflow 会重新解压最终 ZIP，断言新 helper 路径存在、旧 resource 路径不存在，并对 helper 单独执行 `codesign --verify --strict --verbose=2`。
+- `package-release.sh` 在 staging 完成后按 inside-out 顺序：先用宿主 identity 签 Sparkle 的 Autoupdate / Updater / XPCServices，再签被本地化修改的 Sparkle.framework，再签 `Contents/Helpers/QuotaServer`，最后签外层 App；helper、App、Autoupdate 共用 `MACOS_SIGNING_IDENTITY`，三者的 certificate leaf 一致是硬失败条件（P0 自动更新）。
+- release workflow 会重新解压最终 ZIP，断言新 helper 路径存在、旧 resource 路径不存在，并对 helper 单独执行 `codesign --verify --strict --verbose=2`；同时断言 Autoupdate 与外层 App 的 certificate leaf 相同。
 
 如需在 Apple Silicon 上验证 x86_64 切片：`arch -x86_64 <binary>`（Rosetta）。背景与细节见 `docs/UNIVERSAL_BINARY_AND_SIDEBAR.md`。
 

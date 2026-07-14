@@ -36,6 +36,7 @@
 - 使用 `--arch` 后 SwiftPM 的输出目录会从 `.build/<config>/` 变为 `.build/apple/Products/<Config>/`，脚本改用 `--show-bin-path` 动态解析，不再硬编码路径。
 - universal 产物复制到标准 nested-code 目录 `AIUsage.app/Contents/Helpers/QuotaServer`；脚本会清掉增量构建遗留的 `Contents/Resources/Helpers/QuotaServer`，避免同一 helper 被封装两次。
 - 开启 Xcode 签名时，helper 使用宿主的 `EXPANDED_CODE_SIGN_IDENTITY` 先签并 strict 校验，随后由 Xcode 签外层 App；发布 staging 也执行相同的 inside-out 顺序。
+- **P0**：发布 staging 还必须用同一宿主证书显式重签 Sparkle 的 `Autoupdate` / `Updater` / XPCServices（不能只签 framework、不能留 SPM ad-hoc），否则自签名无 Team ID 的已装版本无法自动更新。
 
 ### 预期影响
 

@@ -178,19 +178,47 @@ sign_with_host_identity() {
   codesign "${CODESIGN_ARGS[@]}" --sign "$HOST_SIGN_IDENTITY" "$target"
 }
 
-# The localization injection above changes Sparkle.framework's sealed
-# resources. Re-sign that modified nested bundle explicitly; keep --deep for
-# verification only, not recursive signing.
-if [[ -n "$SPARKLE_RES" && -d "$SPARKLE_RES" ]]; then
-  SPARKLE_FRAMEWORK="$(find "$APP_PATH/Contents/Frameworks" -maxdepth 2 -type d -name 'Sparkle.framework' -print -quit)"
-  if [[ -z "$SPARKLE_FRAMEWORK" ]]; then
-    echo "ERROR: Sparkle resources were modified but Sparkle.framework was not found." >&2
+certificate_leaf_from_dr() {
+  # Extract H"..." from `codesign -d -r-` output. Empty if ad-hoc / cdhash-only.
+  codesign -d -r- "$1" 2>&1 | sed -n 's/.*certificate leaf = H"\([0-9a-fA-F]*\)".*/\1/p' | head -1
+}
+
+SPARKLE_FRAMEWORK="$(find "$APP_PATH/Contents/Frameworks" -maxdepth 2 -type d -name 'Sparkle.framework' -print -quit)"
+if [[ -z "$SPARKLE_FRAMEWORK" ]]; then
+  echo "ERROR: Sparkle.framework not found under Contents/Frameworks." >&2
+  exit 1
+fi
+SPARKLE_VERSION_DIR="$SPARKLE_FRAMEWORK/Versions/Current"
+if [[ ! -d "$SPARKLE_VERSION_DIR" ]]; then
+  SPARKLE_VERSION_DIR="$SPARKLE_FRAMEWORK/Versions/B"
+fi
+
+# P0 (auto-update): With a self-signed host cert and no Apple Team ID, Sparkle's
+# Autoupdate / Installer / Updater / Downloader MUST share the host certificate
+# leaf. Leaving them as SPM ad-hoc (or signing only the outer Sparkle.framework)
+# breaks XPC from already-installed builds and surfaces as:
+#   "An error occurred while running the updater. Please try again later."
+# Do NOT use `codesign --deep` on the outer App (blunt and easy to misuse);
+# sign these Sparkle tools explicitly, then seal the framework, then helper/App.
+# Outer App DR must still pin the stable certificate leaf so Keychain
+# "Always Allow" survives updates (issue #35).
+echo "Signing Sparkle updater tools with the host identity (P0 auto-update)..."
+for SPARKLE_TOOL in \
+  "$SPARKLE_VERSION_DIR/Autoupdate" \
+  "$SPARKLE_VERSION_DIR/Updater.app" \
+  "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc" \
+  "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc"
+do
+  if [[ ! -e "$SPARKLE_TOOL" ]]; then
+    echo "ERROR: required Sparkle tool missing: $SPARKLE_TOOL" >&2
     exit 1
   fi
-  echo "Re-signing modified Sparkle.framework..."
-  sign_with_host_identity "$SPARKLE_FRAMEWORK"
-  codesign --verify --deep --strict --verbose=2 "$SPARKLE_FRAMEWORK"
-fi
+  sign_with_host_identity "$SPARKLE_TOOL"
+done
+
+echo "Re-signing Sparkle.framework after nested tools + localization..."
+sign_with_host_identity "$SPARKLE_FRAMEWORK"
+codesign --verify --deep --strict --verbose=2 "$SPARKLE_FRAMEWORK"
 
 echo "Signing QuotaServer helper with the host identity..."
 sign_with_host_identity "$HELPER_PATH"
@@ -207,8 +235,11 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 # certificate-signed (designated requirement pins the cert). If it silently fell
 # back to ad-hoc, the Keychain "Always Allow" fix would be lost — so fail loudly
 # instead of shipping a build that re-prompts users on every update (issue #35).
+#
+# Also require Sparkle Autoupdate to pin the SAME certificate leaf as the App.
+# Ad-hoc Autoupdate under a self-signed host is a P0 auto-update regression.
 if [[ -n "$SIGN_IDENTITY" ]]; then
-  for SIGNED_TARGET in "$HELPER_PATH" "$APP_PATH"; do
+  for SIGNED_TARGET in "$HELPER_PATH" "$APP_PATH" "$SPARKLE_VERSION_DIR/Autoupdate"; do
     DESIGNATED_REQ="$(codesign -d -r- "$SIGNED_TARGET" 2>&1 || true)"
     if ! echo "$DESIGNATED_REQ" | grep -qi 'certificate leaf'; then
       echo "ERROR: stable signing was requested but $SIGNED_TARGET is not certificate-signed." >&2
@@ -217,7 +248,17 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
       exit 1
     fi
   done
-  echo "Verified stable certificate-pinned signatures for helper and app."
+  APP_LEAF="$(certificate_leaf_from_dr "$APP_PATH")"
+  AUTOUPDATE_LEAF="$(certificate_leaf_from_dr "$SPARKLE_VERSION_DIR/Autoupdate")"
+  if [[ -z "$APP_LEAF" || -z "$AUTOUPDATE_LEAF" || "$APP_LEAF" != "$AUTOUPDATE_LEAF" ]]; then
+    echo "ERROR: Sparkle Autoupdate certificate leaf must match the outer App leaf." >&2
+    echo "  App leaf:        ${APP_LEAF:-<missing>}" >&2
+    echo "  Autoupdate leaf: ${AUTOUPDATE_LEAF:-<missing>}" >&2
+    echo "Leaving Autoupdate ad-hoc (or on a different cert) breaks Sparkle auto-update" >&2
+    echo "for self-signed builds without an Apple Team ID (P0)." >&2
+    exit 1
+  fi
+  echo "Verified stable certificate-pinned signatures for helper, app, and Sparkle Autoupdate (leaf=$APP_LEAF)."
 fi
 
 rm -f "$ZIP_PATH" "$DMG_PATH"

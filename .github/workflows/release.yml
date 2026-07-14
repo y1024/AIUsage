@@ -164,12 +164,26 @@ jobs:
           APP_PATH="$(find "$VERIFY_ROOT" -maxdepth 1 -type d -name 'AIUsage.app' -print -quit)"
           HELPER_PATH="$APP_PATH/Contents/Helpers/QuotaServer"
           LEGACY_HELPER_PATH="$APP_PATH/Contents/Resources/Helpers/QuotaServer"
+          AUTOUPDATE_PATH="$APP_PATH/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate"
 
           test -n "$APP_PATH"
           test -x "$HELPER_PATH"
           test ! -e "$LEGACY_HELPER_PATH"
+          test -x "$AUTOUPDATE_PATH"
           codesign --verify --strict --verbose=2 "$HELPER_PATH"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+          # P0: Autoupdate must share the outer App certificate leaf. Ad-hoc
+          # Autoupdate under a self-signed host breaks Sparkle auto-update.
+          leaf_of() {
+            codesign -d -r- "$1" 2>&1 | sed -n 's/.*certificate leaf = H"\([0-9a-fA-F]*\)".*/\1/p' | head -1
+          }
+          APP_LEAF="$(leaf_of "$APP_PATH")"
+          AUTOUPDATE_LEAF="$(leaf_of "$AUTOUPDATE_PATH")"
+          test -n "$APP_LEAF"
+          test -n "$AUTOUPDATE_LEAF"
+          test "$APP_LEAF" = "$AUTOUPDATE_LEAF"
+          echo "Autoupdate leaf matches App leaf ($APP_LEAF)"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v6
