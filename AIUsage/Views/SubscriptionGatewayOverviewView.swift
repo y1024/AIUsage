@@ -109,7 +109,7 @@ struct SubscriptionGatewayOverviewView: View {
             ),
             .init(
                 id: "apps",
-                value: "\(connectedApplicationCount)/4",
+                value: "\(connectedApplicationCount)/\(ProxyTarget.localProxyTargets.count)",
                 title: L("Connected apps", "已接入"),
                 systemImage: "arrow.triangle.branch",
                 tint: .blue
@@ -517,9 +517,7 @@ struct SubscriptionGatewayOverviewView: View {
     }
 
     private var connectedApplicationCount: Int {
-        connectedTargets.reduce(into: 0) { count, target in
-            count += target == .claude ? 2 : 1
-        }
+        connectedTargets.intersection(Set(ProxyTarget.localProxyTargets)).count
     }
 
     private var modelCatalogDetail: String {

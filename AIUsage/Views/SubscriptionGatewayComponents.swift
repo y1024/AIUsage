@@ -406,7 +406,7 @@ extension ProxyTarget {
     var gatewayTitle: String {
         switch self {
         case .codex: "Codex"
-        case .claude: L("Claude family", "Claude 系列")
+        case .claude: "Claude Code"
         case .openCode: "OpenCode"
         case .cpa: "CPA"
         }
@@ -414,9 +414,9 @@ extension ProxyTarget {
 
     var gatewayDetail: String {
         switch self {
-        case .codex: "Codex CLI"
-        case .claude: "Code · Science"
-        case .openCode: "OpenCode"
+        case .codex: "Responses"
+        case .claude: "Anthropic"
+        case .openCode: "Responses"
         case .cpa: L("OpenAI-compatible upstream", "OpenAI 兼容上游")
         }
     }

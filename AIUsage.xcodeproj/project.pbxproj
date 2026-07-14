@@ -64,6 +64,8 @@
 		5EFSCD012F99003100A15674 /* DashboardStatCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSCD002F99003100A15674 /* DashboardStatCards.swift */; };
 		5EFDAQ012F99005000A15674 /* DashboardQuotaAttentionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFDAQ002F99005000A15674 /* DashboardQuotaAttentionSection.swift */; };
 		5EFASR012F99006000A15674 /* AppSurfaceTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFASR002F99006000A15674 /* AppSurfaceTokens.swift */; };
+		A1F1A5B12F99007000A15674 /* AppFlashBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A5B02F99007000A15674 /* AppFlashBanner.swift */; };
+		A1F1A5C12F99008000A15674 /* GatewayRuntimeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F1A5C02F99008000A15674 /* GatewayRuntimeControl.swift */; };
 		5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSNV002F99003300A15674 /* SidebarNavigation.swift */; };
 		5EFSSB012F99003400A15674 /* SettingsView+Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */; };
 		5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSTC002F99003200A15674 /* DashboardStateCards.swift */; };
@@ -276,6 +278,8 @@
 		5EFSCD002F99003100A15674 /* DashboardStatCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStatCards.swift; sourceTree = "<group>"; };
 		5EFDAQ002F99005000A15674 /* DashboardQuotaAttentionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardQuotaAttentionSection.swift; sourceTree = "<group>"; };
 		5EFASR002F99006000A15674 /* AppSurfaceTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSurfaceTokens.swift; sourceTree = "<group>"; };
+		A1F1A5B02F99007000A15674 /* AppFlashBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFlashBanner.swift; sourceTree = "<group>"; };
+		A1F1A5C02F99008000A15674 /* GatewayRuntimeControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayRuntimeControl.swift; sourceTree = "<group>"; };
 		5EFSNV002F99003300A15674 /* SidebarNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarNavigation.swift; sourceTree = "<group>"; };
 		5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Sidebar.swift"; sourceTree = "<group>"; };
 		5EFSTC002F99003200A15674 /* DashboardStateCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStateCards.swift; sourceTree = "<group>"; };
@@ -568,6 +572,7 @@
 			isa = PBXGroup;
 			children = (
 				C1CPA00A2FD0006000B26789 /* SubscriptionGatewayView.swift */,
+				A1F1A5C02F99008000A15674 /* GatewayRuntimeControl.swift */,
 				C1CPA0182FD000D000B26789 /* SubscriptionGatewayComponents.swift */,
 				C1CPA01A2FD000E000B26789 /* SubscriptionGatewayOverviewView.swift */,
 				C1CPA01C2FD000F000B26789 /* SubscriptionGatewayAccountsView.swift */,
@@ -609,6 +614,7 @@
 				5EFSCD002F99003100A15674 /* DashboardStatCards.swift */,
 				5EFDAQ002F99005000A15674 /* DashboardQuotaAttentionSection.swift */,
 				5EFASR002F99006000A15674 /* AppSurfaceTokens.swift */,
+				A1F1A5B02F99007000A15674 /* AppFlashBanner.swift */,
 				5EFSTC002F99003200A15674 /* DashboardStateCards.swift */,
 				5EFSAA002F99004000A15674 /* SubscriptionAccountActions.swift */,
 				5EFSAL002F99004100A15674 /* SubscriptionAccountListModels.swift */,
@@ -865,6 +871,8 @@
 				5EFSCD012F99003100A15674 /* DashboardStatCards.swift in Sources */,
 				5EFDAQ012F99005000A15674 /* DashboardQuotaAttentionSection.swift in Sources */,
 				5EFASR012F99006000A15674 /* AppSurfaceTokens.swift in Sources */,
+				A1F1A5B12F99007000A15674 /* AppFlashBanner.swift in Sources */,
+				A1F1A5C12F99008000A15674 /* GatewayRuntimeControl.swift in Sources */,
 				5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */,
 				5EFSAA012F99004000A15674 /* SubscriptionAccountActions.swift in Sources */,
 				5EFSAL012F99004100A15674 /* SubscriptionAccountListModels.swift in Sources */,

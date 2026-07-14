@@ -19,7 +19,7 @@ struct APIProviderListView: View {
 
     @State private var editorContext: EditorContext?
     @State private var deletingProvider: APIProvider?
-    @State private var flash: APIProviderFlash?
+    @State private var flash: AppFlash?
     @State private var syncPhases: [String: APIProviderCard.SyncPhase] = [:]
     @State private var listFilter: APIProviderListFilter = .all
 
@@ -81,16 +81,7 @@ struct APIProviderListView: View {
 
     var body: some View {
         content
-        .overlay(alignment: .top) {
-            if let flash {
-                APIProviderFlashBanner(flash: flash)
-                    .padding(.horizontal, 18)
-                    .padding(.top, 10)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .zIndex(10)
-            }
-        }
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: flash)
+        .appFlashOverlay(flash)
         .onChange(of: requestNew) { _, newValue in
             guard newValue else { return }
             editorContext = EditorContext(id: "new", provider: APIProvider(), initialTargets: [])
@@ -461,91 +452,7 @@ struct APIProviderListView: View {
         }
     }
 
-    private func showFlash(_ flash: APIProviderFlash) {
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-            self.flash = flash
-        }
-        let token = flash.id
-        Task {
-            try? await Task.sleep(nanoseconds: 2_400_000_000)
-            await MainActor.run {
-                guard self.flash?.id == token else { return }
-                withAnimation(.easeOut(duration: 0.25)) {
-                    self.flash = nil
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Flash Banner
-
-private struct APIProviderFlash: Equatable, Identifiable {
-    enum Kind: Equatable {
-        case success
-        case error
-        case info
-    }
-
-    let id = UUID()
-    let kind: Kind
-    let message: String
-
-    static func success(_ message: String) -> APIProviderFlash { .init(kind: .success, message: message) }
-    static func error(_ message: String) -> APIProviderFlash { .init(kind: .error, message: message) }
-    static func info(_ message: String) -> APIProviderFlash { .init(kind: .info, message: message) }
-}
-
-private struct APIProviderFlashBanner: View {
-    let flash: APIProviderFlash
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(tint)
-            Text(flash.message)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AppContent.primary(colorScheme))
-                .lineLimit(2)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(bannerBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(tint.opacity(0.45), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.45 : 0.14), radius: 12, y: 5)
-    }
-
-    private var bannerBackground: Color {
-        switch colorScheme {
-        case .dark:
-            return Color(nsColor: .controlBackgroundColor).opacity(0.96)
-        case .light:
-            fallthrough
-        @unknown default:
-            // 不透明纸面，避免透出下方列表导致看不清。
-            return Color(red: 0.99, green: 0.985, blue: 0.978)
-        }
-    }
-
-    private var icon: String {
-        switch flash.kind {
-        case .success: return "checkmark.circle.fill"
-        case .error: return "exclamationmark.triangle.fill"
-        case .info: return "info.circle.fill"
-        }
-    }
-
-    private var tint: Color {
-        switch flash.kind {
-        case .success: return .green
-        case .error: return .orange
-        case .info: return .accentColor
-        }
+    private func showFlash(_ flash: AppFlash) {
+        AppFlashPresenter.present(flash, into: $flash)
     }
 }

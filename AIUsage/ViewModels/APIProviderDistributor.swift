@@ -211,19 +211,20 @@ final class APIProviderDistributor {
         let overridden = existing?.metadata.overriddenKeys ?? []
         func wins(_ key: String) -> Bool { !overridden.contains(key) }
 
-        // CPA 一键网关主配置固定为 OpenAI Responses（Codex 必需）；Claude/Science 默认 Anthropic
-        // 透传，也可在接入页改为本地 OpenAI 转换。
+        // CPA 一键网关主配置固定为 OpenAI Responses（Codex 必需）；Claude Code（含 Science）
+        // 在接入页可选 Anthropic / Chat Completions / Responses，与节点编辑器三卡片一致。
         let isCPAManagedClaude = family == .claude
             && provider.id == CLIProxyGatewayManager.managedProviderID
 
         // 节点类型由格式推导（Codex 恒 codexProxy；Claude：Anthropic→透传直连，OpenAI→转换代理）。
+        let managedClaude = CLIProxyGatewayManager.shared.managedClaudeProtocol
         let nodeType: NodeType
         if family.isCodex {
             nodeType = .codexProxy
         } else if isCPAManagedClaude {
-            switch CLIProxyGatewayManager.shared.managedClaudeProtocol {
+            switch managedClaude {
             case .anthropicPassthrough: nodeType = .anthropicDirect
-            case .openAIConvert: nodeType = .openaiProxy
+            case .openAIChatCompletions, .openAIResponses: nodeType = .openaiProxy
             }
         } else {
             nodeType = (provider.format == .anthropic) ? .anthropicDirect : .openaiProxy
@@ -254,7 +255,11 @@ final class APIProviderDistributor {
         case .codexProxy:
             proxy.openAIUpstreamAPI = .responses
         case .openaiProxy:
-            proxy.openAIUpstreamAPI = provider.format.openAIUpstreamAPI ?? .chatCompletions
+            if isCPAManagedClaude, let api = managedClaude.openAIUpstreamAPI {
+                proxy.openAIUpstreamAPI = api
+            } else {
+                proxy.openAIUpstreamAPI = provider.format.openAIUpstreamAPI ?? .chatCompletions
+            }
             proxy.usePassthroughProxy = false
         case .anthropicDirect:
             proxy.usePassthroughProxy = true

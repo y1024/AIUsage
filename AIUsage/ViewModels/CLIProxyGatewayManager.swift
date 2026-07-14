@@ -167,7 +167,7 @@ final class CLIProxyGatewayManager: ObservableObject {
             self.managedOpenCodeProtocol = proto
         }
         if let raw = UserDefaults.standard.string(forKey: Self.claudeProtocolDefaultsKey),
-           let proto = ManagedClaudeProtocol(rawValue: raw) {
+           let proto = ManagedClaudeProtocol.resolved(rawValue: raw) {
             self.managedClaudeProtocol = proto
         }
         do {
@@ -2053,7 +2053,7 @@ final class CLIProxyGatewayManager: ObservableObject {
             cpaData = nil
         }
 
-        let sourceSemantic = try? CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: copiedData)
+        let sourceSemantic = try? CLIProxyManagedAuthSafety.syncStabilityFingerprint(for: copiedData)
 
         guard let cpaData else {
             return SyncEvaluation(
@@ -2071,8 +2071,8 @@ final class CLIProxyGatewayManager: ObservableObject {
         }
 
         let cpaFingerprint = try CLIProxyJSONFingerprint.hash(cpaData, requireObject: true)
-        let cpaSemantic = try? CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: cpaData)
-        // 无本地记录时：用语义（或全量）判断是否可认领已有 CPA 副本。
+        let cpaSemantic = try? CLIProxyManagedAuthSafety.syncStabilityFingerprint(for: cpaData)
+        // 无本地记录时：用同步稳定性指纹（或全量）判断是否可认领已有 CPA 副本。
         let semanticAligned: Bool = {
             if let cpaSemantic, let sourceSemantic { return cpaSemantic == sourceSemantic }
             return cpaFingerprint == copiedFingerprint
@@ -2092,25 +2092,41 @@ final class CLIProxyGatewayManager: ObservableObject {
             )
         }
 
-        // 源侧 / CPA 侧都只比语义基线，忽略双方正常的 token 轮换。
+        // 源侧 / CPA 侧只比稳定性指纹（忽略 token 轮换）。旧 manifest 存的是含 refresh
+        // digest 的合并指纹时，稳定性指纹对不上 → 视为需回填基线，不报假告警。
         let sourceChanged: Bool
         let cpaChanged: Bool
         var shouldHeal = false
         if let sourceSemantic, let stored = record.lastSourceSemanticFingerprint {
-            sourceChanged = sourceSemantic != stored
+            if sourceSemantic == stored {
+                sourceChanged = false
+            } else if isLegacyMergeFingerprint(stored, currentStability: sourceSemantic, data: copiedData) {
+                sourceChanged = false
+                shouldHeal = true
+            } else {
+                sourceChanged = true
+            }
         } else if sourceSemantic != nil {
             sourceChanged = false
             shouldHeal = true
         } else {
-            sourceChanged = sourceFingerprint != record.sourceFingerprint
+            // 无稳定性指纹时不要退回全量 hash（token 一变就误报）。
+            sourceChanged = false
         }
         if let cpaSemantic, let stored = record.lastCopiedSemanticFingerprint {
-            cpaChanged = cpaSemantic != stored
+            if cpaSemantic == stored {
+                cpaChanged = false
+            } else if isLegacyMergeFingerprint(stored, currentStability: cpaSemantic, data: cpaData) {
+                cpaChanged = false
+                shouldHeal = true
+            } else {
+                cpaChanged = true
+            }
         } else if cpaSemantic != nil {
             cpaChanged = false
             shouldHeal = true
         } else {
-            cpaChanged = cpaFingerprint != record.lastCopiedFingerprint
+            cpaChanged = false
         }
         let state: CLIProxyAccountSyncState
         switch (sourceChanged, cpaChanged) {
@@ -2148,8 +2164,22 @@ final class CLIProxyGatewayManager: ObservableObject {
         let full = (try? CLIProxyJSONFingerprint.hash(disk, requireObject: true))
             ?? (try? CLIProxyJSONFingerprint.hash(uploaded, requireObject: true))
             ?? ""
-        let semantic = try? CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: disk)
+        let semantic = try? CLIProxyManagedAuthSafety.syncStabilityFingerprint(for: disk)
         return AuthFileBaseline(fullFingerprint: full, semanticFingerprint: semantic)
+    }
+
+    /// 旧 sync manifest 把「含 refresh digest 的合并指纹」写进了语义字段。
+    /// 若当前稳定性指纹对应的合并指纹仍等于旧值，说明只是 schema 迁移，不是真实漂移。
+    private func isLegacyMergeFingerprint(
+        _ stored: String,
+        currentStability: String,
+        data: Data
+    ) -> Bool {
+        guard stored != currentStability else { return false }
+        guard let merge = try? CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: data) else {
+            return false
+        }
+        return stored == merge
     }
 
     private func managedIdentityKey(for candidate: CLIProxyAccountSyncCandidate) -> String? {

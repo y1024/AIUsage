@@ -5,6 +5,9 @@ struct SubscriptionGatewayConnectionsView: View {
     @ObservedObject var manager: CLIProxyGatewayManager
     @ObservedObject var runtime: CLIProxyRuntimeController
     @Binding var selectedTargets: Set<ProxyTarget>
+    /// 协议草稿提升到 CPA 根视图，避免切 Tab / 重建时落回枚举默认值造成假「未保存」。
+    @Binding var draftOpenCodeProtocol: OpenCodeProtocol
+    @Binding var draftClaudeProtocol: ManagedClaudeProtocol
 
     @State private var pendingRemoval: Set<ProxyTarget>?
     @State private var lastAppliedAt: Date?
@@ -12,10 +15,6 @@ struct SubscriptionGatewayConnectionsView: View {
     @State private var endpointScope: GatewayEndpointScope = .thisMac
     @State private var selectedLANAddress: String?
     @State private var selectedProtocol: GatewayProtocolEndpoint?
-    /// 接入页草稿：仅点「应用」后才写入 Manager / 分发到 OpenCode 节点。
-    @State private var draftOpenCodeProtocol: OpenCodeProtocol = .openAIResponses
-    /// Claude 系列（Code + Science）共用草稿。
-    @State private var draftClaudeProtocol: ManagedClaudeProtocol = .anthropicPassthrough
 
     private let columns = [GridItem(.adaptive(minimum: 168), spacing: 8)]
 
@@ -68,11 +67,15 @@ struct SubscriptionGatewayConnectionsView: View {
             .padding(.vertical, 20)
         }
         .onAppear {
-            // 有未应用改动时保留草稿，避免切 Tab 回来被静默重置。
-            guard !hasPendingChanges else { return }
-            selectedTargets = actualTargets
-            draftOpenCodeProtocol = manager.managedOpenCodeProtocol
-            draftClaudeProtocol = manager.managedClaudeProtocol
+            reconcileFromManagerIfClean()
+        }
+        .onChange(of: manager.managedOpenCodeProtocol) { _, newValue in
+            guard !hasProtocolPending else { return }
+            draftOpenCodeProtocol = newValue
+        }
+        .onChange(of: manager.managedClaudeProtocol) { _, newValue in
+            guard !hasProtocolPending else { return }
+            draftClaudeProtocol = newValue
         }
         .sheet(item: $selectedProtocol) { endpoint in
             GatewayEndpointDetailSheet(
@@ -107,6 +110,13 @@ struct SubscriptionGatewayConnectionsView: View {
         }
     }
 
+    private func reconcileFromManagerIfClean() {
+        guard !hasPendingChanges else { return }
+        selectedTargets = actualTargets
+        draftOpenCodeProtocol = manager.managedOpenCodeProtocol
+        draftClaudeProtocol = manager.managedClaudeProtocol
+    }
+
     @ViewBuilder
     private var errorBanners: some View {
         if let error = manager.lastError { GatewayErrorBanner(message: error) }
@@ -127,7 +137,7 @@ struct SubscriptionGatewayConnectionsView: View {
                         Text(target.gatewayTitle)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.primary)
-                        Text(targetSubtitle(target, selected: selected))
+                        Text(targetSubtitle(target))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
@@ -168,20 +178,23 @@ struct SubscriptionGatewayConnectionsView: View {
         case .openCode:
             return L("Right-click to choose OpenCode protocol", "右键可选择 OpenCode 协议")
         case .claude:
-            return L("Right-click to choose Claude / Science mode", "右键可选择 Claude / Science 形态")
+            return L("Right-click to choose Claude Code protocol", "右键可选择 Claude Code 协议")
         case .codex, .cpa:
             return ""
         }
     }
 
-    private func targetSubtitle(_ target: ProxyTarget, selected: Bool) -> String {
-        if target == .openCode, selected {
+    private func targetSubtitle(_ target: ProxyTarget) -> String {
+        switch target {
+        case .openCode:
             return draftOpenCodeProtocol.badgeName
+        case .claude:
+            return draftClaudeProtocol.badgeName
+        case .codex:
+            return "Responses"
+        case .cpa:
+            return target.gatewayDetail
         }
-        if target == .claude, selected {
-            return "\(target.gatewayDetail) · \(draftClaudeProtocol.badgeName)"
-        }
-        return target.gatewayDetail
     }
 
     @ViewBuilder
@@ -206,7 +219,7 @@ struct SubscriptionGatewayConnectionsView: View {
 
     @ViewBuilder
     private var claudeProtocolContextMenu: some View {
-        Section(L("Claude / Science mode", "Claude / Science 形态")) {
+        Section(L("Claude Code protocol", "Claude Code 协议")) {
             ForEach(ManagedClaudeProtocol.allCases) { proto in
                 Button {
                     draftClaudeProtocol = proto

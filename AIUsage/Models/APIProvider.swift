@@ -55,28 +55,47 @@ enum APIFormat: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// CPA 托管 Claude 系列（Code + Science）节点的上游形态。
+/// CPA 托管 Claude Code（含 Science）节点的上游协议，与 Claude 节点编辑器三卡片对齐。
 enum ManagedClaudeProtocol: String, Codable, CaseIterable, Identifiable {
     /// Anthropic Messages 透传（默认；避免 Science 复杂载荷撞本地 convert）。
     case anthropicPassthrough = "anthropic-passthrough"
-    /// 经本地 OpenAI 兼容转换后再打到 CPA。
-    case openAIConvert = "openai-convert"
+    /// 经本地代理转成 OpenAI Chat Completions。
+    case openAIChatCompletions = "openai-chat-completions"
+    /// 经本地代理转成 OpenAI Responses。
+    case openAIResponses = "openai-responses"
 
     var id: String { rawValue }
+
+    /// 兼容旧 UserDefaults：`openai-convert`（拆分前的笼统 OpenAI 转换，CPA 主配置为 Responses）。
+    static func resolved(rawValue: String) -> ManagedClaudeProtocol? {
+        if rawValue == "openai-convert" { return .openAIResponses }
+        return ManagedClaudeProtocol(rawValue: rawValue)
+    }
 
     var displayName: String {
         switch self {
         case .anthropicPassthrough:
-            return AppSettings.shared.t("Anthropic passthrough", "Anthropic 透传")
-        case .openAIConvert:
-            return AppSettings.shared.t("OpenAI convert", "OpenAI 转换")
+            return "Anthropic"
+        case .openAIChatCompletions:
+            return "OpenAI Chat Completions"
+        case .openAIResponses:
+            return "OpenAI Responses"
         }
     }
 
     var badgeName: String {
         switch self {
         case .anthropicPassthrough: return "Anthropic"
-        case .openAIConvert: return "OpenAI"
+        case .openAIChatCompletions: return "Chat Completions"
+        case .openAIResponses: return "Responses"
+        }
+    }
+
+    var openAIUpstreamAPI: OpenAIUpstreamAPI? {
+        switch self {
+        case .anthropicPassthrough: return nil
+        case .openAIChatCompletions: return .chatCompletions
+        case .openAIResponses: return .responses
         }
     }
 }

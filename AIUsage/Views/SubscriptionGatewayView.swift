@@ -9,10 +9,14 @@ struct SubscriptionGatewayView: View {
     @State private var pendingAuthDeletion: CLIProxyAuthFile?
     @State private var draftSettings = CLIProxyGatewaySettings.default
     @State private var settingsBase = CLIProxyGatewaySettings.default
-    @State private var distributionTargets: Set<ProxyTarget> = []
+    @State private var distributionTargets: Set<ProxyTarget> = CLIProxyGatewayManager.shared.currentDistributionTargets
+    @State private var draftOpenCodeProtocol: OpenCodeProtocol = CLIProxyGatewayManager.shared.managedOpenCodeProtocol
+    @State private var draftClaudeProtocol: ManagedClaudeProtocol = CLIProxyGatewayManager.shared.managedClaudeProtocol
     @State private var showAddAccount = false
     @State private var pendingSection: CLIProxyGatewaySection?
     @State private var showDiscardSectionConfirm = false
+    /// 进入页面后才判断「接入/设置」脏标记，避免草稿尚未对齐时的假橙点闪烁。
+    @State private var draftsReady = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,15 +29,25 @@ struct SubscriptionGatewayView: View {
             let currentSettings = runtime.settings
             settingsBase = currentSettings
             draftSettings = currentSettings
+            distributionTargets = manager.currentDistributionTargets
+            draftOpenCodeProtocol = manager.managedOpenCodeProtocol
+            draftClaudeProtocol = manager.managedClaudeProtocol
+            draftsReady = true
+            let snapshotBeforeRefresh = distributionTargets
             await manager.refresh()
-            distributionTargets = currentDistributionTargets
+            if distributionTargets == snapshotBeforeRefresh {
+                distributionTargets = manager.currentDistributionTargets
+            }
         }
         .onChange(of: navigation.addAccountRequest) { _, _ in
             navigation.selectedSection = .accounts
             showAddAccount = true
         }
-        .onChange(of: currentDistributionTargets) { _, targets in
-            distributionTargets = targets
+        .onChange(of: currentDistributionTargets) { previous, targets in
+            // 草稿仍等于旧值 → 跟随外部更新；已分叉则保留未保存编辑。
+            if !draftsReady || distributionTargets == previous {
+                distributionTargets = targets
+            }
         }
         .onChange(of: runtime.settings) { _, newValue in
             // A provider-plugin action can update runtime settings while the
@@ -151,20 +165,15 @@ struct SubscriptionGatewayView: View {
     }
 
     private var headerActions: some View {
-        HStack(spacing: 8) {
-            Button {
-                navigation.showAccounts(openAddAccount: true)
-                showAddAccount = true
-            } label: {
-                Label(L("Add Upstream", "添加上游"), systemImage: "plus")
-                    .font(.caption.weight(.semibold))
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .disabled(manager.operation.isBusy)
+        runtimeControl
+    }
 
-            runtimeBadge
-        }
+    private var runtimeControl: some View {
+        GatewayRuntimeControl(
+            manager: manager,
+            runtime: runtime,
+            onOpenSettings: { requestSectionChange(to: .settings) }
+        )
     }
 
     private var sectionNavigation: some View {
@@ -179,10 +188,11 @@ struct SubscriptionGatewayView: View {
                             .font(.system(size: 12, weight: .semibold))
                         Text(section.shortTitle)
                             .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
-                        if isSectionDirty(section) {
+                        if draftsReady, isSectionDirty(section) {
                             Circle()
                                 .fill(Color.orange)
                                 .frame(width: 6, height: 6)
+                                .accessibilityLabel(L("Unsaved changes", "有未保存更改"))
                         }
                     }
                     .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.78))
@@ -224,6 +234,8 @@ struct SubscriptionGatewayView: View {
         switch section {
         case .connections:
             return distributionTargets != manager.currentDistributionTargets
+                || draftOpenCodeProtocol != manager.managedOpenCodeProtocol
+                || draftClaudeProtocol != manager.managedClaudeProtocol
         case .settings:
             return draftSettings.normalized != settingsBase.normalized
         case .overview, .accounts:
@@ -235,6 +247,8 @@ struct SubscriptionGatewayView: View {
         switch section {
         case .connections:
             distributionTargets = manager.currentDistributionTargets
+            draftOpenCodeProtocol = manager.managedOpenCodeProtocol
+            draftClaudeProtocol = manager.managedClaudeProtocol
         case .settings:
             draftSettings = settingsBase
         case .overview, .accounts:
@@ -262,7 +276,9 @@ struct SubscriptionGatewayView: View {
             SubscriptionGatewayConnectionsView(
                 manager: manager,
                 runtime: runtime,
-                selectedTargets: $distributionTargets
+                selectedTargets: $distributionTargets,
+                draftOpenCodeProtocol: $draftOpenCodeProtocol,
+                draftClaudeProtocol: $draftClaudeProtocol
             )
         case .settings:
             SubscriptionGatewaySettingsView(
@@ -271,49 +287,6 @@ struct SubscriptionGatewayView: View {
                 draftSettings: $draftSettings,
                 pendingVersionDeletion: $pendingVersionDeletion
             )
-        }
-    }
-
-    private var runtimeBadge: some View {
-        Menu {
-            if runtime.state.isRunning {
-                Button(L("Stop CPA", "停止 CPA")) {
-                    Task { await runtime.stop() }
-                }
-                Button(L("Restart CPA", "重启 CPA")) {
-                    Task { await runtime.restart() }
-                }
-            } else {
-                Button(L("Start CPA", "启动 CPA")) {
-                    Task { await runtime.start() }
-                }
-            }
-            Divider()
-            Button(L("Open Settings", "打开设置")) {
-                requestSectionChange(to: .settings)
-            }
-            Button(L("Refresh Status", "刷新状态")) {
-                Task { await manager.refresh() }
-            }
-        } label: {
-            GatewayStatusPill(
-                text: runtimeLabel,
-                color: runtime.state.isRunning ? .green : (runtime.state.isTransitioning ? .orange : .secondary),
-                systemImage: runtime.state.isRunning ? "checkmark.circle.fill" : "circle.fill"
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .disabled(runtime.state.isTransitioning || manager.operation.isBusy)
-        .help(L("CPA runtime actions", "CPA 运行操作"))
-    }
-
-    private var runtimeLabel: String {
-        switch runtime.state {
-        case .stopped: L("CPA stopped", "CPA 已停止")
-        case .starting: L("Starting…", "正在启动…")
-        case .running: L("CPA running", "CPA 运行中")
-        case .stopping: L("Stopping…", "正在停止…")
-        case .failed: L("CPA needs attention", "CPA 需要处理")
         }
     }
 

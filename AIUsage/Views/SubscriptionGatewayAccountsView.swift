@@ -17,7 +17,7 @@ struct SubscriptionGatewayAccountsView: View {
     @State private var selectedDetail: CLIProxyAuthFile?
     @State private var pendingForceSync: CLIProxyAccountSyncCandidate?
     @State private var upstreamSection: GatewayUpstreamSection = .oauth
-    @State private var subscriptionBridgeNotice: String?
+    @State private var subscriptionFlash: AppFlash?
 
     var body: some View {
         let syncStates = GatewayAccountListLogic.syncStatesByAuthFileName(manager: manager)
@@ -32,29 +32,17 @@ struct SubscriptionGatewayAccountsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 errorBanners
-                if let subscriptionBridgeNotice {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "person.badge.plus")
-                            .foregroundStyle(.secondary)
-                        Text(subscriptionBridgeNotice)
-                            .font(.caption)
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                        Button {
-                            self.subscriptionBridgeNotice = nil
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.tertiary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
-                }
                 GatewaySectionTitle(
                     title: L("Account center", "账号中心"),
-                    subtitle: L("Upstreams already in CPA. Use Add Upstream in the top bar.", "已在 CPA 中的上游。添加请用顶部「添加上游」。")
+                    subtitle: L(
+                        "Upstreams already in CPA.",
+                        "已在 CPA 中的上游。"
+                    ),
+                    actionTitle: L("Add Upstream", "添加上游"),
+                    actionSystemImage: "plus",
+                    action: {
+                        showAddAccount = true
+                    }
                 )
 
                 summaryRow(syncStates: syncStates)
@@ -75,6 +63,7 @@ struct SubscriptionGatewayAccountsView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 22)
         }
+        .appFlashOverlay(subscriptionFlash)
         .sheet(isPresented: $showAddAccount) {
             CLIProxyAddUpstreamSheet(
                 manager: manager,
@@ -247,14 +236,14 @@ struct SubscriptionGatewayAccountsView: View {
             HStack(spacing: 12) {
                 searchField
                 filterPicker
-                Spacer()
+                Spacer(minLength: 8)
                 refreshButton
             }
             VStack(alignment: .leading, spacing: 10) {
                 searchField
                 HStack(spacing: 10) {
                     filterPicker
-                    Spacer()
+                    Spacer(minLength: 8)
                     refreshButton
                 }
             }
@@ -369,26 +358,28 @@ struct SubscriptionGatewayAccountsView: View {
 
     private func addToSubscription(_ file: CLIProxyAuthFile) async {
         let outcome = await CLIProxyGatewayManager.shared.addAuthFileToSubscriptionAccounts(file)
+        let flash: AppFlash
+        switch outcome {
+        case .added(let name):
+            flash = .success(L(
+                "Added to Subscription Accounts · \(name)",
+                "已加入订阅账号 · \(name)"
+            ))
+        case .alreadyPresent(let name):
+            flash = .info(L(
+                "Already in Subscription Accounts · \(name)",
+                "订阅账号中已有 · \(name)"
+            ))
+        case .unsupported:
+            flash = .info(L(
+                "This provider can’t be added from CPA yet.",
+                "该服务商暂不支持从 CPA 添加。"
+            ))
+        case .failed(let message):
+            flash = .error(message)
+        }
         await MainActor.run {
-            switch outcome {
-            case .added(let name):
-                subscriptionBridgeNotice = L(
-                    "Added \(name) to Subscription Accounts.",
-                    "已将 \(name) 添加到订阅账号。"
-                )
-            case .alreadyPresent(let name):
-                subscriptionBridgeNotice = L(
-                    "\(name) is already in Subscription Accounts.",
-                    "\(name) 已在订阅账号中，无需重复添加。"
-                )
-            case .unsupported:
-                subscriptionBridgeNotice = L(
-                    "This provider can’t be added to Subscription Accounts from CPA yet.",
-                    "该服务商暂不支持从 CPA 添加到订阅账号。"
-                )
-            case .failed(let message):
-                subscriptionBridgeNotice = message
-            }
+            AppFlashPresenter.present(flash, into: $subscriptionFlash)
         }
     }
 

@@ -1461,16 +1461,25 @@ nonisolated struct CLIProxyAccountIdentity: Equatable, Sendable {
 /// Computes a non-secret proof that two managed auth files have the same
 /// refresh credential and the same persistent CPA behavior.
 nonisolated enum CLIProxyManagedAuthSafety {
+    /// 同步状态用：只比身份与持久字段，忽略 access/refresh token 轮换。
+    /// 用于「源已更新 / 副本已改」判定，避免 OAuth 刷新造成假告警。
+    static func syncStabilityFingerprint(for data: Data) throws -> String? {
+        let root = try jsonObject(from: data)
+        guard let sanitizedRoot = sanitize(root) as? [String: Any] else { return nil }
+        var material: [String: Any] = [
+            "schema": 2,
+            "persistent_auth": sanitizedRoot
+        ]
+        if let identity = try? CLIProxyAccountIdentity.parse(data: data),
+           let planType = identity.planType {
+            material["codex_plan_type"] = planType
+        }
+        return try hashMaterial(material)
+    }
+
+    /// 合并安全用：在持久字段之外绑定唯一 refresh_token，证明「同一登录会话」。
     static func destructiveMergeFingerprint(for data: Data) throws -> String? {
-        let object: Any
-        do {
-            object = try JSONSerialization.jsonObject(with: data)
-        } catch {
-            throw CLIProxyGatewayError.invalidAuthFile("credential file is not valid JSON")
-        }
-        guard let root = object as? [String: Any] else {
-            throw CLIProxyGatewayError.invalidAuthFile("credential file must contain a JSON object")
-        }
+        let root = try jsonObject(from: data)
 
         var refreshTokens: [String] = []
         collectRefreshTokens(in: root, into: &refreshTokens)
@@ -1494,6 +1503,23 @@ nonisolated enum CLIProxyManagedAuthSafety {
            let planType = identity.planType {
             material["codex_plan_type"] = planType
         }
+        return try hashMaterial(material)
+    }
+
+    private static func jsonObject(from data: Data) throws -> [String: Any] {
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw CLIProxyGatewayError.invalidAuthFile("credential file is not valid JSON")
+        }
+        guard let root = object as? [String: Any] else {
+            throw CLIProxyGatewayError.invalidAuthFile("credential file must contain a JSON object")
+        }
+        return root
+    }
+
+    private static func hashMaterial(_ material: [String: Any]) throws -> String? {
         guard JSONSerialization.isValidJSONObject(material) else { return nil }
         let canonical = try JSONSerialization.data(withJSONObject: material, options: [.sortedKeys])
         return SHA256.hash(data: canonical)
