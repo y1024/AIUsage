@@ -761,7 +761,7 @@ struct CLIProxyUpdaterRegression {
 
         try expect(free.canAutomaticallyMerge && team.canAutomaticallyMerge, "complete Codex identities were not strong")
         try expect(free.key != team.key, "Free and Team workspaces with one email were merged")
-        try expect(free.planDisplayName == "Free" && team.planDisplayName == "Team", "Codex plan summary is wrong")
+        try expect(free.planDisplayName == "Free" && team.planDisplayName == "Business", "Codex plan summary is wrong")
         try expect(free.shortAccountID != free.accountID, "long Codex account ID was not shortened for display")
 
         let plan = CLIProxyManagedAuthDeduplicator.plan(for: [
@@ -816,7 +816,7 @@ struct CLIProxyUpdaterRegression {
         try expect(plus.key == team.key, "Codex plan change created a new account identity")
         try expect(plus.key == fallback.key, "root account/chatgpt user and JWT account/sub did not have identity parity")
         try expect(plus.key == planless.key && planless.canAutomaticallyMerge, "missing plan claim weakened a complete Codex identity")
-        try expect(plus.planDisplayName == "Plus" && team.planDisplayName == "Team", "plan display did not follow the current JWT")
+        try expect(plus.planDisplayName == "Plus" && team.planDisplayName == "Business", "plan display did not follow the current JWT")
 
         let plusFingerprint = try CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: plusData)
         let teamFingerprint = try CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: teamData)
