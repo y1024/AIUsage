@@ -30,6 +30,12 @@ enum GlobalProxyTrack: String, Codable, CaseIterable {
 
 private let globalProxyLog = Logger(subsystem: "com.aiusage.desktop", category: "GlobalProxy")
 
+/// Claude Science 沙箱工作区：每个工作区对应独立 data-dir；技术 email 由 id 派生，不暴露给用户。
+struct ScienceWorkspace: Codable, Equatable, Identifiable, Hashable {
+    var id: String
+    var name: String
+}
+
 struct GlobalProxyConfig: Codable, Equatable {
     /// 是否启用全局代理模式（启用时接管 CLI 配置、拉起常驻代理；停用时还原）。
     var isEnabled: Bool
@@ -50,8 +56,12 @@ struct GlobalProxyConfig: Codable, Equatable {
     var activeNodeId: String?
     /// Science 沙箱监听端口（仅 Science 轨；即 `claude-science serve --port`）。缺省 14410（AIUsage 端口族）。
     var sciencePort: Int? = nil
-    /// Science 沙箱假账号邮箱（仅 Science 轨；必须以 .invalid 保留顶级域结尾，保证不可路由）。缺省 aiusage@cslocal.invalid。
+    /// 遗留：旧版可编辑假邮箱。现由 `activeScienceWorkspaceId` 派生 `…@cslocal.invalid`，读档后会被覆盖。
     var sandboxEmail: String? = nil
+    /// Science 沙箱工作区列表（仅 Science 轨）。缺省一个「默认」工作区。
+    var scienceWorkspaces: [ScienceWorkspace]? = nil
+    /// 当前激活的沙箱工作区 id。接管模式下忽略，固定走 adopt 目录。
+    var activeScienceWorkspaceId: String? = nil
     /// 接管真实实例（仅 Science 轨）：内部 daemon 跑在独立 data-dir、由 8765 反向代理注入会话，
     /// 使双击桌面 app 也免登录。**不触碰真实 ~/.claude-science 凭证**，仅改写运行期 operon.lock（停用即删）。
     /// 缺省 false（安全默认，只做隔离沙箱）。
@@ -73,8 +83,28 @@ struct GlobalProxyConfig: Codable, Equatable {
     /// 默认沙箱的内部 daemon 端口。浏览器只访问 `defaultScienceListenPort`，
     /// `ScienceAuthProxy` 在二者之间反代并提供即时模型目录。
     static let defaultScienceSandboxInternalPort = 14412
-    // 假账号邮箱缺省值：以 `.invalid`（RFC 2606 保留顶级域，永不可解析）保证是不可路由假账号，带 AIUsage 标识。
-    static let defaultSandboxEmail = "aiusage@cslocal.invalid"
+    /// 默认沙箱工作区 id（稳定；旧 `science-sandbox/home` 迁移到此）。
+    static let defaultScienceWorkspaceId = "default"
+    /// 默认工作区显示名（英文存盘；UI 可本地化展示）。
+    static let defaultScienceWorkspaceName = "Default"
+    // 假账号邮箱缺省值（兼容旧配置；运行时由工作区 id 派生覆盖）。
+    static let defaultSandboxEmail = "default@cslocal.invalid"
+
+    /// 由工作区 id 派生不可路由假邮箱（RFC 2606 `.invalid`）。
+    static func sandboxEmail(forWorkspaceId id: String) -> String {
+        let raw = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safe = raw.replacingOccurrences(
+            of: "[^A-Za-z0-9._-]",
+            with: "-",
+            options: .regularExpression
+        )
+        let local = safe.isEmpty ? "workspace" : safe
+        return "\(local)@cslocal.invalid"
+    }
+
+    static var defaultScienceWorkspace: ScienceWorkspace {
+        ScienceWorkspace(id: defaultScienceWorkspaceId, name: defaultScienceWorkspaceName)
+    }
     // 接管真实实例模式下 Science 对外固定端口（= 桌面 app 默认端口）：由本地反向代理（ScienceAuthProxy）占用，
     // 负责给每个请求注入 operon 会话 cookie，使双击桌面 app / 浏览器打开 8765 都免登录。
     static let realInstancePort = 8765
@@ -113,13 +143,34 @@ struct GlobalProxyConfig: Codable, Equatable {
                 openCodeInterface: .openAICompatible, activeNodeId: nil
             )
         case .science:
-            return GlobalProxyConfig(
+            var config = GlobalProxyConfig(
                 isEnabled: false, port: defaultSciencePort, clientKey: freshClientKey(),
                 virtualModel: defaultClaudeOpus, sonnetModel: defaultClaudeSonnet,
                 haikuModel: defaultClaudeHaiku, openCodeInterface: nil, activeNodeId: nil,
-                sciencePort: defaultScienceListenPort, sandboxEmail: defaultSandboxEmail
+                sciencePort: defaultScienceListenPort,
+                sandboxEmail: sandboxEmail(forWorkspaceId: defaultScienceWorkspaceId),
+                scienceWorkspaces: [defaultScienceWorkspace],
+                activeScienceWorkspaceId: defaultScienceWorkspaceId
             )
+            config.ensureScienceWorkspaceDefaults()
+            return config
         }
+    }
+
+    /// 保证至少有一个工作区，并同步派生 `sandboxEmail`。读档后应调用。
+    mutating func ensureScienceWorkspaceDefaults() {
+        var list = scienceWorkspaces ?? []
+        if list.isEmpty {
+            list = [Self.defaultScienceWorkspace]
+        }
+        // 去重保序
+        var seen = Set<String>()
+        list = list.filter { seen.insert($0.id).inserted }
+        scienceWorkspaces = list
+        if activeScienceWorkspaceId == nil || !list.contains(where: { $0.id == activeScienceWorkspaceId }) {
+            activeScienceWorkspaceId = list[0].id
+        }
+        sandboxEmail = Self.sandboxEmail(forWorkspaceId: activeScienceWorkspaceId ?? Self.defaultScienceWorkspaceId)
     }
 
     // MARK: Derived
@@ -151,8 +202,29 @@ struct GlobalProxyConfig: Codable, Equatable {
         let p = sciencePort ?? Self.defaultScienceListenPort
         return p == 8765 ? Self.defaultScienceListenPort : p
     }
-    /// Science 沙箱假账号邮箱（缺省 aiusage@cslocal.invalid）。
-    var effectiveSandboxEmail: String { (sandboxEmail?.nilIfBlank) ?? Self.defaultSandboxEmail }
+    /// 当前沙箱工作区列表（至少含默认项）。
+    var effectiveScienceWorkspaces: [ScienceWorkspace] {
+        let list = scienceWorkspaces ?? []
+        return list.isEmpty ? [Self.defaultScienceWorkspace] : list
+    }
+
+    /// 当前激活沙箱工作区 id。
+    var effectiveActiveScienceWorkspaceId: String {
+        let id = activeScienceWorkspaceId ?? Self.defaultScienceWorkspaceId
+        if effectiveScienceWorkspaces.contains(where: { $0.id == id }) { return id }
+        return effectiveScienceWorkspaces[0].id
+    }
+
+    /// 当前激活沙箱工作区。
+    var effectiveActiveScienceWorkspace: ScienceWorkspace {
+        effectiveScienceWorkspaces.first(where: { $0.id == effectiveActiveScienceWorkspaceId })
+            ?? Self.defaultScienceWorkspace
+    }
+
+    /// Science 沙箱假账号邮箱（由工作区 id 派生；`.invalid` 不可路由）。
+    var effectiveSandboxEmail: String {
+        Self.sandboxEmail(forWorkspaceId: effectiveActiveScienceWorkspaceId)
+    }
 
     /// 是否接管真实实例（缺省 false）。
     var effectiveAdoptReal: Bool { adoptRealInstance ?? false }
@@ -187,7 +259,11 @@ enum GlobalProxyStore {
             return .makeDefault(track: track)
         }
         do {
-            return try JSONDecoder().decode(GlobalProxyConfig.self, from: data)
+            var config = try JSONDecoder().decode(GlobalProxyConfig.self, from: data)
+            if track == .science {
+                config.ensureScienceWorkspaceDefaults()
+            }
+            return config
         } catch {
             globalProxyLog.error("Failed to decode global proxy config (\(track.rawValue, privacy: .public)), using default: \(String(describing: error), privacy: .public)")
             return .makeDefault(track: track)
@@ -195,11 +271,15 @@ enum GlobalProxyStore {
     }
 
     static func save(_ config: GlobalProxyConfig, track: GlobalProxyTrack) {
+        var toSave = config
+        if track == .science {
+            toSave.ensureScienceWorkspaceDefaults()
+        }
         let path = configPath(track: track)
         let dir = (path as NSString).deletingLastPathComponent
         do {
             try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-            let data = try JSONEncoder().encode(config)
+            let data = try JSONEncoder().encode(toSave)
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
         } catch {

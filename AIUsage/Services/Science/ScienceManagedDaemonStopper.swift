@@ -5,10 +5,11 @@ import Darwin
 /// `claude-science stop` cannot run (binary uninstalled) or is unavailable
 /// (crash-leftover from the other mode).
 ///
-/// This is deliberately not a generic process killer: it accepts only the two
-/// fixed AIUsage data directories (sandbox and adopt), trusts only their JSON
-/// lock PID, and requires the live command line to name both `claude-science`
-/// and that exact `--data-dir` argument before sending SIGTERM.
+/// This is deliberately not a generic process killer: it accepts only AIUsage
+/// sandbox workspace data dirs (`science-sandbox/**/home/.claude-science`) and
+/// the adopt data dir, trusts only their JSON lock PID, and requires the live
+/// command line to name both `claude-science` and that exact `--data-dir`
+/// argument before sending SIGTERM.
 nonisolated enum ScienceManagedDaemonStopper {
     enum Outcome: Equatable {
         case noLock
@@ -17,9 +18,14 @@ nonisolated enum ScienceManagedDaemonStopper {
         case termSent(exited: Bool)
     }
 
+    static var managedSandboxRoot: String {
+        (NSHomeDirectory() as NSString).appendingPathComponent(".config/aiusage/science-sandbox")
+    }
+
+    /// 兼容旧调用：默认工作区 data-dir。
     static var managedSandboxDataDir: String {
         ((NSHomeDirectory() as NSString)
-            .appendingPathComponent(".config/aiusage/science-sandbox/home") as NSString)
+            .appendingPathComponent(".config/aiusage/science-sandbox/workspaces/default/home") as NSString)
             .appendingPathComponent(".claude-science")
     }
 
@@ -27,6 +33,18 @@ nonisolated enum ScienceManagedDaemonStopper {
         ((NSHomeDirectory() as NSString)
             .appendingPathComponent(".config/aiusage/science-adopt/home") as NSString)
             .appendingPathComponent(".claude-science")
+    }
+
+    /// 是否为 AIUsage 沙箱工作区 data-dir（含旧版 `science-sandbox/home`）。
+    static func isManagedSandboxDataDir(_ dataDir: String) -> Bool {
+        let requested = URL(fileURLWithPath: dataDir).standardizedFileURL.path
+        guard requested.hasSuffix("/home/.claude-science") else { return false }
+        let root = URL(fileURLWithPath: managedSandboxRoot).standardizedFileURL.path
+        if requested == (root as NSString).appendingPathComponent("home/.claude-science") {
+            return true
+        }
+        let workspacesPrefix = (root as NSString).appendingPathComponent("workspaces") + "/"
+        return requested.hasPrefix(workspacesPrefix)
     }
 
     @discardableResult
@@ -102,13 +120,12 @@ nonisolated enum ScienceManagedDaemonStopper {
 
     private static func isExactManagedDataDir(_ dataDir: String) -> Bool {
         let requested = URL(fileURLWithPath: dataDir).standardizedFileURL
-        let allowed = [managedSandboxDataDir, managedAdoptDataDir]
-            .map { URL(fileURLWithPath: $0).standardizedFileURL.path }
-        guard allowed.contains(requested.path) else { return false }
-
-        // A relocated parent (for example symlinked ~/.config) remains inside
-        // the user's AIUsage hierarchy. Only the allowlisted dataDir entry
-        // itself is forbidden from redirecting to another tree.
+        if isManagedSandboxDataDir(requested.path) {
+            guard FileManager.default.fileExists(atPath: requested.path) else { return true }
+            return (try? requested.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
+        }
+        let adopt = URL(fileURLWithPath: managedAdoptDataDir).standardizedFileURL
+        guard requested.path == adopt.path else { return false }
         guard FileManager.default.fileExists(atPath: requested.path) else { return true }
         return (try? requested.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
     }

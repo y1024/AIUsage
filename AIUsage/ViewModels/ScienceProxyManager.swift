@@ -40,7 +40,11 @@ final class ScienceProxyManager: ObservableObject {
     var activeNodeId: String? { config.activeNodeId }
     var isProxyRunning: Bool { runtime.isProcessRunning }
     var scienceInstalled: Bool { ScienceSandbox.isInstalled }
-    var sandboxHome: String { ScienceSandboxPaths.make().home }
+    var sandboxHome: String { sandboxPaths.home }
+    /// 当前沙箱工作区路径集（接管模式仍返回沙箱路径，仅供打开/重置沙箱目录用）。
+    var sandboxPaths: ScienceSandboxPaths {
+        ScienceSandboxPaths.make(workspaceId: config.effectiveActiveScienceWorkspaceId)
+    }
     /// 是否接管真实实例（双击桌面 app 也免登录）。
     var adoptReal: Bool { config.effectiveAdoptReal }
     /// 浏览器实际访问的公开端口。两种模式都由 `ScienceAuthProxy` 监听。
@@ -57,11 +61,12 @@ final class ScienceProxyManager: ObservableObject {
                 dataDir: ScienceRealAdopt.adoptDataDir
             )
         }
+        let paths = sandboxPaths
         return ScienceProxyEndpointPlan(
             mode: .sandbox,
             publicPort: config.effectiveSciencePort,
             daemonPort: GlobalProxyConfig.defaultScienceSandboxInternalPort,
-            dataDir: ScienceSandboxPaths.make().dataDir
+            dataDir: paths.dataDir
         )
     }
 
@@ -215,17 +220,16 @@ final class ScienceProxyManager: ObservableObject {
 
     // MARK: - Settings（仅停用态可改）
 
-    func updateSettings(proxyPort: Int, sciencePort: Int, email: String) {
+    func updateSettings(proxyPort: Int, sciencePort: Int) {
         guard !config.isEnabled else { return }
         config.port = max(1, min(65_535, proxyPort))
         let sp = max(1, min(65_535, sciencePort))
         config.sciencePort = (sp == 8765) ? GlobalProxyConfig.defaultScienceListenPort : sp
-        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        config.sandboxEmail = trimmed.isEmpty ? GlobalProxyConfig.defaultSandboxEmail : trimmed
+        config.ensureScienceWorkspaceDefaults()
         persist()
     }
 
-    /// 切换「接管真实实例」（仅停用态可改）。开启后双击桌面 app 也免登录（独立 daemon + 反代，不碰真实凭证）。
+    /// 切换「接管真实实例」（仅停用态可改）。开启后双击桌面 app 也免登录；工作区切换在接管态不可用。
     func setAdoptReal(_ on: Bool) {
         guard !config.isEnabled else { return }
         config.adoptRealInstance = on
@@ -237,6 +241,83 @@ final class ScienceProxyManager: ObservableObject {
         guard !config.isEnabled else { return }
         config.allowLAN = allowLAN
         persist()
+    }
+
+    // MARK: - Workspaces（仅沙箱；接管态忽略）
+
+    func addWorkspace(named name: String) {
+        guard !config.isEnabled, !config.effectiveAdoptReal else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        config.ensureScienceWorkspaceDefaults()
+        let id = UUID().uuidString.lowercased()
+        var list = config.effectiveScienceWorkspaces
+        list.append(ScienceWorkspace(id: id, name: trimmed))
+        config.scienceWorkspaces = list
+        config.activeScienceWorkspaceId = id
+        config.ensureScienceWorkspaceDefaults()
+        persist()
+    }
+
+    func renameWorkspace(id: String, to name: String) {
+        guard !config.isEnabled, !config.effectiveAdoptReal else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        config.ensureScienceWorkspaceDefaults()
+        guard var list = config.scienceWorkspaces,
+              let idx = list.firstIndex(where: { $0.id == id }) else { return }
+        list[idx].name = trimmed
+        config.scienceWorkspaces = list
+        persist()
+    }
+
+    func deleteWorkspace(id: String) {
+        guard !config.isEnabled, !config.effectiveAdoptReal else { return }
+        config.ensureScienceWorkspaceDefaults()
+        var list = config.effectiveScienceWorkspaces
+        guard list.count > 1, list.contains(where: { $0.id == id }) else {
+            operationError = AppSettings.shared.t(
+                "Keep at least one workspace.",
+                "至少保留一个工作区。"
+            )
+            return
+        }
+        list.removeAll { $0.id == id }
+        config.scienceWorkspaces = list
+        if config.activeScienceWorkspaceId == id {
+            config.activeScienceWorkspaceId = list[0].id
+        }
+        config.ensureScienceWorkspaceDefaults()
+        persist()
+        // 删除磁盘目录（护栏：必须在 workspaces/<id>/home 下）
+        let home = ScienceSandboxPaths.homePath(forWorkspaceId: id)
+        let root = ScienceSandboxPaths.sandboxRoot
+        let resolved = URL(fileURLWithPath: home).resolvingSymlinksInPath().path
+        let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        let expectedPrefix = (resolvedRoot as NSString).appendingPathComponent("workspaces") + "/"
+        guard resolved.hasPrefix(expectedPrefix) else { return }
+        let workspaceRoot = (home as NSString).deletingLastPathComponent
+        try? FileManager.default.removeItem(atPath: workspaceRoot)
+    }
+
+    /// 切换激活工作区。运行中会停掉再以新目录重启。
+    func selectWorkspace(id: String) async {
+        guard !config.effectiveAdoptReal else { return }
+        config.ensureScienceWorkspaceDefaults()
+        guard config.effectiveScienceWorkspaces.contains(where: { $0.id == id }) else { return }
+        guard id != config.effectiveActiveScienceWorkspaceId else { return }
+
+        let wasRunning = config.isEnabled
+        let nodeId = config.activeNodeId
+        if wasRunning {
+            await stop()
+        }
+        config.activeScienceWorkspaceId = id
+        config.ensureScienceWorkspaceDefaults()
+        persist()
+        if wasRunning, let nodeId {
+            await start(activeNodeId: nodeId)
+        }
     }
 
     // MARK: - Start / Stop / Switch
@@ -334,7 +415,7 @@ final class ScienceProxyManager: ObservableObject {
                     try ScienceRealAdopt.startInternalDaemon(proxyPort: proxyPort, email: email)
                 }.value
             } else {
-                let paths = ScienceSandboxPaths.make()
+                let paths = ScienceSandboxPaths.make(workspaceId: config.effectiveActiveScienceWorkspaceId)
                 try await Task.detached(priority: .userInitiated) {
                     // 迁移旧版“daemon 直接监听公开端口”的残留实例，然后在专用内部端口重启。
                     try? ScienceSandbox.stop(paths: paths)
@@ -419,11 +500,12 @@ final class ScienceProxyManager: ObservableObject {
     /// sandbox 始终只操作自己的 data-dir，绝不触碰真实 ~/.claude-science。
     private func teardownScience(_ endpoints: ScienceProxyEndpointPlan) async {
         ScienceAuthProxy.shared.stop()
+        let sandboxPaths = self.sandboxPaths
         await Task.detached(priority: .userInitiated) {
             if endpoints.adopting {
                 ScienceRealAdopt.stopAdoptedDaemon()
             } else {
-                try? ScienceSandbox.stop(paths: ScienceSandboxPaths.make())
+                try? ScienceSandbox.stop(paths: sandboxPaths)
             }
         }.value
         sandboxHealthy = false
@@ -439,7 +521,7 @@ final class ScienceProxyManager: ObservableObject {
         // silently). The strict managed-lock stopper only ever touches
         // AIUsage-owned data dirs, so sweeping here is safe and idempotent.
         let otherModeDataDir = endpoints.adopting
-            ? ScienceManagedDaemonStopper.managedSandboxDataDir
+            ? sandboxPaths.dataDir
             : ScienceManagedDaemonStopper.managedAdoptDataDir
         await Task.detached(priority: .utility) {
             ScienceManagedDaemonStopper.stopFromManagedLock(dataDir: otherModeDataDir)
@@ -586,17 +668,17 @@ final class ScienceProxyManager: ObservableObject {
     }
 
     func openSandboxFolder() {
-        let path = ScienceSandboxPaths.make().home
+        let path = sandboxPaths.home
         try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
-    /// 重置沙箱（仅停用态）：删除沙箱 HOME，下次启动重新克隆运行时并新铸虚拟登录。
-    /// 护栏：路径必须落在 ~/.config/aiusage/science-sandbox 之下。
+    /// 重置当前沙箱工作区（仅停用态）：删除该工作区 HOME，下次启动重新克隆运行时并新铸虚拟登录。
+    /// 护栏：路径必须落在 ~/.config/aiusage/science-sandbox/workspaces 之下（或旧版 home）。
     func resetSandbox() {
         guard !config.isEnabled else { return }
-        let home = ScienceSandboxPaths.make().home
-        let root = (NSHomeDirectory() as NSString).appendingPathComponent(".config/aiusage/science-sandbox")
+        let home = sandboxPaths.home
+        let root = ScienceSandboxPaths.sandboxRoot
         let resolved = URL(fileURLWithPath: home).resolvingSymlinksInPath().path
         let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
         guard resolved == resolvedRoot || resolved.hasPrefix(resolvedRoot + "/") else {

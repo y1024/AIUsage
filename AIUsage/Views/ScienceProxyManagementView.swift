@@ -1,9 +1,9 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Claude Science Proxy Management View
 // 「Claude Science 代理」主视图，与 Codex/OpenCode 菜单同一套观感（卡片 + 品牌描边 + 胶囊控件）。
-// Hero 卡片承载「一键开始 / 停止」+ 激活节点热切换 + 运行状态；配置卡片（停用态可编辑）承载
-// 代理端口 / Science 端口 / 账号 / 目录 / 接管开关。
+// Hero 卡片：一键开始/停止 + 激活节点热切换；配置卡：端口、工作区、目录；接管开关收进高级区。
 
 struct ScienceProxyManagementView: View {
     @ObservedObject private var manager = ScienceProxyManager.shared
@@ -11,16 +11,25 @@ struct ScienceProxyManagementView: View {
 
     @State private var proxyPortText = ""
     @State private var sciencePortText = ""
-    @State private var emailText = ""
     @State private var selectedNodeId = ""
     @State private var adoptReal = false
     @State private var allowLAN = false
-    @State private var showAccountHelp = false
+    @State private var showAdvanced = false
+    @State private var showWorkspaceHelp = false
+    @State private var showNewWorkspaceAlert = false
+    @State private var showRenameWorkspaceAlert = false
+    @State private var showDeleteWorkspaceConfirm = false
+    @State private var showResetWorkspaceConfirm = false
+    @State private var workspaceNameDraft = ""
+    @State private var workspacePendingRenameId: String?
 
     static let brand = Color(red: 0.55, green: 0.36, blue: 0.96)
 
     private var nodes: [GlobalProxyNodeRef] { manager.availableNodes() }
     private var isEnabled: Bool { manager.isEnabled }
+    private var workspaces: [ScienceWorkspace] { manager.config.effectiveScienceWorkspaces }
+    private var activeWorkspace: ScienceWorkspace { manager.config.effectiveActiveScienceWorkspace }
+    private var workspaceControlsEnabled: Bool { !adoptReal }
 
     var body: some View {
         ScrollView {
@@ -41,6 +50,59 @@ struct ScienceProxyManagementView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear(perform: syncFromConfig)
+        .alert(L("New Workspace", "新建工作区"), isPresented: $showNewWorkspaceAlert) {
+            TextField(L("Name", "名称"), text: $workspaceNameDraft)
+            Button(L("Cancel", "取消"), role: .cancel) { workspaceNameDraft = "" }
+            Button(L("Create", "创建")) {
+                manager.addWorkspace(named: workspaceNameDraft)
+                workspaceNameDraft = ""
+            }
+        } message: {
+            Text(L("Each workspace keeps its own conversations and local login.",
+                     "每个工作区有独立的对话与本地登录状态。"))
+        }
+        .alert(L("Rename Workspace", "重命名工作区"), isPresented: $showRenameWorkspaceAlert) {
+            TextField(L("Name", "名称"), text: $workspaceNameDraft)
+            Button(L("Cancel", "取消"), role: .cancel) {
+                workspaceNameDraft = ""
+                workspacePendingRenameId = nil
+            }
+            Button(L("Save", "保存")) {
+                if let id = workspacePendingRenameId {
+                    manager.renameWorkspace(id: id, to: workspaceNameDraft)
+                }
+                workspaceNameDraft = ""
+                workspacePendingRenameId = nil
+            }
+        }
+        .confirmationDialog(
+            L("Delete this workspace?", "删除此工作区？"),
+            isPresented: $showDeleteWorkspaceConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(L("Delete", "删除"), role: .destructive) {
+                manager.deleteWorkspace(id: activeWorkspace.id)
+            }
+            Button(L("Cancel", "取消"), role: .cancel) {}
+        } message: {
+            Text(L("Its local data folder will be removed. This cannot be undone.",
+                     "将删除其本地数据目录，且不可恢复。"))
+        }
+        .confirmationDialog(
+            L("Reset this workspace?", "重置当前工作区？"),
+            isPresented: $showResetWorkspaceConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(L("Reset", "重置"), role: .destructive) {
+                manager.resetSandbox()
+            }
+            Button(L("Cancel", "取消"), role: .cancel) {}
+        } message: {
+            Text(L(
+                "Conversations and local login in “\(displayName(for: activeWorkspace))” will be cleared. The workspace itself stays.",
+                "将清空「\(displayName(for: activeWorkspace))」中的对话与本地登录，工作区本身保留。"
+            ))
+        }
     }
 
     private var notInstalledCard: some View {
@@ -210,13 +272,22 @@ struct ScienceProxyManagementView: View {
                             value: L("Enabled", "已启用")
                         )
                     }
-                    GlobalProxySummaryChip(label: L("Mode", "模式"),
-                                           value: manager.adoptReal ? L("Real instance", "真实实例") : L("Sandbox", "隔离沙箱"))
+                    GlobalProxySummaryChip(
+                        label: L("Mode", "模式"),
+                        value: manager.adoptReal ? L("Real instance", "真实实例") : L("Sandbox", "隔离沙箱")
+                    )
+                    if !manager.adoptReal {
+                        GlobalProxySummaryChip(
+                            label: L("Workspace", "工作区"),
+                            value: displayName(for: activeWorkspace)
+                        )
+                    }
                     GlobalProxySummaryChip(label: L("Proxy Port", "代理端口"), value: "\(manager.config.port)")
                     GlobalProxySummaryChip(label: L("Science Port", "Science 端口"), value: "\(manager.listenPort)")
-                    GlobalProxySummaryChip(label: L("Account", "账号"), value: manager.config.effectiveSandboxEmail)
                 }
             } else {
+                workspaceSection
+
                 HStack(alignment: .top, spacing: 12) {
                     GlobalProxyField(label: L("Proxy Port", "代理端口")) {
                         TextField("14402", text: $proxyPortText)
@@ -232,49 +303,191 @@ struct ScienceProxyManagementView: View {
                     }
                     Spacer(minLength: 0)
                 }
-                GlobalProxyField(label: L("Account", "账号"), fillWidth: true) {
-                    HStack(spacing: 6) {
-                        TextField("aiusage@cslocal.invalid", text: $emailText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 320)
-                            .disabled(adoptReal)
-                            .onChange(of: emailText) { _, _ in commitSettings() }
-                        accountHelpButton
-                    }
-                }
 
                 lanAccessToggle
 
-                Divider().padding(.vertical, 2)
-
-                adoptToggle
-            }
-
-            Divider().padding(.vertical, 2)
-
-            HStack(spacing: 8) {
-                Image(systemName: "folder")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                Text(manager.sandboxHome.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 8)
-                Button(L("Open", "打开")) { manager.openSandboxFolder() }
-                    .buttonStyle(.link)
-                    .font(.caption)
-                Button(L("Reset", "重置")) { manager.resetSandbox() }
-                    .buttonStyle(.link)
-                    .font(.caption)
-                    .disabled(isEnabled)
+                DisclosureGroup(isExpanded: $showAdvanced) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        adoptToggle
+                        dataLocationRow
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Text(L("Advanced", "高级"))
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .tint(.secondary)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    }
+
+    // MARK: - Workspace
+
+    private var workspaceSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                GlobalProxyInlineLabel(text: L("Workspace", "工作区"))
+                GlobalProxyChipMenu(
+                    brand: Self.brand,
+                    title: displayName(for: activeWorkspace),
+                    systemImage: "square.stack.3d.up.fill",
+                    isDisabled: !workspaceControlsEnabled || manager.isBusy,
+                    items: workspaces.map {
+                        GlobalProxyPickerItem(id: $0.id, name: displayName(for: $0))
+                    },
+                    selectedId: activeWorkspace.id,
+                    onSelect: { id in
+                        Task { await manager.selectWorkspace(id: id) }
+                    },
+                    footerActions: workspaceFooterActions,
+                    emptyMessage: L("No workspaces", "暂无工作区")
+                )
+                Button {
+                    manager.openSandboxFolder()
+                } label: {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                }
+                .buttonStyle(.plain)
+                .help(L("Show in Finder", "在 Finder 中显示"))
+                .disabled(!workspaceControlsEnabled)
+
+                workspaceHelpButton
+                Spacer(minLength: 0)
+            }
+            if adoptReal {
+                Text(L("Workspaces are available in sandbox mode only.", "工作区仅在隔离沙箱模式下可用。"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 2)
+            }
+        }
+    }
+
+    private var workspaceFooterActions: [GlobalProxyChipMenuAction] {
+        [
+            GlobalProxyChipMenuAction(
+                id: "new",
+                title: L("New Workspace…", "新建工作区…"),
+                systemImage: "plus",
+                action: {
+                    workspaceNameDraft = ""
+                    showNewWorkspaceAlert = true
+                }
+            ),
+            GlobalProxyChipMenuAction(
+                id: "rename",
+                title: L("Rename…", "重命名…"),
+                systemImage: "pencil",
+                isDisabled: workspaces.isEmpty,
+                action: {
+                    workspacePendingRenameId = activeWorkspace.id
+                    workspaceNameDraft = displayName(for: activeWorkspace)
+                    showRenameWorkspaceAlert = true
+                }
+            ),
+            GlobalProxyChipMenuAction(
+                id: "reset",
+                title: L("Reset Workspace…", "重置工作区…"),
+                systemImage: "arrow.counterclockwise",
+                isDestructive: true,
+                isDisabled: isEnabled,
+                action: { showResetWorkspaceConfirm = true }
+            ),
+            GlobalProxyChipMenuAction(
+                id: "delete",
+                title: L("Delete…", "删除…"),
+                systemImage: "trash",
+                isDestructive: true,
+                isDisabled: workspaces.count <= 1 || isEnabled,
+                action: { showDeleteWorkspaceConfirm = true }
+            ),
+        ]
+    }
+
+    private var dataLocationRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(L("Data folder", "数据目录"))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+            HStack(spacing: 8) {
+                Text(manager.sandboxHome.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                Spacer(minLength: 0)
+                Button(L("Copy", "复制")) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(manager.sandboxHome, forType: .string)
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+        }
+        .opacity(adoptReal ? 0.45 : 1)
+    }
+
+    private func displayName(for workspace: ScienceWorkspace) -> String {
+        if workspace.id == GlobalProxyConfig.defaultScienceWorkspaceId,
+           workspace.name == GlobalProxyConfig.defaultScienceWorkspaceName {
+            return L("Default", "默认")
+        }
+        return workspace.name
+    }
+
+    private var workspaceHelpButton: some View {
+        Button {
+            showWorkspaceHelp.toggle()
+        } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(L("About workspaces", "关于工作区"))
+        .popover(isPresented: $showWorkspaceHelp, arrowEdge: .bottom) {
+            workspaceHelpBubble
+        }
+    }
+
+    private var workspaceHelpBubble: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(L("Sandbox workspaces", "沙箱工作区"), systemImage: "square.stack.3d.up.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Self.brand)
+            helpRow("externaldrive", L("Each workspace has its own data folder and conversation history.",
+                                       "每个工作区有独立数据目录与对话历史。"))
+            helpRow("wifi.slash", L("Local login only — never contacts Anthropic.",
+                                    "仅本地登录，绝不联系 Anthropic。"))
+            helpRow("arrow.triangle.2.circlepath", L("Switching workspaces restarts Science with that folder.",
+                                                     "切换工作区会用对应目录重启 Science。"))
+            helpRow("trash", L("Reset clears only the current workspace.",
+                               "重置只清空当前工作区。"))
+        }
+        .padding(14)
+        .frame(width: 288, alignment: .leading)
+    }
+
+    private func helpRow(_ icon: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var lanAccessToggle: some View {
@@ -318,8 +531,8 @@ struct ScienceProxyManagementView: View {
                     Text(L("Adopt real instance (desktop app login-free)", "接管真实实例（桌面 app 也免登录）"))
                         .font(.system(size: 12, weight: .semibold))
                     Text(L(
-                        "Also makes the double-clicked Claude Science.app login-free (uses port 8765).",
-                        "让双击 Claude Science.app 也免登录（占用 8765）。"
+                        "Also makes the double-clicked Claude Science.app login-free (uses port 8765). Workspaces are disabled while this is on.",
+                        "让双击 Claude Science.app 也免登录（占用 8765）。开启后工作区不可用。"
                     ))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -343,54 +556,6 @@ struct ScienceProxyManagementView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
             }
-        }
-    }
-
-    // MARK: - Account Help Bubble
-
-    private var accountHelpButton: some View {
-        Button {
-            showAccountHelp.toggle()
-        } label: {
-            Image(systemName: "questionmark.circle")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain)
-        .help(L("About the local account", "关于本地账号"))
-        .popover(isPresented: $showAccountHelp, arrowEdge: .bottom) {
-            accountHelpBubble
-        }
-    }
-
-    private var accountHelpBubble: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(L("Local fake account", "本地假账号"), systemImage: "person.badge.key.fill")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Self.brand)
-            helpRow("wifi.slash", L("Never goes online — used only to pass the local login gate.",
-                                    "绝不联网，只用于越过本地登录门。"))
-            helpRow("checkmark.seal", L("Must end with .invalid — a reserved domain that can never resolve.",
-                                       "必须以 .invalid 结尾——保留域名，永不可解析。"))
-            helpRow("externaldrive", L("Each account gets its own isolated data-dir and conversation history.",
-                                       "每个账号有独立 data-dir 与对话历史。"))
-            helpRow("arrow.triangle.2.circlepath", L("Switching the address keeps your existing conversations.",
-                                                     "更换地址不会清空已有对话。"))
-        }
-        .padding(14)
-        .frame(width: 288, alignment: .leading)
-    }
-
-    private func helpRow(_ icon: String, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .frame(width: 16)
-            Text(text)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -436,17 +601,17 @@ struct ScienceProxyManagementView: View {
     private func syncFromConfig() {
         proxyPortText = "\(manager.config.port)"
         sciencePortText = "\(manager.config.effectiveSciencePort)"
-        emailText = manager.config.effectiveSandboxEmail
         adoptReal = manager.adoptReal
         allowLAN = manager.config.effectiveAllowLAN
         selectedNodeId = resolvedSelection
+        showAdvanced = manager.adoptReal
     }
 
     private func commitSettings() {
         guard !isEnabled else { return }
         let proxyPort = Int(proxyPortText.trimmingCharacters(in: .whitespaces)) ?? manager.config.port
         let sciencePort = Int(sciencePortText.trimmingCharacters(in: .whitespaces)) ?? manager.config.effectiveSciencePort
-        manager.updateSettings(proxyPort: proxyPort, sciencePort: sciencePort, email: emailText)
+        manager.updateSettings(proxyPort: proxyPort, sciencePort: sciencePort)
     }
 }
 

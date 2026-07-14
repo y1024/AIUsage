@@ -32,12 +32,12 @@ nonisolated enum ScienceSelectionNormalizer {
         }
     }
 
-    /// Production callers use the two fixed AIUsage roots. Tests may inject a
-    /// temporary managed root without weakening the production path check.
+    /// Production callers use AIUsage sandbox workspace / adopt roots. Tests may
+    /// inject an exact allow-list without weakening the production path check.
     static func normalize(
         dataDir: String,
         currentModelIDs: Set<String>,
-        managedDataDirs: Set<String> = defaultManagedDataDirs
+        managedDataDirs: Set<String>? = nil
     ) throws -> Result {
         let root = try validatedManagedRoot(dataDir, managedDataDirs: managedDataDirs)
         guard FileManager.default.fileExists(atPath: root.path) else {
@@ -67,33 +67,43 @@ nonisolated enum ScienceSelectionNormalizer {
         )
     }
 
-    private static var defaultManagedDataDirs: Set<String> {
-        let home = NSHomeDirectory() as NSString
-        return [
-            home.appendingPathComponent(".config/aiusage/science-sandbox/home/.claude-science"),
-            home.appendingPathComponent(".config/aiusage/science-adopt/home/.claude-science"),
-        ]
+    private static func isProductionManagedDataDir(_ dataDir: String) -> Bool {
+        let requested = standardizedURL(dataDir).path
+        let adopt = standardizedURL(
+            (NSHomeDirectory() as NSString)
+                .appendingPathComponent(".config/aiusage/science-adopt/home/.claude-science")
+        ).path
+        if requested == adopt { return true }
+        return ScienceManagedDaemonStopper.isManagedSandboxDataDir(requested)
     }
 
     private static func validatedManagedRoot(
         _ dataDir: String,
-        managedDataDirs: Set<String>
+        managedDataDirs: Set<String>?
     ) throws -> URL {
         let requestedRaw = standardizedURL(dataDir)
         let requested = requestedRaw.resolvingSymlinksInPath()
-        let allowedRaw = Set(managedDataDirs.map { standardizedURL($0).path })
-        let allowedResolved = Set(managedDataDirs.map {
-            standardizedURL($0).resolvingSymlinksInPath().path
-        })
         let real = standardizedURL(
             (NSHomeDirectory() as NSString).appendingPathComponent(".claude-science")
         ).resolvingSymlinksInPath().path
 
-        // Require both the configured spelling and resolved destination to be
-        // managed. A symlink from an AIUsage root into the real Science tree is
-        // rejected even though its pre-resolution path looks valid.
-        guard allowedRaw.contains(requestedRaw.path),
-              allowedResolved.contains(requested.path),
+        if let managedDataDirs {
+            let allowedRaw = Set(managedDataDirs.map { standardizedURL($0).path })
+            let allowedResolved = Set(managedDataDirs.map {
+                standardizedURL($0).resolvingSymlinksInPath().path
+            })
+            guard allowedRaw.contains(requestedRaw.path),
+                  allowedResolved.contains(requested.path),
+                  !isDataDirRootSymlink(requestedRaw),
+                  requested.path != real,
+                  !requested.path.hasPrefix(real + "/") else {
+                throw NormalizationError.unmanagedDataDirectory
+            }
+            return requested
+        }
+
+        guard isProductionManagedDataDir(requestedRaw.path),
+              isProductionManagedDataDir(requested.path),
               !isDataDirRootSymlink(requestedRaw),
               requested.path != real,
               !requested.path.hasPrefix(real + "/") else {

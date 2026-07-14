@@ -171,6 +171,16 @@ struct GlobalProxyPickerItem: Identifiable {
     let name: String
 }
 
+/// Chip 菜单底部操作（新建 / 重命名 / 危险操作等）。
+struct GlobalProxyChipMenuAction: Identifiable {
+    let id: String
+    let title: String
+    var systemImage: String? = nil
+    var isDestructive: Bool = false
+    var isDisabled: Bool = false
+    let action: () -> Void
+}
+
 struct GlobalProxyChipMenu: View {
     let brand: Color
     let title: String
@@ -179,6 +189,8 @@ struct GlobalProxyChipMenu: View {
     let items: [GlobalProxyPickerItem]
     let selectedId: String
     let onSelect: (String) -> Void
+    var footerActions: [GlobalProxyChipMenuAction] = []
+    var emptyMessage: String = L("No nodes available", "暂无可用节点")
 
     @State private var isOpen = false
 
@@ -212,7 +224,7 @@ struct GlobalProxyChipMenu: View {
         ScrollView {
             VStack(spacing: 2) {
                 if items.isEmpty {
-                    Text(L("No nodes available", "暂无可用节点"))
+                    Text(emptyMessage)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -230,11 +242,63 @@ struct GlobalProxyChipMenu: View {
                         }
                     }
                 }
+                if !footerActions.isEmpty {
+                    Divider().padding(.vertical, 4)
+                    ForEach(footerActions) { action in
+                        GlobalProxyChipFooterRow(
+                            title: action.title,
+                            systemImage: action.systemImage,
+                            isDestructive: action.isDestructive,
+                            isDisabled: action.isDisabled
+                        ) {
+                            guard !action.isDisabled else { return }
+                            isOpen = false
+                            action.action()
+                        }
+                    }
+                }
             }
             .padding(6)
         }
-        .frame(width: 240)
-        .frame(maxHeight: 320)
+        .frame(width: 260)
+        .frame(maxHeight: 360)
+    }
+}
+
+private struct GlobalProxyChipFooterRow: View {
+    let title: String
+    let systemImage: String?
+    let isDestructive: Bool
+    let isDisabled: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 12))
+                        .foregroundStyle(isDestructive ? Color.red.opacity(isDisabled ? 0.4 : 0.9) : Color.secondary)
+                        .frame(width: 16)
+                }
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(isDestructive ? Color.red.opacity(isDisabled ? 0.4 : 1) : Color.primary.opacity(isDisabled ? 0.4 : 1))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(hovered && !isDisabled ? Color.primary.opacity(0.06) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .onHover { hovered = $0 }
     }
 }
 

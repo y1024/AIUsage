@@ -44,7 +44,7 @@ enum ScienceSandboxError: LocalizedError {
     }
 }
 
-/// 沙箱各路径（由代理配置与固定布局推导）。
+/// 沙箱各路径（由工作区 id 与固定布局推导）。
 struct ScienceSandboxPaths {
     /// 沙箱 HOME（独立于真实 HOME）。
     let home: String
@@ -52,21 +52,72 @@ struct ScienceSandboxPaths {
     let dataDir: String
     /// 真实凭证目录（只用于护栏比对，绝不写）。
     let realDir: String
+    /// 所属工作区 id（缺省 `default`）。
+    let workspaceId: String
 
     static let scienceBinary = "/Applications/Claude Science.app/Contents/Resources/bin/claude-science"
 
-    static func make(home overrideHome: String? = nil) -> ScienceSandboxPaths {
-        let base = overrideHome ?? defaultHome
+    /// AIUsage 沙箱根目录（其下 `workspaces/<id>/home` 为各工作区）。
+    static var sandboxRoot: String {
+        (NSHomeDirectory() as NSString).appendingPathComponent(".config/aiusage/science-sandbox")
+    }
+
+    /// 旧版单目录 HOME（无工作区）；首次访问默认工作区时迁移到 `workspaces/default/home`。
+    static var legacyHome: String {
+        (sandboxRoot as NSString).appendingPathComponent("home")
+    }
+
+    static func homePath(forWorkspaceId workspaceId: String) -> String {
+        let workspaces = (sandboxRoot as NSString).appendingPathComponent("workspaces")
+        let workspaceRoot = (workspaces as NSString).appendingPathComponent(workspaceId)
+        return (workspaceRoot as NSString).appendingPathComponent("home")
+    }
+
+    static func make(workspaceId: String = GlobalProxyConfig.defaultScienceWorkspaceId) -> ScienceSandboxPaths {
+        let safeId = workspaceId.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
+            ?? GlobalProxyConfig.defaultScienceWorkspaceId
+        migrateLegacyHomeIfNeeded(for: safeId)
+        let base = homePath(forWorkspaceId: safeId)
         return ScienceSandboxPaths(
             home: base,
             dataDir: (base as NSString).appendingPathComponent(".claude-science"),
-            realDir: (NSHomeDirectory() as NSString).appendingPathComponent(".claude-science")
+            realDir: (NSHomeDirectory() as NSString).appendingPathComponent(".claude-science"),
+            workspaceId: safeId
         )
     }
 
+    /// 兼容旧调用：等价于默认工作区。
+    static func make(home overrideHome: String?) -> ScienceSandboxPaths {
+        if let overrideHome {
+            return ScienceSandboxPaths(
+                home: overrideHome,
+                dataDir: (overrideHome as NSString).appendingPathComponent(".claude-science"),
+                realDir: (NSHomeDirectory() as NSString).appendingPathComponent(".claude-science"),
+                workspaceId: GlobalProxyConfig.defaultScienceWorkspaceId
+            )
+        }
+        return make(workspaceId: GlobalProxyConfig.defaultScienceWorkspaceId)
+    }
+
+    /// 将旧 `science-sandbox/home` 迁到 `workspaces/default/home`（仅当目标尚不存在）。
+    static func migrateLegacyHomeIfNeeded(for workspaceId: String) {
+        guard workspaceId == GlobalProxyConfig.defaultScienceWorkspaceId else { return }
+        let fm = FileManager.default
+        let legacy = legacyHome
+        let modern = homePath(forWorkspaceId: workspaceId)
+        guard fm.fileExists(atPath: legacy), !fm.fileExists(atPath: modern) else { return }
+        let parent = (modern as NSString).deletingLastPathComponent
+        do {
+            try fm.createDirectory(atPath: parent, withIntermediateDirectories: true)
+            try fm.moveItem(atPath: legacy, toPath: modern)
+            sandboxLog.notice("Migrated legacy Science sandbox home → workspaces/default/home")
+        } catch {
+            sandboxLog.error("Failed to migrate legacy Science sandbox home: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     static var defaultHome: String {
-        let home = NSHomeDirectory()
-        return (home as NSString).appendingPathComponent(".config/aiusage/science-sandbox/home")
+        homePath(forWorkspaceId: GlobalProxyConfig.defaultScienceWorkspaceId)
     }
 }
 
