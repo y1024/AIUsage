@@ -79,8 +79,43 @@ struct GatewayAccountRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpenDetail)
+        .contextMenu { rowContextMenu }
         .accessibilityElement(children: .combine)
         .accessibilityAction(named: L("Show account details", "查看账号详情"), onOpenDetail)
+    }
+
+    @ViewBuilder
+    private var rowContextMenu: some View {
+        Button(action: onOpenDetail) {
+            Label(L("Account Details", "账号详情"), systemImage: "info.circle")
+        }
+        if let linkedCandidate {
+            Button {
+                onRequestSync(linkedCandidate)
+            } label: {
+                Label(
+                    L("Sync from AIUsage", "从 AIUsage 同步"),
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
+            }
+            Divider()
+            syncModeButton(
+                title: L("Manual copy", "手动同步副本"),
+                selected: syncMode == .manualCopy
+            ) {
+                onSetSyncMode(linkedCandidate, .manualCopy)
+            }
+            syncModeButton(
+                title: L("Keep updated", "保持单向同步"),
+                selected: syncMode == .keepUpdated
+            ) {
+                onSetSyncMode(linkedCandidate, .keepUpdated)
+            }
+        }
+        Divider()
+        Button(role: .destructive, action: onDelete) {
+            Label(L("Remove from CPA", "从 CPA 删除"), systemImage: "trash")
+        }
     }
 
     private var emailAvatar: some View {
@@ -172,6 +207,8 @@ struct GatewayAccountRow: View {
         .accessibilityLabel(text)
     }
 
+    @State private var isMoreHovered = false
+
     private var moreMenu: some View {
         Menu {
             Button(action: onOpenDetail) {
@@ -181,31 +218,25 @@ struct GatewayAccountRow: View {
                 Button {
                     onRequestSync(linkedCandidate)
                 } label: {
-                    Label(L("Sync from AIUsage", "从 AIUsage 同步"),
+                    Label(
+                        L("Sync from AIUsage", "从 AIUsage 同步"),
                         systemImage: "arrow.triangle.2.circlepath"
                     )
                 }
-                Menu {
-                    Button {
+                Divider()
+                Section(L("Sync mode", "同步模式")) {
+                    syncModeButton(
+                        title: L("Manual copy", "手动同步副本"),
+                        selected: syncMode == .manualCopy
+                    ) {
                         onSetSyncMode(linkedCandidate, .manualCopy)
-                    } label: {
-                        if syncMode == .manualCopy {
-                            Label(L("Manual copy", "手动同步副本"), systemImage: "checkmark")
-                        } else {
-                            Text(L("Manual copy", "手动同步副本"))
-                        }
                     }
-                    Button {
+                    syncModeButton(
+                        title: L("Keep updated", "保持单向同步"),
+                        selected: syncMode == .keepUpdated
+                    ) {
                         onSetSyncMode(linkedCandidate, .keepUpdated)
-                    } label: {
-                        if syncMode == .keepUpdated {
-                            Label(L("Keep updated", "保持单向同步"), systemImage: "checkmark")
-                        } else {
-                            Text(L("Keep updated", "保持单向同步"))
-                        }
                     }
-                } label: {
-                    Label(L("Sync mode", "同步模式"), systemImage: "arrow.left.arrow.right")
                 }
             }
             Divider()
@@ -213,15 +244,40 @@ struct GatewayAccountRow: View {
                 Label(L("Remove from CPA", "从 CPA 删除"), systemImage: "trash")
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
-                .contentShape(Rectangle())
+            Image(systemName: "ellipsis")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.secondary.opacity(isMoreHovered ? 1 : 0.55))
+                .frame(width: 22, height: 22)
+                .background(
+                    Circle()
+                        .fill(Color.primary.opacity(isMoreHovered ? 0.08 : 0))
+                )
+                .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
-        .frame(width: 24)
+        .menuIndicator(.hidden)
+        .frame(width: 22, height: 22)
+        .onHover { isMoreHovered = $0 }
+        .opacity(isBusy ? 0.35 : 1)
         .disabled(isBusy)
         .accessibilityLabel(L("More actions for \(file.displayLabel)", "\(file.displayLabel) 的更多操作"))
+        .help(L("More actions", "更多操作"))
+    }
+
+    private func syncModeButton(
+        title: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                Spacer(minLength: 12)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+            }
+        }
     }
 }

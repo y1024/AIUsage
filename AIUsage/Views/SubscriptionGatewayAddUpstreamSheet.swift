@@ -510,21 +510,37 @@ struct CLIProxyAddUpstreamSheet: View {
             Button {
                 Task { await manager.setSyncMode(candidate, mode: .manualCopy) }
             } label: {
-                Label(L("Manual copy", "手动同步"),
-                      systemImage: manager.syncMode(for: candidate) == .keepUpdated ? "circle" : "checkmark")
+                HStack {
+                    Text(L("Manual copy", "手动同步"))
+                    Spacer(minLength: 12)
+                    if manager.syncMode(for: candidate) != .keepUpdated {
+                        Image(systemName: "checkmark")
+                    }
+                }
             }
             Button {
                 Task { await manager.setSyncMode(candidate, mode: .keepUpdated) }
             } label: {
-                Label(L("Keep updated", "保持单向同步"),
-                      systemImage: manager.syncMode(for: candidate) == .keepUpdated ? "checkmark" : "circle")
+                HStack {
+                    Text(L("Keep updated", "保持单向同步"))
+                    Spacer(minLength: 12)
+                    if manager.syncMode(for: candidate) == .keepUpdated {
+                        Image(systemName: "checkmark")
+                    }
+                }
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
+            Image(systemName: "ellipsis")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
         .disabled(!runtime.state.isRunning || manager.isManagingAccounts)
+        .help(L("More actions", "更多操作"))
     }
 
     private func syncStatePill(_ state: CLIProxyAccountSyncState) -> GatewayStatusPill {
