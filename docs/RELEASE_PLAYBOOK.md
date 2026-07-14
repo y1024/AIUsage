@@ -16,14 +16,21 @@
 
 只要缺一项，都不算真正发版完成。
 
+## 严禁（发版时绝对不要做）
+
+1. **禁止**在 `README.md` / `README.zh-CN.md` 写任何版本更新说明、changelog、`New in` / `Improved in` / `v0.x.x 改进` 之类的段落。README 只描述产品能力，不写发版历史。
+2. **禁止**新建总结性 Markdown 文档（发版笔记、变更汇总、临时 changelog 文件）塞进仓库。
+3. **禁止**本地打包产物当正式发版：`dist/`、本地 `package-release.sh` 只用于预检；正式产物以 GitHub Actions `Release Build` 为准。
+4. **禁止**跳过 CI 盯梢：push tag 后必须 `gh run watch`，确认成功、Release 有 dmg/zip、再拉回 `appcast.xml`。
+5. **禁止**把用户可见更新内容写到别处：只通过 `gh release edit` 写 GitHub Release Notes。
+6. **禁止**为发版改无关文件、顺手「整理」文档或加测试脚本。
+
 ## 发版前
 
 先确认版本号已同步更新：
 
 - `AIUsage/Info.plist`
 - `AIUsage.xcodeproj/project.pbxproj`
-- `README.md`
-- `README.zh-CN.md`
 
 建议先看工作区：
 

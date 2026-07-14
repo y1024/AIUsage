@@ -1,6 +1,9 @@
 import Combine
 import Darwin
 import Foundation
+import os.log
+
+private let cliProxyRuntimeLog = Logger(subsystem: "com.aiusage.desktop", category: "CLIProxyRuntime")
 
 @MainActor
 final class CLIProxyRuntimeController: ObservableObject {
@@ -70,6 +73,7 @@ final class CLIProxyRuntimeController: ObservableObject {
         self.cachedSecrets = secretStore.load()
         try paths.prepare()
         reapOwnedOrphanIfNeeded()
+        reapStaleManagedListenerIfNeeded(port: settings.normalized.port)
         isLoadingSettings = false
     }
 
@@ -115,19 +119,19 @@ final class CLIProxyRuntimeController: ObservableObject {
     func stopSynchronouslyForTermination() {
         shouldBeRunning = false
         finishPendingProcessLogs()
-        guard let process, process.isRunning else {
-            clearPIDRecord()
-            return
+        if let process, process.isRunning {
+            process.terminationHandler = nil
+            process.terminate()
+            let deadline = Date().addingTimeInterval(1.5)
+            while process.isRunning, Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+            if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
+            self.process = nil
         }
-        process.terminationHandler = nil
-        process.terminate()
-        let deadline = Date().addingTimeInterval(1.5)
-        while process.isRunning, Date() < deadline {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
-        }
-        if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
-        clearPIDRecord()
-        self.process = nil
+        // Xcode 强杀 / 未挂上 Process 句柄时，仍按 pid 文件 + 端口回收本机托管 CPA。
+        reapOwnedOrphanIfNeeded()
+        reapStaleManagedListenerIfNeeded(port: settings.normalized.port)
         state = .stopped
     }
 
@@ -148,6 +152,11 @@ final class CLIProxyRuntimeController: ObservableObject {
                 throw CLIProxyGatewayError.notInstalled
             }
             let normalized = settings.normalized
+            // Debug 重编译 / 上次强退后，外部 CPA 可能仍占端口；启动前再收一次本机托管孤儿。
+            reapOwnedOrphanIfNeeded()
+            reapStaleManagedListenerIfNeeded(port: normalized.port)
+            waitUntilPortFree(normalized.port, bindHost: normalized.bindHost)
+
             if let conflict = ProxyPortArbiter.conflict(
                 forPorts: [normalized.port],
                 excluding: "cliproxyapi-gateway"
@@ -233,6 +242,7 @@ final class CLIProxyRuntimeController: ObservableObject {
         self.process = nil
         finishPendingProcessLogs()
         clearPIDRecord()
+        waitUntilPortFree(settings.normalized.port, bindHost: settings.normalized.bindHost)
         state = .stopped
     }
 
@@ -377,16 +387,79 @@ final class CLIProxyRuntimeController: ObservableObject {
             return
         }
         defer { clearPIDRecord() }
-        guard record.pid > 1, Darwin.kill(record.pid, 0) == 0,
-              record.configPath == paths.configURL.path,
-              record.binaryPath.hasPrefix(paths.versionsDirectory.path + "/"),
-              Self.processPath(record.pid) == record.binaryPath,
-              Self.processCommand(record.pid).contains("-config \(record.configPath)") else { return }
-        Darwin.kill(record.pid, SIGTERM)
-        for _ in 0..<10 where Darwin.kill(record.pid, 0) == 0 {
+        guard record.pid > 1, Darwin.kill(record.pid, 0) == 0 else { return }
+
+        let matchesConfig = record.configPath == paths.configURL.path
+            || Self.processCommand(record.pid).contains(paths.configURL.path)
+        let binaryPath = Self.processPath(record.pid)
+        let matchesBinary = binaryPath == record.binaryPath
+            || (binaryPath?.hasPrefix(paths.versionsDirectory.path + "/") == true)
+            || record.binaryPath.hasPrefix(paths.versionsDirectory.path + "/")
+        // 放宽匹配：pid 文件存在且仍是我们的 versions 二进制 / 仍带本机 config，即回收。
+        // （Xcode 强杀后 binary 路径偶发解析不一致，过严会导致端口孤儿留下。）
+        guard matchesConfig || matchesBinary else { return }
+
+        cliProxyRuntimeLog.notice("Reaping CPA orphan from pid file pid=\(record.pid, privacy: .public)")
+        Self.terminatePid(record.pid)
+    }
+
+    /// 按监听端口回收「带本机 -config」的 CLIProxyAPI，覆盖 pid 文件丢失的情况。
+    private func reapStaleManagedListenerIfNeeded(port: Int) {
+        guard (1...65_535).contains(port) else { return }
+        let configPath = paths.configURL.path
+        let candidates = Self.pidsListening(on: port).filter { pid in
+            pid > 1 && pid != ProcessInfo.processInfo.processIdentifier
+        }
+        for pid in candidates {
+            let command = Self.processCommand(pid)
+            let path = Self.processPath(pid) ?? ""
+            let looksLikeCPA = path.localizedCaseInsensitiveContains("cliproxy")
+                || path.localizedCaseInsensitiveContains("CLIProxyAPI")
+                || (path as NSString).lastPathComponent.localizedCaseInsensitiveContains("cliproxy")
+            let usesOurConfig = command.contains(configPath)
+            let underOurVersions = path.hasPrefix(paths.versionsDirectory.path + "/")
+            guard looksLikeCPA, usesOurConfig || underOurVersions else { continue }
+            cliProxyRuntimeLog.notice(
+                "Reaping stale CPA listener on port \(port, privacy: .public) pid=\(pid, privacy: .public)"
+            )
+            Self.terminatePid(pid)
+        }
+    }
+
+    private func waitUntilPortFree(_ port: Int, bindHost: String, attempts: Int = 20) {
+        for _ in 0..<attempts {
+            if Self.isIPv4PortAvailable(port, bindHost: bindHost) { return }
             usleep(100_000)
         }
-        if Darwin.kill(record.pid, 0) == 0 { Darwin.kill(record.pid, SIGKILL) }
+    }
+
+    private static func terminatePid(_ pid: Int32) {
+        Darwin.kill(pid, SIGTERM)
+        for _ in 0..<15 where Darwin.kill(pid, 0) == 0 {
+            usleep(100_000)
+        }
+        if Darwin.kill(pid, 0) == 0 {
+            Darwin.kill(pid, SIGKILL)
+            for _ in 0..<10 where Darwin.kill(pid, 0) == 0 {
+                usleep(50_000)
+            }
+        }
+    }
+
+    private static func pidsListening(on port: Int) -> [Int32] {
+        let lsof = Process()
+        lsof.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        lsof.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]
+        let pipe = Pipe()
+        lsof.standardOutput = pipe
+        lsof.standardError = FileHandle.nullDevice
+        guard (try? lsof.run()) != nil else { return [] }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        lsof.waitUntilExit()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        return output
+            .components(separatedBy: .whitespacesAndNewlines)
+            .compactMap { Int32($0) }
     }
 
     private static func processPath(_ pid: Int32) -> String? {

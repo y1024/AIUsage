@@ -132,15 +132,7 @@ Universal Binary —— Apple Silicon 与 Intel 芯片 Mac 均原生运行（mac
 
 ## CPA 网关
 
-> **v0.14.0 新增** · 由官方 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 发布版提供网关能力。
->
-> **v0.14.1 改进** · CPA 账号同步改用服务商原生身份，安全收敛经过验证的历史副本；即使邮箱相同，不同工作区或 Project 也会保持独立。
->
-> **v0.14.2 改进** · 账号语义改由能力矩阵驱动：只有拥有已验证适配器的 Provider（Codex、Antigravity）才作为“从 AIUsage 接入”候选；Claude/Kimi/Grok 显示为 CPA 核心 OAuth，Gemini CLI 显示为官方插件，Cursor、Copilot 等仅监控账号不会进入 CPA 账号池。“添加上游”向导新增安全导入中心：多文件本地识别、导入预览、内容/身份去重、逐项结果，以及独立的 Codex auth.json 转换入口。
->
-> **v0.14.5 改进** · 仪表盘改为真正的首页（额度告警摘要，不再堆账号大卡）。API 提供商可分发到 CPA（含回环防护）、同步反馈与列表筛选更清晰。CPA 账号筛选与行内告警对齐，运行徽章与切 Tab 草稿保护让日常操作更稳。
-
-CPA 网关把订阅账号汇聚成一套受管本地 API。AIUsage 可以独立下载、校验、启动、更新和回滚 CLIProxyAPI，因此更新 CPA 不需要等待 AIUsage 发布新版本。
+CPA 网关把订阅账号汇聚成一套受管本地 API。由官方 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 发布版提供网关能力。AIUsage 可以独立下载、校验、启动、更新和回滚 CLIProxyAPI，因此更新 CPA 不需要等待 AIUsage 发布新版本。
 
 | 能力 | 说明 |
 | --- | --- |
