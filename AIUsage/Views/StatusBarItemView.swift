@@ -132,8 +132,10 @@ struct StatusBarItemView: View {
     // MARK: - Subviews
 
     private var fallbackIcon: some View {
-        Image(systemName: "chart.bar.fill")
-            .font(.system(size: 15))
+        Image("MenuBarIcon")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 18, height: 18)
     }
 
     private var statusBarDivider: some View {
