@@ -9,9 +9,11 @@ internal let accountPersistenceLog = Logger(subsystem: "com.aiusage.desktop", ca
 ///
 /// Provider-native accounts cannot always be identified by email: Codex uses a
 /// workspace + user tuple, while Antigravity uses project + email. Registry
-/// identity therefore stays anchored on a canonical `credentialId` or normalized
-/// auth-file path. Providers without native multi-account identity keep the prior
-/// account/email fallback.
+/// identity for Codex prefers **accountId + userId** (then accountId + email),
+/// matching `AccountCredentialStore` / `ProviderEngine`. Path is only a fallback
+/// when native components are incomplete — otherwise AuthImports copies of the
+/// same `~/.codex/auth.json` become duplicate dashboard cards. Providers without
+/// native multi-account identity keep the prior account/email fallback.
 ///
 /// All matching and dedup logic lives here so the `AccountRegistryRefreshSnapshot`
 /// (reconcile worker) and `AccountStore` extensions can share exactly one
@@ -58,6 +60,14 @@ enum AccountIdentityPolicy {
         return a == b
     }
 
+    /// Auth-file credentials store the original path in `sourcePath`; fall back to
+    /// the credential payload itself (never `sourceIdentifier`, which is a scheme URI).
+    static func credentialAuthFilePath(_ credential: AccountCredential) -> String? {
+        guard credential.authMethod == .authFile else { return nil }
+        return credential.metadata["sourcePath"]?.nilIfBlank
+            ?? credential.credential.nilIfBlank
+    }
+
     static func maxTimestampString(_ values: String?...) -> String? {
         values
             .compactMap { $0?.nilIfBlank }
@@ -69,14 +79,34 @@ enum AccountIdentityPolicy {
 
     // MARK: - Dedup key
 
-    static func identityKey(for account: StoredProviderAccount) -> String {
+    static func identityKey(
+        for account: StoredProviderAccount,
+        credentialLookup: [String: AccountCredential] = [:]
+    ) -> String {
         let providerId = account.providerId.lowercased()
         if isMultiWorkspace(providerId) {
+            if providerId == "codex" {
+                if let accountId = account.normalizedAccountId {
+                    let userId = resolvedCodexUserId(for: account, credentialLookup: credentialLookup)
+                    if let userId {
+                        return "\(providerId):account:\(accountId):user:\(userId)"
+                    }
+                    if !account.normalizedEmail.isEmpty {
+                        return "\(providerId):account:\(accountId):email:\(account.normalizedEmail)"
+                    }
+                }
+            }
+
+            // Path next (same as ProviderEngine fallback): scan + credential branches.
+            let resolvedPath = normalizedSourceFilePath(account.sourceFilePath)
+                ?? account.credentialId.flatMap { credentialLookup[$0] }
+                    .flatMap(credentialAuthFilePath)
+                    .flatMap(normalizedSourceFilePath)
+            if let resolvedPath {
+                return "\(providerId):path:\(resolvedPath)"
+            }
             if let credentialId = account.credentialId?.lowercased().nilIfBlank {
                 return "\(providerId):cred:\(credentialId)"
-            }
-            if let normalized = normalizedSourceFilePath(account.sourceFilePath) {
-                return "\(providerId):path:\(normalized)"
             }
             return "\(providerId):stored:\(account.id.lowercased())"
         }
@@ -92,6 +122,22 @@ enum AccountIdentityPolicy {
         return "\(providerId):stored:\(account.id.lowercased())"
     }
 
+    private static func resolvedCodexUserId(
+        for account: StoredProviderAccount,
+        credentialLookup: [String: AccountCredential]
+    ) -> String? {
+        if let userId = normalizedLookupValue(account.workspaceUserId) {
+            return userId
+        }
+        guard let credentialId = account.credentialId?.nilIfBlank,
+              let credential = credentialLookup[credentialId] else {
+            return nil
+        }
+        return normalizedLookupValue(
+            credential.metadata["workspaceUserId"] ?? credential.metadata["userId"]
+        )
+    }
+
     // MARK: - Preference / merge
 
     static func shouldPrefer(
@@ -99,6 +145,16 @@ enum AccountIdentityPolicy {
         over rhs: StoredProviderAccount,
         credentialLookup: [String: AccountCredential]
     ) -> Bool {
+        // Permanent-delete tombstones must win over empty rediscovered shells, but lose to
+        // an explicit credential-backed re-add (same workspace imported again).
+        if lhs.isPermanentlyRemoved != rhs.isPermanentlyRemoved {
+            let lhsHasCredential = lhs.credentialId.flatMap { credentialLookup[$0] } != nil
+            let rhsHasCredential = rhs.credentialId.flatMap { credentialLookup[$0] } != nil
+            if lhs.isPermanentlyRemoved, rhsHasCredential, !rhs.isHidden { return false }
+            if rhs.isPermanentlyRemoved, lhsHasCredential, !lhs.isHidden { return true }
+            return lhs.isPermanentlyRemoved
+        }
+
         if lhs.isHidden != rhs.isHidden {
             return !lhs.isHidden
         }
@@ -107,6 +163,12 @@ enum AccountIdentityPolicy {
         let rhsHasCredential = rhs.credentialId.flatMap { credentialLookup[$0] } != nil
         if lhsHasCredential != rhsHasCredential {
             return lhsHasCredential
+        }
+
+        let lhsPathScore = canonicalAuthPathScore(lhs.sourceFilePath)
+        let rhsPathScore = canonicalAuthPathScore(rhs.sourceFilePath)
+        if lhsPathScore != rhsPathScore {
+            return lhsPathScore > rhsPathScore
         }
 
         let lhsCredentialBound = extractCredentialId(from: lhs.providerResultId ?? "") != nil
@@ -157,9 +219,40 @@ enum AccountIdentityPolicy {
         if merged.sourceFilePath?.nilIfBlank == nil {
             merged.sourceFilePath = secondary.sourceFilePath?.nilIfBlank
         }
+        if merged.workspaceUserId?.nilIfBlank == nil {
+            merged.workspaceUserId = secondary.workspaceUserId?.nilIfBlank
+        }
+        // Prefer the live CLI auth path over AuthImports managed copies.
+        if let preferredPath = preferredCanonicalAuthPath(
+            merged.sourceFilePath,
+            secondary.sourceFilePath
+        ) {
+            merged.sourceFilePath = preferredPath
+        }
         merged.lastSeenAt = maxTimestampString(preferred.lastSeenAt, secondary.lastSeenAt)
-        merged.isHidden = preferred.isHidden && secondary.isHidden
+        merged.isPermanentlyRemoved = preferred.isPermanentlyRemoved || secondary.isPermanentlyRemoved
+        merged.isHidden = (preferred.isHidden && secondary.isHidden) || merged.isPermanentlyRemoved
+        if merged.isPermanentlyRemoved {
+            merged.credentialId = nil
+            merged.note = nil
+        }
         return merged
+    }
+
+    /// Prefer `~/.codex/auth.json` (or non-AuthImports paths) when merging duplicates.
+    private static func preferredCanonicalAuthPath(_ lhs: String?, _ rhs: String?) -> String? {
+        let left = canonicalAuthPathScore(lhs)
+        let right = canonicalAuthPathScore(rhs)
+        if left < 0, right < 0 { return nil }
+        if left >= right { return lhs?.nilIfBlank ?? rhs?.nilIfBlank }
+        return rhs?.nilIfBlank ?? lhs?.nilIfBlank
+    }
+
+    private static func canonicalAuthPathScore(_ path: String?) -> Int {
+        guard let normalized = normalizedSourceFilePath(path) else { return -1 }
+        if normalized.hasSuffix("/.codex/auth.json") { return 3 }
+        if normalized.contains("/authimports/") { return 0 }
+        return 1
     }
 
     // MARK: - Live matching
@@ -176,6 +269,14 @@ enum AccountIdentityPolicy {
         }
 
         if isMultiWorkspace(stored.providerId) {
+            // Codex workspace identity is chatgpt_account_id. Same email with
+            // different accountIds (personal vs Business) stay separate.
+            if stored.providerId.lowercased() == "codex",
+               let storedAccountId = stored.normalizedAccountId,
+               let liveAccountId = normalizedLiveAccountID(for: provider),
+               storedAccountId == liveAccountId {
+                return true
+            }
             if sourceFilePathsMatch(stored.sourceFilePath, provider.sourceFilePath) {
                 return true
             }
@@ -227,8 +328,20 @@ enum AccountIdentityPolicy {
             }
         }
 
-        // Step 0.5: sourceFilePath 归一化路径匹配（仅 multi-workspace provider）
+        // Step 0.5: Codex native workspace id (chatgpt_account_id)
         let liveIsMultiWs = isMultiWorkspace(provider.baseProviderId)
+        if liveIsMultiWs, provider.baseProviderId.lowercased() == "codex",
+           let liveAccountId = normalizedLiveAccountID(for: provider) {
+            if let nativeMatch = registry.firstIndex(where: {
+                !reservedStoredIDs.contains($0.id) && !$0.isHidden &&
+                $0.providerId == provider.baseProviderId &&
+                $0.normalizedAccountId == liveAccountId
+            }) {
+                return nativeMatch
+            }
+        }
+
+        // Step 0.6: sourceFilePath 归一化路径匹配（仅 multi-workspace provider）
         if liveIsMultiWs {
             if let livePath = provider.sourceFilePath {
                 return registry.firstIndex(where: {
@@ -329,7 +442,7 @@ enum AccountIdentityPolicy {
         var indicesToRemove: [Int] = []
 
         for (index, account) in registry.enumerated() {
-            let key = identityKey(for: account)
+            let key = identityKey(for: account, credentialLookup: credentialLookup)
             if let existingIndex = seen[key] {
                 let existing = registry[existingIndex]
                 let keepExisting = shouldPrefer(existing, over: account, credentialLookup: credentialLookup)
@@ -477,6 +590,31 @@ private struct AccountRegistryRefreshSnapshot {
                 AccountIdentityPolicy.matchesLive(stored: $0, provider: provider)
             }) {
                 var hidden = accountRegistry[hiddenIndex]
+
+                // Credential-backed live row means the user re-imported / reconnected —
+                // revive permanent tombstones instead of keeping them suppressed forever.
+                if hidden.isPermanentlyRemoved, inferredCredentialId != nil {
+                    hidden.isPermanentlyRemoved = false
+                    hidden.isHidden = false
+                    hidden.credentialId = inferredCredentialId
+                    if hidden.providerResultId != provider.id {
+                        hidden.providerResultId = provider.id
+                    }
+                    let isLiveSuccess = provider.status != .error
+                    if isLiveSuccess, hidden.accountId != provider.accountId {
+                        hidden.accountId = provider.accountId
+                    }
+                    if let livePath = provider.sourceFilePath,
+                       !AccountIdentityPolicy.sourceFilePathsMatch(hidden.sourceFilePath, livePath) {
+                        hidden.sourceFilePath = livePath
+                    }
+                    hidden.lastSeenAt = now
+                    accountRegistry[hiddenIndex] = hidden
+                    reservedStoredIDs.insert(hidden.id)
+                    didChange = true
+                    continue
+                }
+
                 if hidden.providerResultId != provider.id {
                     hidden.providerResultId = provider.id
                     didChange = true
@@ -486,7 +624,7 @@ private struct AccountRegistryRefreshSnapshot {
                     hidden.accountId = provider.accountId
                     didChange = true
                 }
-                if hidden.credentialId == nil, let inferredCredentialId {
+                if hidden.credentialId == nil, let inferredCredentialId, !hidden.isPermanentlyRemoved {
                     hidden.credentialId = inferredCredentialId
                     didChange = true
                 }
@@ -912,10 +1050,15 @@ extension AccountStore {
                 account.accountId = accountId
                 didChange = true
             }
-            let credSourcePath = credential.metadata["sourceIdentifier"]?.nilIfBlank
-                ?? credential.credential.nilIfBlank
-            if account.sourceFilePath == nil, let credSourcePath,
-               credential.authMethod == .authFile {
+            let workspaceUserId = credential.metadata["workspaceUserId"]?.nilIfBlank
+                ?? credential.metadata["userId"]?.nilIfBlank
+            if let workspaceUserId, account.workspaceUserId != workspaceUserId {
+                account.workspaceUserId = workspaceUserId
+                didChange = true
+            }
+            let credSourcePath = AccountIdentityPolicy.credentialAuthFilePath(credential)
+            if let credSourcePath,
+               !AccountIdentityPolicy.sourceFilePathsMatch(account.sourceFilePath, credSourcePath) {
                 account.sourceFilePath = credSourcePath
                 didChange = true
             }

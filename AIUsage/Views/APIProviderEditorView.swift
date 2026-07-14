@@ -19,7 +19,10 @@ struct APIProviderEditorView: View {
     @State private var topPText: String
     @State private var showAdvanced = false
     @StateObject private var modelFetch = ModelFetchState()
+    private let initialProvider: APIProvider
+    private let initialTargets: Set<ProxyTarget>
     private let isNew: Bool
+    @State private var confirmDiscard = false
 
     init(
         provider: APIProvider,
@@ -27,14 +30,25 @@ struct APIProviderEditorView: View {
         onSave: @escaping (APIProvider, Set<ProxyTarget>) -> Void
     ) {
         self.onSave = onSave
+        self.initialProvider = provider
+        self.initialTargets = Self.sanitizedTargets(initialTargets, for: provider)
         _draft = State(initialValue: provider)
         _library = State(initialValue: provider.models)
         _currency = State(initialValue: provider.models.first?.pricing.currency ?? .usd)
         _defaultModel = State(initialValue: provider.defaultModel)
-        _selectedTargets = State(initialValue: initialTargets)
+        _selectedTargets = State(initialValue: Self.sanitizedTargets(initialTargets, for: provider))
         _temperatureText = State(initialValue: Self.decimalText(provider.temperature))
         _topPText = State(initialValue: Self.decimalText(provider.topP))
         isNew = provider.name.isEmpty && provider.baseURL.isEmpty && provider.models.isEmpty
+    }
+
+    @MainActor
+    private static func sanitizedTargets(_ targets: Set<ProxyTarget>, for provider: APIProvider) -> Set<ProxyTarget> {
+        var result = targets.filter { $0.supports(provider.format) }
+        if APIProviderCPALoopGuard.blockReason(for: provider) != nil {
+            result.remove(.cpa)
+        }
+        return result
     }
 
     private static func decimalText(_ value: Double?) -> String {
@@ -76,9 +90,36 @@ struct APIProviderEditorView: View {
         }
         .frame(width: 760, height: 820)
         .onChange(of: draft.format) { _, newFormat in
-            // 格式变更后去掉不兼容的分发目标（如切到非 Responses 时移除 Codex）。
             selectedTargets = selectedTargets.filter { $0.supports(newFormat) }
         }
+        .confirmationDialog(
+            L("Discard changes?", "放弃更改？"),
+            isPresented: $confirmDiscard
+        ) {
+            Button(L("Discard", "放弃"), role: .destructive) { dismiss() }
+            Button(L("Keep Editing", "继续编辑"), role: .cancel) {}
+        } message: {
+            Text(L("You have unsaved changes.", "当前有未保存的修改。"))
+        }
+    }
+
+    private var isDirty: Bool {
+        draft.name != initialProvider.name
+            || draft.baseURL != initialProvider.baseURL
+            || draft.apiKey != initialProvider.apiKey
+            || draft.format != initialProvider.format
+            || library != initialProvider.models
+            || defaultModel != initialProvider.defaultModel
+            || selectedTargets != initialTargets
+            || draft.contextLimit != initialProvider.contextLimit
+            || draft.outputLimit != initialProvider.outputLimit
+            || draft.maxOutputTokens != initialProvider.maxOutputTokens
+            || temperatureText != Self.decimalText(initialProvider.temperature)
+            || topPText != Self.decimalText(initialProvider.topP)
+    }
+
+    private func requestDismiss() {
+        if isDirty { confirmDiscard = true } else { dismiss() }
     }
 
     // MARK: - Header / Footer
@@ -97,8 +138,13 @@ struct APIProviderEditorView: View {
 
     private var footer: some View {
         HStack {
+            if !canSave {
+                Text(L("Base URL and at least one model are required.", "需要填写 Base URL，并至少添加一个模型。"))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
             Spacer()
-            Button(L("Cancel", "取消")) { dismiss() }
+            Button(L("Cancel", "取消")) { requestDismiss() }
                 .keyboardShortcut(.cancelAction)
             Button(L("Save", "保存")) { save() }
                 .keyboardShortcut(.defaultAction)
@@ -221,8 +267,8 @@ struct APIProviderEditorView: View {
     private var distributionSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(L(
-                "Selected proxies get a linked node mapped from this provider. Unchecking removes that proxy's linked node.",
-                "勾选的代理会生成一个由本提供商映射的链接节点；取消勾选会移除该代理下的链接节点。"
+                "Selected targets get a linked node (or CPA upstream) mapped from this provider. Unchecking removes that link.",
+                "勾选的目标会生成由本提供商映射的链接节点（或 CPA 上游）；取消勾选会移除该链接。"
             ))
             .font(.caption2)
             .foregroundStyle(.tertiary)
@@ -236,17 +282,24 @@ struct APIProviderEditorView: View {
 
     private func distributionRow(_ target: ProxyTarget) -> some View {
         let supported = target.supports(draft.format)
+        let loopReason = target == .cpa ? APIProviderCPALoopGuard.blockReason(for: draft) : nil
+        let enabled = supported && loopReason == nil
         return HStack(alignment: .top, spacing: 8) {
             Toggle(isOn: Binding(
                 get: { selectedTargets.contains(target) },
                 set: { on in
-                    if on { selectedTargets.insert(target) } else { selectedTargets.remove(target) }
+                    if on {
+                        guard enabled else { return }
+                        selectedTargets.insert(target)
+                    } else {
+                        selectedTargets.remove(target)
+                    }
                 }
             )) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(target.displayName)
                         .font(.body)
-                    if let reason = target.incompatibilityReason(for: draft.format) {
+                    if let reason = loopReason ?? target.incompatibilityReason(for: draft.format) {
                         Text(reason)
                             .font(.caption2)
                             .foregroundStyle(.orange)
@@ -254,7 +307,17 @@ struct APIProviderEditorView: View {
                 }
             }
             .toggleStyle(.checkbox)
-            .disabled(!supported)
+            .disabled(!enabled)
+        }
+        .onChange(of: draft.baseURL) { _, _ in
+            if target == .cpa, APIProviderCPALoopGuard.blockReason(for: draft) != nil {
+                selectedTargets.remove(.cpa)
+            }
+        }
+        .onChange(of: draft.format) { _, _ in
+            if target == .cpa, !enabled {
+                selectedTargets.remove(.cpa)
+            }
         }
     }
 

@@ -55,29 +55,63 @@ enum APIFormat: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// CPA 托管 Claude 系列（Code + Science）节点的上游形态。
+enum ManagedClaudeProtocol: String, Codable, CaseIterable, Identifiable {
+    /// Anthropic Messages 透传（默认；避免 Science 复杂载荷撞本地 convert）。
+    case anthropicPassthrough = "anthropic-passthrough"
+    /// 经本地 OpenAI 兼容转换后再打到 CPA。
+    case openAIConvert = "openai-convert"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .anthropicPassthrough:
+            return AppSettings.shared.t("Anthropic passthrough", "Anthropic 透传")
+        case .openAIConvert:
+            return AppSettings.shared.t("OpenAI convert", "OpenAI 转换")
+        }
+    }
+
+    var badgeName: String {
+        switch self {
+        case .anthropicPassthrough: return "Anthropic"
+        case .openAIConvert: return "OpenAI"
+        }
+    }
+}
+
 /// 可分发到的代理目标。
 enum ProxyTarget: String, Codable, CaseIterable, Identifiable {
     case codex
     case claude
     case openCode
+    /// CPA 网关的 OpenAI 兼容上游池（非本地代理节点）。
+    case cpa
 
     var id: String { rawValue }
+
+    /// Codex / Claude / OpenCode 本地代理（不含 CPA）。CPA 接入页只用这三项。
+    static var localProxyTargets: [ProxyTarget] { [.codex, .claude, .openCode] }
 
     var displayName: String {
         switch self {
         case .codex: return "Codex"
         case .claude: return "Claude Code"
         case .openCode: return "OpenCode"
+        case .cpa: return "CPA"
         }
     }
 
-    /// 兼容性：Codex 上游锁定 Responses，故只接受 openAIResponses；Claude/OpenCode 三格式皆可
-    /// （Claude：OpenAI 格式→转换代理，Anthropic→透传代理）。
+    /// 兼容性：Codex 上游锁定 Responses；CPA 首期仅 OpenAI 兼容（Chat / Responses）；
+    /// Claude/OpenCode 三格式皆可（Claude：OpenAI→转换代理，Anthropic→透传）。
     func supports(_ format: APIFormat) -> Bool {
         switch self {
         case .codex: return format == .openAIResponses
         case .claude: return true
         case .openCode: return true
+        case .cpa:
+            return format == .openAIChatCompletions || format == .openAIResponses
         }
     }
 
@@ -89,6 +123,11 @@ enum ProxyTarget: String, Codable, CaseIterable, Identifiable {
             return AppSettings.shared.t(
                 "Codex only speaks the OpenAI Responses API upstream.",
                 "Codex 上游仅支持 OpenAI Responses 接口。"
+            )
+        case .cpa:
+            return AppSettings.shared.t(
+                "CPA API upstream currently accepts OpenAI-compatible formats only.",
+                "CPA 的 API 上游目前仅支持 OpenAI 兼容格式。"
             )
         default:
             return AppSettings.shared.t("Incompatible format.", "格式不兼容。")
@@ -221,5 +260,45 @@ struct APIProvider: Identifiable, Codable, Equatable {
     /// 兼容的分发目标。
     var compatibleTargets: [ProxyTarget] {
         ProxyTarget.allCases.filter { $0.supports(format) }
+    }
+}
+
+// MARK: - CPA Loop Guard
+// 防止「API 提供商 → CPA」回环：
+// 1) CPA 受管主配置（把 CPA 当分发出去）不能再写回 CPA；
+// 2) Base URL 已指向本机 CPA 端口时也不能分发回 CPA。
+
+enum APIProviderCPALoopGuard {
+    @MainActor
+    static func blockReason(for provider: APIProvider) -> String? {
+        blockReason(
+            for: provider,
+            cpaPort: CLIProxyRuntimeController.shared.settings.normalized.port
+        )
+    }
+
+    static func blockReason(for provider: APIProvider, cpaPort: Int) -> String? {
+        if provider.id == CLIProxyGatewayManager.managedProviderID {
+            return AppSettings.shared.t(
+                "The CPA Gateway provider cannot be distributed back to CPA (loop).",
+                "「CPA 网关」主配置不能再分发回 CPA（会形成回环）。"
+            )
+        }
+        if pointsToLocalCPA(baseURL: provider.baseURL, cpaPort: cpaPort) {
+            return AppSettings.shared.t(
+                "Base URL points at local CPA; distributing back would loop.",
+                "Base URL 指向本机 CPA，分发回去会形成回环。"
+            )
+        }
+        return nil
+    }
+
+    static func pointsToLocalCPA(baseURL: String, cpaPort: Int) -> Bool {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), let host = url.host?.lowercased() else { return false }
+        let loopback: Set<String> = ["localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]"]
+        guard loopback.contains(host) else { return false }
+        let port = url.port ?? ((url.scheme?.lowercased() == "https") ? 443 : 80)
+        return port == cpaPort
     }
 }

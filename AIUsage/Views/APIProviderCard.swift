@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Inheritance Banner
 // 链接节点编辑器顶部横幅：提示该节点继承自某「API 提供商」主配置，并提供「重置为继承」
@@ -34,24 +35,34 @@ struct InheritanceBanner: View {
 }
 
 // MARK: - API Provider Card
-// 「API 提供商」列表中的单条目行卡：与 Codex/Claude/OpenCode 节点卡片同一套视觉语言——
-// 顶部格式徽章、左侧拖拽把手 + 信息 pills（模型数/默认模型）、名称/baseURL/分发状态行、
-// 右侧动作区（编辑 / 立即同步 / 删除），分发后左边缘高亮条。
-// 拖拽排序由列表（APIProviderListView）通过 onDragChanged/onDragEnded 跟手让位实现。
+// 「API 提供商」列表行：安静表面（已分发不再整卡蓝染），格式徽章贴标题旁，
+// 模型/默认模型收进次要元信息行，分发状态用安静胶囊。右键菜单承担复制/同步/复制等。
 
 struct APIProviderCard: View {
+    enum SyncPhase: Equatable {
+        case idle
+        case syncing
+        case success
+        case failure
+    }
+
     let provider: APIProvider
     let distributedTargets: Set<ProxyTarget>
+    var syncPhase: SyncPhase = .idle
 
     var onDragChanged: (CGFloat) -> Void = { _ in }
     var onDragEnded: () -> Void = {}
     var onEdit: () -> Void = {}
     var onSync: () -> Void = {}
+    var onDuplicate: () -> Void = {}
     var onDelete: () -> Void = {}
+    var onCopied: (String) -> Void = { _ in }
+    var onOpenTarget: (ProxyTarget) -> Void = { _ in }
+
+    @Environment(\.colorScheme) private var colorScheme
 
     private var isDistributed: Bool { !distributedTargets.isEmpty }
 
-    // 格式主题色（与 OpenCode 节点卡片同语言）。
     private static let chatBrand = Color(red: 0.29, green: 0.73, blue: 0.56)
     private static let anthropicBrand = Color(red: 0.85, green: 0.47, blue: 0.34)
     private static let responsesBrand = Color(red: 0.40, green: 0.52, blue: 0.92)
@@ -65,53 +76,74 @@ struct APIProviderCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            formatBadge
+        HStack(alignment: .top, spacing: 10) {
+            dragHandle
+                .padding(.top, 2)
 
-            HStack(spacing: 10) {
-                dragHandle
-
-                infoPills
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(provider.displayName)
-                        .font(.system(size: 15, weight: .bold))
-                        .lineLimit(1)
-                    Text(provider.baseURL.nilIfBlank ?? L("Base URL not set", "未设置 Base URL"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    distributionLine
-                }
-
-                Spacer()
-
-                actionButtons
+            VStack(alignment: .leading, spacing: 5) {
+                titleRow
+                Text(provider.baseURL.nilIfBlank ?? L("Base URL not set", "未设置 Base URL"))
+                    .font(.caption)
+                    .foregroundStyle(AppContent.secondary(colorScheme))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                metaRow
+                distributionLine
             }
+
+            Spacer(minLength: 8)
+
+            actionButtons
         }
-        .padding(14)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(cardBackgroundColor)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(AppSurface.card(colorScheme))
         )
-        .overlay(alignment: .leading) {
-            if isDistributed {
-                Capsule()
-                    .fill(Color.accentColor)
-                    .frame(width: 3)
-                    .padding(.vertical, 10)
-                    .padding(.leading, 3)
-                    .shadow(color: Color.accentColor.opacity(0.4), radius: 4, x: 0, y: 0)
-            }
-        }
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(cardBorderColor, lineWidth: isDistributed ? 1.5 : 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(AppStroke.card(colorScheme), lineWidth: 1)
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: onEdit)
         .contextMenu { contextMenu }
+    }
+
+    // MARK: - Title
+
+    private var titleRow: some View {
+        HStack(spacing: 8) {
+            Text(provider.displayName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AppContent.primary(colorScheme))
+                .lineLimit(1)
+            formatBadge
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Meta
+
+    private var metaRow: some View {
+        HStack(spacing: 6) {
+            Text(L("\(provider.models.count) models", "\(provider.models.count) 个模型"))
+                .font(.caption2)
+                .foregroundStyle(AppContent.tertiary(colorScheme))
+            if let dm = provider.effectiveDefaultModel.nilIfBlank {
+                Text("·")
+                    .font(.caption2)
+                    .foregroundStyle(AppContent.tertiary(colorScheme))
+                Image(systemName: "star.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.orange.opacity(0.85))
+                Text(dm)
+                    .font(.caption2)
+                    .foregroundStyle(AppContent.secondary(colorScheme))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     // MARK: - Drag Handle
@@ -132,39 +164,6 @@ struct APIProviderCard: View {
             )
     }
 
-    // MARK: - Info Pills
-
-    private var infoPills: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            infoPill(
-                icon: "cube.box",
-                text: "\(provider.models.count)",
-                color: .blue
-            )
-            .help(L("\(provider.models.count) models", "\(provider.models.count) 个模型"))
-            if let dm = provider.effectiveDefaultModel.nilIfBlank {
-                infoPill(icon: "star.fill", text: dm, color: .orange)
-                    .help(L("Default model", "默认模型"))
-            }
-        }
-        .frame(width: 96, alignment: .trailing)
-    }
-
-    private func infoPill(icon: String, text: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 10))
-            Text(text)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-        .foregroundStyle(color)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(color.opacity(0.12)))
-    }
-
     // MARK: - Format Badge
 
     private var formatBadge: some View {
@@ -176,7 +175,7 @@ struct APIProviderCard: View {
         .font(.system(size: 9, weight: .bold))
         .foregroundStyle(formatColor)
         .padding(.horizontal, 7)
-        .padding(.vertical, 3)
+        .padding(.vertical, 2)
         .background(Capsule().fill(formatColor.opacity(0.12)))
         .help(L(
             "API format: \(provider.format.displayName)",
@@ -191,54 +190,133 @@ struct APIProviderCard: View {
         if isDistributed {
             HStack(spacing: 5) {
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.green)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(AppContent.tertiary(colorScheme))
                 ForEach(ProxyTarget.allCases.filter { distributedTargets.contains($0) }) { target in
-                    Text(target.displayName)
+                    Button {
+                        onOpenTarget(target)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(target.displayName)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 7, weight: .bold))
+                        }
                         .font(.system(size: 9, weight: .semibold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.green.opacity(0.16)))
-                        .foregroundStyle(.green)
+                        .background(Capsule().fill(AppSurface.chip(colorScheme)))
+                        .foregroundStyle(AppContent.secondary(colorScheme))
+                    }
+                    .buttonStyle(.plain)
+                    .help(L("Open \(target.displayName)", "打开 \(target.displayName)"))
                 }
             }
         } else {
             Text(L("Not distributed", "未分发"))
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(AppContent.tertiary(colorScheme))
         }
     }
 
     // MARK: - Actions
 
     private var actionButtons: some View {
-        HStack(spacing: 6) {
-            Button(action: onSync) {
-                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(isDistributed ? .blue : .gray.opacity(0.4))
-            }
-            .buttonStyle(.plain)
-            .disabled(!isDistributed)
-            .help(L("Re-apply this provider to its linked nodes.", "把本提供商重新应用到所有链接节点。"))
-
-            Button(action: onEdit) {
-                Image(systemName: "pencil.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.blue)
-            }
-            .buttonStyle(.plain)
-            .help(L("Edit", "编辑"))
-
-            Button(action: onDelete) {
-                Image(systemName: "trash.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.red)
-            }
-            .buttonStyle(.plain)
-            .help(L("Delete", "删除"))
+        HStack(spacing: 4) {
+            syncButton
+            actionIconButton(
+                systemImage: "pencil",
+                help: L("Edit", "编辑"),
+                action: onEdit
+            )
+            actionIconButton(
+                systemImage: "trash",
+                help: L("Delete", "删除"),
+                tint: .red,
+                action: onDelete
+            )
         }
     }
+
+    private var syncButton: some View {
+        Button(action: onSync) {
+            Group {
+                switch syncPhase {
+                case .idle:
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(
+                            isDistributed
+                                ? AppContent.secondary(colorScheme)
+                                : AppContent.tertiary(colorScheme).opacity(0.45)
+                        )
+                case .syncing:
+                    ProgressView()
+                        .controlSize(.small)
+                case .success:
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.green)
+                case .failure:
+                    Image(systemName: "exclamationmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.red)
+                }
+            }
+            .frame(width: 28, height: 28)
+            .background(syncBackground, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isDistributed || syncPhase == .syncing)
+        .help(syncHelp)
+        .animation(.easeInOut(duration: 0.15), value: syncPhase)
+    }
+
+    private var syncBackground: Color {
+        switch syncPhase {
+        case .idle: return AppSurface.chip(colorScheme)
+        case .syncing: return AppSurface.chip(colorScheme)
+        case .success: return Color.green.opacity(0.16)
+        case .failure: return Color.red.opacity(0.14)
+        }
+    }
+
+    private var syncHelp: String {
+        switch syncPhase {
+        case .idle:
+            return L("Re-apply this provider to its linked nodes.", "把本提供商重新应用到所有链接节点。")
+        case .syncing:
+            return L("Syncing…", "同步中…")
+        case .success:
+            return L("Synced", "已同步")
+        case .failure:
+            return L("Sync failed", "同步失败")
+        }
+    }
+
+    private func actionIconButton(
+        systemImage: String,
+        help: String,
+        enabled: Bool = true,
+        tint: Color? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(
+                    enabled
+                        ? (tint ?? AppContent.secondary(colorScheme))
+                        : AppContent.tertiary(colorScheme).opacity(0.45)
+                )
+                .frame(width: 28, height: 28)
+                .background(AppSurface.chip(colorScheme), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(help)
+    }
+
+    // MARK: - Context Menu
 
     @ViewBuilder
     private var contextMenu: some View {
@@ -248,23 +326,51 @@ struct APIProviderCard: View {
         Button(action: onSync) {
             Label(L("Sync Now", "立即同步"), systemImage: "arrow.triangle.2.circlepath")
         }
-        .disabled(!isDistributed)
+        .disabled(!isDistributed || syncPhase == .syncing)
+
+        Button(action: onDuplicate) {
+            Label(L("Duplicate", "创建副本"), systemImage: "plus.square.on.square")
+        }
+
         Divider()
+
+        Button {
+            copyToPasteboard(provider.baseURL)
+            onCopied(L("Base URL copied", "已复制 Base URL"))
+        } label: {
+            Label(L("Copy Base URL", "复制 Base URL"), systemImage: "link")
+        }
+        .disabled(provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+        Button {
+            copyToPasteboard(provider.apiKey)
+            onCopied(L("API Key copied", "已复制 API Key"))
+        } label: {
+            Label(L("Copy API Key", "复制 API Key"), systemImage: "key")
+        }
+        .disabled(provider.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+        if let dm = provider.effectiveDefaultModel.nilIfBlank {
+            Button {
+                copyToPasteboard(dm)
+                onCopied(L("Default model copied", "已复制默认模型"))
+            } label: {
+                Label(L("Copy Default Model", "复制默认模型"), systemImage: "star")
+            }
+        }
+
+        Divider()
+
         Button(role: .destructive, action: onDelete) {
             Label(L("Delete", "删除"), systemImage: "trash")
         }
     }
 
-    // MARK: - Styling
+    // MARK: - Helpers
 
-    private var cardBackgroundColor: Color {
-        if isDistributed { return Color.accentColor.opacity(0.05) }
-        return Color(nsColor: .controlBackgroundColor).opacity(0.5)
-    }
-
-    private var cardBorderColor: Color {
-        if isDistributed { return Color.accentColor.opacity(0.4) }
-        return Color.primary.opacity(0.06)
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 }
 

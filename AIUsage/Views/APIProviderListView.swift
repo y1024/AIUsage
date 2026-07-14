@@ -1,20 +1,27 @@
 import SwiftUI
 
 // MARK: - API Provider List
-// 「服务商 → API 提供商」分类下的列表：新增/编辑统一上游配置，并把它分发到三套代理。
-// 分发与同步委托 APIProviderDistributor；分发状态实时取自各代理 store（故观察它们以刷新）。
+// 「服务商 → API 提供商」分类下的列表：新增/编辑统一上游配置，并分发到 Codex / Claude / OpenCode / CPA。
+// 操作反馈：行内按钮即时态 + 顶部轻横幅。
 
 struct APIProviderListView: View {
     var searchText: String = ""
     /// 顶部工具栏「新增」触发信号：置 true 即打开新建编辑器（由本视图复位）。
     @Binding var requestNew: Bool
+    var onClearSearch: (() -> Void)?
 
+    @EnvironmentObject private var appState: AppState
     @ObservedObject private var store = APIProviderStore.shared
     @ObservedObject private var profileStore = NodeProfileStore.shared
     @ObservedObject private var openCodeStore = OpenCodeNodeStore.shared
+    @ObservedObject private var cpaLinks = APIProviderCPALinkStore.shared
+    @ObservedObject private var gatewayNavigation = CLIProxyGatewayNavigation.shared
 
     @State private var editorContext: EditorContext?
     @State private var deletingProvider: APIProvider?
+    @State private var flash: APIProviderFlash?
+    @State private var syncPhases: [String: APIProviderCard.SyncPhase] = [:]
+    @State private var listFilter: APIProviderListFilter = .all
 
     // 手势驱动的「拖拽实时让位」重排状态（与三套代理节点列表同一套手感）。
     @State private var draggingId: String?
@@ -23,13 +30,29 @@ struct APIProviderListView: View {
 
     private var distributor: APIProviderDistributor { APIProviderDistributor.shared }
 
+    private enum APIProviderListFilter: String, CaseIterable, Identifiable {
+        case all
+        case distributed
+        case idle
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .all: return L("All", "全部")
+            case .distributed: return L("Distributed", "已分发")
+            case .idle: return L("Not distributed", "未分发")
+            }
+        }
+    }
+
     private struct EditorContext: Identifiable {
         let id: String
         let provider: APIProvider
         let initialTargets: Set<ProxyTarget>
     }
 
-    private var filteredProviders: [APIProvider] {
+    private var searchedProviders: [APIProvider] {
         guard !searchText.isEmpty else { return store.providers }
         return store.providers.filter {
             $0.displayName.localizedCaseInsensitiveContains(searchText)
@@ -37,8 +60,37 @@ struct APIProviderListView: View {
         }
     }
 
+    private var filteredProviders: [APIProvider] {
+        searchedProviders.filter { provider in
+            let isDistributed = !distributor.currentTargets(for: provider.id).isEmpty
+            switch listFilter {
+            case .all: return true
+            case .distributed: return isDistributed
+            case .idle: return !isDistributed
+            }
+        }
+    }
+
+    private var distributedCount: Int {
+        store.providers.filter { !distributor.currentTargets(for: $0.id).isEmpty }.count
+    }
+
+    private var idleCount: Int {
+        store.providers.count - distributedCount
+    }
+
     var body: some View {
         content
+        .overlay(alignment: .top) {
+            if let flash {
+                APIProviderFlashBanner(flash: flash)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(10)
+            }
+        }
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: flash)
         .onChange(of: requestNew) { _, newValue in
             guard newValue else { return }
             editorContext = EditorContext(id: "new", provider: APIProvider(), initialTargets: [])
@@ -47,7 +99,16 @@ struct APIProviderListView: View {
         .sheet(item: $editorContext) { ctx in
             APIProviderEditorView(provider: ctx.provider, initialTargets: ctx.initialTargets) { provider, targets in
                 let saved = store.upsert(provider)
-                Task { await distributor.setDistribution(saved, targets: targets) }
+                Task {
+                    let error = await distributor.setDistribution(saved, targets: targets)
+                    if let error {
+                        showFlash(.error(error))
+                    } else if targets.isEmpty {
+                        showFlash(.success(L("Provider saved", "已保存提供商")))
+                    } else {
+                        showFlash(.success(L("Saved and distributed", "已保存并分发")))
+                    }
+                }
             }
         }
         .confirmationDialog(
@@ -72,14 +133,94 @@ struct APIProviderListView: View {
 
     @ViewBuilder
     private var content: some View {
-        if filteredProviders.isEmpty {
+        if store.providers.isEmpty {
             emptyState
+        } else if searchedProviders.isEmpty {
+            searchEmptyState
+        } else if filteredProviders.isEmpty {
+            filterEmptyState
         } else {
             ScrollView {
-                providerList
-                    .padding(18)
+                VStack(alignment: .leading, spacing: 12) {
+                    overviewRow
+                    providerList
+                }
+                .padding(18)
             }
         }
+    }
+
+    private var overviewRow: some View {
+        GatewayStatCapsuleRow(
+            items: [
+                .init(
+                    id: "all",
+                    value: "\(store.providers.count)",
+                    title: L("providers", "提供商"),
+                    systemImage: "shippingbox.fill",
+                    tint: .indigo
+                ),
+                .init(
+                    id: "distributed",
+                    value: "\(distributedCount)",
+                    title: L("distributed", "已分发"),
+                    systemImage: "arrow.triangle.branch",
+                    tint: .green
+                ),
+                .init(
+                    id: "idle",
+                    value: "\(idleCount)",
+                    title: L("idle", "未分发"),
+                    systemImage: "circle.dashed",
+                    tint: .secondary
+                ),
+            ],
+            selectedId: listFilter.rawValue,
+            onSelect: { id in
+                if let next = APIProviderListFilter(rawValue: id) {
+                    withAnimation(.easeInOut(duration: 0.15)) { listFilter = next }
+                }
+            }
+        )
+    }
+
+    private var searchEmptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 36))
+                .foregroundStyle(.secondary)
+            Text(L("No matching providers", "没有匹配的提供商"))
+                .font(.title3.weight(.semibold))
+            Text(L("Try a different keyword, or clear the search.", "试试其他关键词，或清除搜索。"))
+                .font(.body)
+                .foregroundStyle(.secondary)
+            if let onClearSearch {
+                Button(L("Clear Search", "清除搜索"), action: onClearSearch)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    private var filterEmptyState: some View {
+        VStack(spacing: 14) {
+            overviewRow
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+            Spacer(minLength: 0)
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .font(.system(size: 36))
+                .foregroundStyle(.secondary)
+            Text(L("Nothing in this filter", "此筛选下没有条目"))
+                .font(.title3.weight(.semibold))
+            Button(L("Show all", "显示全部")) {
+                listFilter = .all
+            }
+            .buttonStyle(.bordered)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// 条目列表 + 跟手让位拖拽重排。搜索过滤时禁用拖拽（避免对部分列表整表重写顺序）。
@@ -115,6 +256,7 @@ struct APIProviderListView: View {
         APIProviderCard(
             provider: provider,
             distributedTargets: distributor.currentTargets(for: provider.id),
+            syncPhase: syncPhases[provider.id] ?? .idle,
             onDragChanged: { translation in
                 guard reorderEnabled else { return }
                 if draggingId != provider.id { draggingId = provider.id }
@@ -124,7 +266,6 @@ struct APIProviderListView: View {
                 if reorderEnabled {
                     commitDrag()
                 } else {
-                    // 拖拽中途进入搜索（禁用重排）：不提交，但仍复位拖拽态，避免残留高亮/偏移。
                     draggingId = nil
                     dragTranslation = 0
                 }
@@ -137,16 +278,24 @@ struct APIProviderListView: View {
                 )
             },
             onSync: {
-                store.markUsed(id: provider.id)
-                Task { await distributor.syncFromMaster(provider) }
+                syncProvider(provider)
+            },
+            onDuplicate: {
+                duplicateProvider(provider)
             },
             onDelete: {
                 if distributor.currentTargets(for: provider.id).isEmpty {
-                    // 无链接节点：直接删，无需询问处理方式。
                     store.delete(id: provider.id)
+                    showFlash(.success(L("Provider deleted", "已删除提供商")))
                 } else {
                     deletingProvider = provider
                 }
+            },
+            onCopied: { message in
+                showFlash(.info(message))
+            },
+            onOpenTarget: { target in
+                openDistributedTarget(target)
             }
         )
         .background {
@@ -157,7 +306,6 @@ struct APIProviderListView: View {
 
     // MARK: - Drag Reorder Helpers
 
-    // 卡片在 LazyVStack(spacing:0) 中各带 .padding(.vertical,4)，上下合计 8 作为行间距。
     private static let rowSpacing: CGFloat = 8
     private static let fallbackHeight: CGFloat = 84
 
@@ -171,7 +319,6 @@ struct APIProviderListView: View {
         (rowHeights[id] ?? Self.fallbackHeight) + Self.rowSpacing
     }
 
-    /// 各行在基础布局中的中心 Y（被拖行仍按原槽位计入），用于阈值判断。
     private func rowBaseCenters(_ ids: [String]) -> [CGFloat] {
         var centers: [CGFloat] = []
         var top: CGFloat = 0
@@ -183,7 +330,6 @@ struct APIProviderListView: View {
         return centers
     }
 
-    /// 由跟手位移推出被拖行应落入的目标条目下标。
     private func dragTarget(ids: [String], srcIdx: Int) -> Int {
         guard !ids.isEmpty, srcIdx < ids.count else { return srcIdx }
         let centers = rowBaseCenters(ids)
@@ -194,7 +340,6 @@ struct APIProviderListView: View {
         return target
     }
 
-    /// 单行 y 位移：被拖行跟手；其余行按「让位」规则平移一个被拖行步幅。
     private func rowOffset(index: Int, id: String, srcIdx: Int?, target: Int?) -> CGFloat {
         if id == draggingId { return dragTranslation }
         guard let srcIdx, let target, let dragId = draggingId else { return 0 }
@@ -204,7 +349,6 @@ struct APIProviderListView: View {
         return 0
     }
 
-    /// 松手时把被拖卡片落到目标下标并整表持久化顺序。
     private func commitDrag() {
         let ids = store.providers.map(\.id)
         defer {
@@ -230,8 +374,8 @@ struct APIProviderListView: View {
             Text(L("No API providers yet", "还没有 API 提供商"))
                 .font(.title3.weight(.semibold))
             Text(L(
-                "Create one unified upstream config and distribute it to Codex / Claude / OpenCode proxies at once.",
-                "创建一份统一的上游配置，一键分发到 Codex / Claude / OpenCode 三套代理。"
+                "Create one unified upstream config and distribute it to Codex / Claude / OpenCode / CPA at once.",
+                "创建一份统一的上游配置，一键分发到 Codex / Claude / OpenCode / CPA。"
             ))
             .font(.body)
             .foregroundStyle(.secondary)
@@ -255,10 +399,153 @@ struct APIProviderListView: View {
 
     // MARK: - Actions
 
+    private func syncProvider(_ provider: APIProvider) {
+        guard syncPhases[provider.id] != .syncing else { return }
+        store.markUsed(id: provider.id)
+        syncPhases[provider.id] = .syncing
+        showFlash(.info(L("Syncing “\(provider.displayName)”…", "正在同步「\(provider.displayName)」…")))
+        Task {
+            let error = await distributor.syncFromMaster(provider)
+            if let error {
+                syncPhases[provider.id] = .failure
+                showFlash(.error(error))
+            } else {
+                syncPhases[provider.id] = .success
+                showFlash(.success(L("Synced “\(provider.displayName)”", "已同步「\(provider.displayName)」")))
+            }
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            if syncPhases[provider.id] != .syncing {
+                syncPhases[provider.id] = .idle
+            }
+        }
+    }
+
+    private func duplicateProvider(_ provider: APIProvider) {
+        var copy = provider
+        copy.id = UUID().uuidString
+        copy.name = provider.name.isEmpty
+            ? L("Copy", "副本")
+            : L("\(provider.name) copy", "\(provider.name) 副本")
+        copy.createdAt = Date()
+        copy.lastUsedAt = nil
+        copy.sortOrder = Int.max
+        let saved = store.upsert(copy)
+        showFlash(.success(L("Duplicate created — review and save", "已创建副本，请确认后保存")))
+        editorContext = EditorContext(id: saved.id, provider: saved, initialTargets: [])
+    }
+
     private func deleteProvider(_ provider: APIProvider, deleteChildren: Bool) {
         Task {
             await distributor.handleProviderDeletion(provider, deleteChildren: deleteChildren)
             store.delete(id: provider.id)
+            syncPhases[provider.id] = nil
+            showFlash(.success(
+                deleteChildren
+                    ? L("Provider and linked nodes deleted", "已删除提供商及链接节点")
+                    : L("Provider deleted; linked nodes kept", "已删除提供商，链接节点已保留")
+            ))
+        }
+    }
+
+    private func openDistributedTarget(_ target: ProxyTarget) {
+        switch target {
+        case .codex:
+            appState.selectedSection = .codexProxyManagement
+        case .claude:
+            appState.selectedSection = .proxyManagement
+        case .openCode:
+            appState.selectedSection = .opencodeManagement
+        case .cpa:
+            appState.selectedSection = .subscriptionGateway
+            gatewayNavigation.showAccounts()
+        }
+    }
+
+    private func showFlash(_ flash: APIProviderFlash) {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+            self.flash = flash
+        }
+        let token = flash.id
+        Task {
+            try? await Task.sleep(nanoseconds: 2_400_000_000)
+            await MainActor.run {
+                guard self.flash?.id == token else { return }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    self.flash = nil
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Flash Banner
+
+private struct APIProviderFlash: Equatable, Identifiable {
+    enum Kind: Equatable {
+        case success
+        case error
+        case info
+    }
+
+    let id = UUID()
+    let kind: Kind
+    let message: String
+
+    static func success(_ message: String) -> APIProviderFlash { .init(kind: .success, message: message) }
+    static func error(_ message: String) -> APIProviderFlash { .init(kind: .error, message: message) }
+    static func info(_ message: String) -> APIProviderFlash { .init(kind: .info, message: message) }
+}
+
+private struct APIProviderFlashBanner: View {
+    let flash: APIProviderFlash
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(tint)
+            Text(flash.message)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppContent.primary(colorScheme))
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(bannerBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(tint.opacity(0.45), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.45 : 0.14), radius: 12, y: 5)
+    }
+
+    private var bannerBackground: Color {
+        switch colorScheme {
+        case .dark:
+            return Color(nsColor: .controlBackgroundColor).opacity(0.96)
+        case .light:
+            fallthrough
+        @unknown default:
+            // 不透明纸面，避免透出下方列表导致看不清。
+            return Color(red: 0.99, green: 0.985, blue: 0.978)
+        }
+    }
+
+    private var icon: String {
+        switch flash.kind {
+        case .success: return "checkmark.circle.fill"
+        case .error: return "exclamationmark.triangle.fill"
+        case .info: return "info.circle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch flash.kind {
+        case .success: return .green
+        case .error: return .orange
+        case .info: return .accentColor
         }
     }
 }

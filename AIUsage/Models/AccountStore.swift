@@ -44,6 +44,7 @@ final class AccountStore: ObservableObject {
         accountId: String? = nil,
         credentialId: String? = nil,
         providerResultId: String? = nil,
+        sourceFilePath: String? = nil,
         ensureProviderSelected: (String) -> Void
     ) -> Bool {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,15 +62,29 @@ final class AccountStore: ObservableObject {
             ?? credentialId.map { "\(providerId):cred:\($0)".lowercased() }
         let effectiveDisplayName = displayName?.nilIfBlank ?? credentialSnapshot?.displayName
         let requiresCredentialBoundIdentity = AccountIdentityPolicy.isMultiWorkspace(providerId)
+        let resolvedSourcePath = sourceFilePath?.nilIfBlank
+            ?? credentialId.flatMap {
+                AccountCredentialStore.shared.loadCredential(providerId: providerId, credentialId: $0)
+            }.flatMap(AccountIdentityPolicy.credentialAuthFilePath)
 
         if let index = accountRegistry.firstIndex(where: {
             guard $0.providerId == providerId else { return false }
             if let credentialId, $0.credentialId == credentialId { return true }
             if let normalizedProviderResultId, $0.normalizedProviderResultId == normalizedProviderResultId { return true }
-            // Codex and Antigravity native identities have already been resolved
-            // to a canonical credential ID before this method is called. Falling
-            // back to accountId/email here would collapse distinct users/projects.
-            if requiresCredentialBoundIdentity { return false }
+            if requiresCredentialBoundIdentity {
+                // Same auth-file path = same Codex/Antigravity workspace (scan vs credential).
+                if let resolvedSourcePath,
+                   AccountIdentityPolicy.sourceFilePathsMatch($0.sourceFilePath, resolvedSourcePath) {
+                    return true
+                }
+                // Re-adding a deleted Codex workspace must revive the permanent tombstone.
+                if providerId.lowercased() == "codex",
+                   let normalizedAccountId,
+                   $0.normalizedAccountId == normalizedAccountId {
+                    return true
+                }
+                return false
+            }
             if let normalizedAccountId, $0.normalizedAccountId == normalizedAccountId { return true }
             if let normalizedAccountId, let storedAccountId = $0.normalizedAccountId,
                storedAccountId != normalizedAccountId {
@@ -89,7 +104,10 @@ final class AccountStore: ObservableObject {
                 credentialId: credentialId ?? existing.credentialId,
                 createdAt: existing.createdAt,
                 lastSeenAt: maxTimestampString(now, existing.lastSeenAt, credentialSnapshot?.validatedAt),
-                isHidden: false
+                isHidden: false,
+                isPermanentlyRemoved: false,
+                sourceFilePath: resolvedSourcePath ?? existing.sourceFilePath,
+                workspaceUserId: existing.workspaceUserId
             )
         } else {
             accountRegistry.append(
@@ -104,7 +122,9 @@ final class AccountStore: ObservableObject {
                     credentialId: credentialId,
                     createdAt: now,
                     lastSeenAt: maxTimestampString(now, credentialSnapshot?.validatedAt),
-                    isHidden: false
+                    isHidden: false,
+                    isPermanentlyRemoved: false,
+                    sourceFilePath: resolvedSourcePath
                 )
             )
         }
@@ -231,6 +251,7 @@ final class AccountStore: ObservableObject {
             accountId: accountId,
             credentialId: enrichedCredential.id,
             providerResultId: "\(providerId):cred:\(enrichedCredential.id)",
+            sourceFilePath: AccountIdentityPolicy.credentialAuthFilePath(enrichedCredential),
             ensureProviderSelected: ensureProviderSelected
         )
 
@@ -283,15 +304,11 @@ final class AccountStore: ObservableObject {
         onRestored(accountRegistry[index].providerId)
     }
 
-    func deleteAccount(
+    /// Soft-hide: keep a tombstone so auto-discovery does not immediately re-add the account.
+    func hideAccount(
         _ entry: ProviderAccountEntry,
-        onPostRegistryDelete: () -> Void
+        onPostRegistryChange: () -> Void
     ) {
-        let matchedCredentials = matchingCredentialsImpl(for: entry)
-        for credential in matchedCredentials {
-            AccountCredentialStore.shared.deleteCredential(credential)
-        }
-
         let matchingIndices = matchingStoredAccountIndices(for: entry)
         if !matchingIndices.isEmpty {
             for index in matchingIndices {
@@ -300,7 +317,11 @@ final class AccountStore: ObservableObject {
                 updated.credentialId = nil
                 updated.providerResultId = entry.liveProvider?.id ?? updated.providerResultId
                 updated.accountId = entry.liveProvider?.accountId ?? updated.accountId
+                updated.sourceFilePath = entry.liveProvider?.sourceFilePath
+                    ?? entry.storedAccount?.sourceFilePath
+                    ?? updated.sourceFilePath
                 updated.isHidden = true
+                updated.isPermanentlyRemoved = false
                 updated.lastSeenAt = maxTimestampString(
                     SharedFormatters.iso8601String(from: Date()),
                     updated.lastSeenAt
@@ -314,6 +335,40 @@ final class AccountStore: ObservableObject {
             lastSeenAt: SharedFormatters.iso8601String(from: Date())
         ) {
             accountRegistry.append(hiddenEntry)
+        }
+
+        // Soft-hide keeps Keychain credentials; only suppress dashboard listing.
+        _ = normalizeAccountRegistryAgainstCredentials()
+        deduplicateAccountRegistry()
+        persistAccountRegistry()
+        onPostRegistryChange()
+    }
+
+    /// Permanent delete: remove linked Keychain credentials and suppress rediscovery.
+    /// Multi-workspace providers (Codex) can come back from ~/.codex or AuthImports unless
+    /// a permanently-removed tombstone remains — those are hidden from the Hidden Accounts UI.
+    func deleteAccount(
+        _ entry: ProviderAccountEntry,
+        onPostRegistryDelete: () -> Void
+    ) {
+        let matchedCredentials = matchingCredentialsImpl(for: entry)
+        for credential in matchedCredentials {
+            AccountCredentialStore.shared.deleteCredential(credential)
+        }
+
+        let matchingIndices = matchingStoredAccountIndices(for: entry)
+        for index in matchingIndices.sorted(by: >) {
+            accountRegistry.remove(at: index)
+        }
+
+        if let tombstone = makeStoredAccount(
+            from: entry,
+            note: nil,
+            isHidden: true,
+            lastSeenAt: SharedFormatters.iso8601String(from: Date()),
+            isPermanentlyRemoved: true
+        ) {
+            accountRegistry.append(tombstone)
         }
 
         _ = normalizeAccountRegistryAgainstCredentials()
@@ -338,27 +393,18 @@ final class AccountStore: ObservableObject {
             }
 
             let matchingIndices = matchingStoredAccountIndices(for: entry)
-            if !matchingIndices.isEmpty {
-                for index in matchingIndices {
-                    var updated = accountRegistry[index]
-                    updated.note = nil
-                    updated.credentialId = nil
-                    updated.providerResultId = entry.liveProvider?.id ?? updated.providerResultId
-                    updated.accountId = entry.liveProvider?.accountId ?? updated.accountId
-                    updated.isHidden = true
-                    updated.lastSeenAt = maxTimestampString(
-                        SharedFormatters.iso8601String(from: Date()),
-                        updated.lastSeenAt
-                    )
-                    accountRegistry[index] = updated
-                }
-            } else if let hiddenEntry = makeStoredAccount(
+            for index in matchingIndices.sorted(by: >) {
+                accountRegistry.remove(at: index)
+            }
+
+            if let tombstone = makeStoredAccount(
                 from: entry,
                 note: nil,
                 isHidden: true,
-                lastSeenAt: SharedFormatters.iso8601String(from: Date())
+                lastSeenAt: SharedFormatters.iso8601String(from: Date()),
+                isPermanentlyRemoved: true
             ) {
-                accountRegistry.append(hiddenEntry)
+                accountRegistry.append(tombstone)
             }
         }
 
@@ -383,7 +429,7 @@ final class AccountStore: ObservableObject {
     func hiddenAccounts() -> [StoredProviderAccount] {
         let providerOrder = providerCatalogOrder
         return accountRegistry
-            .filter(\.isHidden)
+            .filter { $0.isHidden && !$0.isPermanentlyRemoved }
             .sorted {
                 if $0.providerId != $1.providerId {
                     let lhsIndex = providerOrder.firstIndex(of: $0.providerId) ?? Int.max
@@ -436,9 +482,27 @@ final class AccountStore: ObservableObject {
         )
     }
 
-    func hasHiddenRegistryMatch(providerId: String, normalizedEmail: String?, normalizedAccountId: String?) -> Bool {
+    func hasHiddenRegistryMatch(
+        providerId: String,
+        normalizedEmail: String?,
+        normalizedAccountId: String?,
+        sourceFilePath: String? = nil
+    ) -> Bool {
         accountRegistry.contains { stored in
             guard stored.providerId == providerId, stored.isHidden else { return false }
+            if AccountIdentityPolicy.isMultiWorkspace(providerId) {
+                // Codex / Antigravity: email alone can hide the wrong workspace.
+                if AccountIdentityPolicy.sourceFilePathsMatch(stored.sourceFilePath, sourceFilePath) {
+                    return true
+                }
+                // AuthImports vs ~/.codex share accountId but not path — still one workspace.
+                if providerId.lowercased() == "codex",
+                   let normalizedAccountId,
+                   stored.normalizedAccountId == normalizedAccountId {
+                    return true
+                }
+                return false
+            }
             if let normalizedAccountId,
                stored.normalizedAccountId == normalizedAccountId {
                 return true

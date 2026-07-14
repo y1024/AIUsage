@@ -315,6 +315,31 @@ final class ProviderRefreshCoordinator: ObservableObject {
         providers.removeAll { $0.baseProviderId == providerId }
     }
 
+    /// Drop in-memory live rows for a deleted/hidden account so the UI updates before the next refresh.
+    func removeLiveProviders(matching entry: ProviderAccountEntry) {
+        if let live = entry.liveProvider {
+            let identity = liveProviderIdentity(live)
+            providers.removeAll {
+                $0.id == live.id || liveProviderIdentity($0) == identity
+            }
+            return
+        }
+
+        providers.removeAll { provider in
+            guard provider.baseProviderId == entry.providerId else { return false }
+            if let stored = entry.storedAccount {
+                return accountStore.matchesStoredWithLive(stored, provider: provider)
+            }
+            return false
+        }
+    }
+
+    func removeLiveProviders(matching entries: [ProviderAccountEntry]) {
+        for entry in entries {
+            removeLiveProviders(matching: entry)
+        }
+    }
+
     func reapplyVisibleSortedProviders() {
         providers = visibleProviders(from: providers).sorted(by: providerSort)
     }

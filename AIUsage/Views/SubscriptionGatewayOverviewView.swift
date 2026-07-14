@@ -54,56 +54,25 @@ struct SubscriptionGatewayOverviewView: View {
     @State private var showAllModels = false
     @State private var selectedModel: CLIProxyModelCatalogEntry?
 
-    private let metricColumns = [GridItem(.adaptive(minimum: 210), spacing: 10)]
-    private let modelColumns = [GridItem(.adaptive(minimum: 300), spacing: 9)]
+    private let modelColumns = [GridItem(.adaptive(minimum: 220), spacing: 8)]
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
                 errorBanners
-                if manager.isInstalled { serviceCard }
-                nextStepCard
 
-                Text(L("Live overview", "运行概况"))
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
+                GatewayStatCapsuleRow(items: overviewStatItems)
 
-                LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 10) {
-                    GatewayMetricCard(
-                        title: L("Accounts", "账号"),
-                        value: "\(readyAccountCount) / \(manager.authFiles.count)",
-                        detail: L("ready in the CPA pool", "CPA 池中可用 / 总数"),
-                        systemImage: "person.2.fill",
-                        tint: .indigo
-                    )
-                    GatewayMetricCard(
-                        title: L("Models", "模型"),
-                        value: "\(manager.modelCatalog.count)",
-                        detail: L("unique models available now", "当前可用的去重模型"),
-                        systemImage: "square.stack.3d.up.fill",
-                        tint: .purple
-                    )
-                    GatewayMetricCard(
-                        title: L("Connected apps", "已接入应用"),
-                        value: "\(connectedApplicationCount) / 4",
-                        detail: L("apps through \(connectedTargets.count) config targets", "通过 \(connectedTargets.count) 个配置目标接入"),
-                        systemImage: "arrow.triangle.branch",
-                        tint: .blue
-                    )
-                    GatewayMetricCard(
-                        title: L("CPA version", "CPA 版本"),
-                        value: manager.currentVersion.map { "v\($0)" } ?? "—",
-                        detail: updateDetail,
-                        systemImage: manager.hasUpdate ? "arrow.down.circle.fill" : "checkmark.seal.fill",
-                        tint: manager.hasUpdate ? .orange : .green
-                    )
+                if manager.isInstalled {
+                    compactServiceBar
                 }
 
+                nextStepCard
                 modelCatalogCard
             }
             .frame(maxWidth: 1080, alignment: .leading)
             .padding(.horizontal, 24)
-            .padding(.vertical, 22)
+            .padding(.vertical, 18)
         }
         .sheet(item: $selectedModel) { entry in
             GatewayModelDetailSheet(entry: entry)
@@ -120,6 +89,41 @@ struct SubscriptionGatewayOverviewView: View {
                 await manager.refreshAvailableModels()
             }
         }
+    }
+
+    private var overviewStatItems: [GatewayStatCapsuleRow.Item] {
+        [
+            .init(
+                id: "accounts",
+                value: "\(readyAccountCount)/\(manager.authFiles.count)",
+                title: L("Accounts", "账号"),
+                systemImage: "person.2.fill",
+                tint: .indigo
+            ),
+            .init(
+                id: "models",
+                value: "\(manager.modelCatalog.count)",
+                title: L("Models", "模型"),
+                systemImage: "square.stack.3d.up.fill",
+                tint: .purple
+            ),
+            .init(
+                id: "apps",
+                value: "\(connectedApplicationCount)/4",
+                title: L("Connected apps", "已接入"),
+                systemImage: "arrow.triangle.branch",
+                tint: .blue
+            ),
+            .init(
+                id: "version",
+                value: manager.currentVersion.map { "v\($0)" } ?? "—",
+                title: manager.hasUpdate
+                    ? L("Update available", "有更新")
+                    : L("CPA version", "CPA 版本"),
+                systemImage: manager.hasUpdate ? "arrow.down.circle.fill" : "checkmark.seal.fill",
+                tint: manager.hasUpdate ? .orange : .green
+            ),
+        ]
     }
 
     @ViewBuilder
@@ -181,27 +185,32 @@ struct SubscriptionGatewayOverviewView: View {
         actionTitle: String,
         action: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: 17) {
+        HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.system(size: 24, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(tint)
-                .frame(width: 48, height: 48)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.headline)
+                .frame(width: 36, height: 36)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
                 Text(detail)
-                    .font(.callout)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 18)
+            Spacer(minLength: 12)
             Button(actionTitle, action: action)
                 .buttonStyle(.borderedProminent)
+                .controlSize(.small)
                 .disabled(manager.operation.isBusy || runtime.state.isTransitioning)
         }
-        .padding(18)
-        .background(tint.opacity(0.075), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(tint.opacity(0.16)))
+        .padding(12)
+        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(tint.opacity(0.14), lineWidth: 1)
+        )
     }
 
     private var modelCatalogCard: some View {
@@ -339,29 +348,29 @@ struct SubscriptionGatewayOverviewView: View {
         return Button {
             selectedModel = entry
         } label: {
-            HStack(spacing: 10) {
-                GatewayProviderIcon(providerID: entry.providerID, size: 31)
-                VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                GatewayProviderIcon(providerID: entry.providerID, size: 26)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(model.displayName?.nilIfBlank ?? model.id)
-                        .font(.callout.weight(.semibold))
+                        .font(.caption.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Text(model.id)
                         .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Spacer(minLength: 6)
+                Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.quaternary)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-            .background(Color.primary.opacity(0.028), in: RoundedRectangle(cornerRadius: 10))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -387,89 +396,57 @@ struct SubscriptionGatewayOverviewView: View {
         .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
     }
 
-    private var serviceCard: some View {
-        GatewayCard {
-            VStack(alignment: .leading, spacing: 15) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L("CPA runtime", "CPA 运行服务"))
-                            .font(.headline)
-                        Text(serviceDetail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    HStack(spacing: 8) {
-                        GatewayStatusPill(
-                            text: runtime.state.isRunning ? L("Healthy", "运行正常") : L("Offline", "未运行"),
-                            color: runtime.state.isRunning ? .green : .secondary,
-                            systemImage: runtime.state.isRunning ? "checkmark.circle.fill" : "circle"
-                        )
-                        if runtime.settings.allowLANAccess {
-                            GatewayStatusPill(
-                                text: L("LAN enabled", "局域网已开启"),
-                                color: .orange,
-                                systemImage: "network"
-                            )
-                        }
-                    }
-                }
-                GatewayCopyField(
-                    label: L("This Mac", "本机地址"),
-                    value: runtime.baseURL.absoluteString
-                )
-                if runtime.settings.allowLANAccess {
-                    if !runtime.lanBaseURLs.isEmpty {
-                        ForEach(runtime.lanBaseURLs, id: \.absoluteString) { lanURL in
-                            GatewayCopyField(
-                                label: runtime.state.isRunning
-                                    ? L("Local network · \(lanURL.host ?? "")", "局域网地址 · \(lanURL.host ?? "")")
-                                    : L("Local network after start · \(lanURL.host ?? "")", "启动后的局域网地址 · \(lanURL.host ?? "")"),
-                                value: lanURL.absoluteString
-                            )
-                        }
-                    } else {
-                        HStack(spacing: 8) {
-                            Image(systemName: "wifi.exclamationmark")
-                            Text(L(
-                                "LAN access is enabled, but no active private or shared IPv4 address was found.",
-                                "已开启局域网访问，但当前未找到可用的私有或共享 IPv4 地址。"
-                            ))
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                    }
-                }
-                HStack {
-                    Button {
-                        Task {
-                            if runtime.state.isRunning { await runtime.stop() }
-                            else {
-                                await runtime.start()
-                                if runtime.state.isRunning { await manager.refreshAccounts() }
-                            }
-                        }
-                    } label: {
-                        Label(
-                            runtime.state.isRunning ? L("Stop CPA", "停止 CPA") : L("Start CPA", "启动 CPA"),
-                            systemImage: runtime.state.isRunning ? "stop.fill" : "play.fill"
-                        )
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(runtime.state.isTransitioning || !manager.isInstalled)
-
-                    Button {
-                        Task { await manager.refreshAccounts() }
-                    } label: {
-                        Label(L("Refresh", "刷新"), systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(!runtime.state.isRunning || manager.isManagingAccounts)
-                    Spacer()
-                }
+    private var compactServiceBar: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(runtime.state.isRunning ? Color.green : Color.secondary.opacity(0.45))
+                .frame(width: 8, height: 8)
+            Text(runtime.state.isRunning ? L("CPA running", "CPA 运行中") : L("CPA stopped", "CPA 已停止"))
+                .font(.caption.weight(.semibold))
+            Text(runtime.baseURL.absoluteString)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            if runtime.settings.allowLANAccess {
+                GatewayQuietBadge(text: L("LAN", "局域网"), tint: .orange)
             }
+            Spacer(minLength: 8)
+            Button {
+                Task {
+                    if runtime.state.isRunning { await runtime.stop() }
+                    else {
+                        await runtime.start()
+                        if runtime.state.isRunning { await manager.refreshAccounts() }
+                    }
+                }
+            } label: {
+                Label(
+                    runtime.state.isRunning ? L("Stop", "停止") : L("Start", "启动"),
+                    systemImage: runtime.state.isRunning ? "stop.fill" : "play.fill"
+                )
+                .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(runtime.state.isTransitioning || !manager.isInstalled)
+
+            Button {
+                Task { await manager.refreshAccounts() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(!runtime.state.isRunning || manager.isManagingAccounts)
+            .help(L("Refresh", "刷新"))
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(serviceDetail)
     }
 
     private var readyAccountCount: Int {
@@ -543,12 +520,6 @@ struct SubscriptionGatewayOverviewView: View {
         connectedTargets.reduce(into: 0) { count, target in
             count += target == .claude ? 2 : 1
         }
-    }
-
-    private var updateDetail: String {
-        if manager.hasUpdate { return L("an official update is available", "有可用的官方更新") }
-        if manager.isInstalled { return L("managed independently", "由 AIUsage 独立管理") }
-        return L("not installed", "尚未安装")
     }
 
     private var modelCatalogDetail: String {

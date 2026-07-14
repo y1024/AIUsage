@@ -475,14 +475,26 @@ public actor ProviderEngine {
     }
 
     private func identityKey(for result: ProviderResult, providerId: String) -> String {
-        // Multi-workspace providers (Codex): identity is anchored on
-        // sourceFilePath first, then credentialId. Path wins because the
-        // automatic scan branch never carries a credentialId but always
-        // knows the auth file it read from, while the credential-backed
-        // branch carries both (we populate summary.sourceFilePath from
-        // credential.credential for authFile credentials). Using path first
-        // lets the two branches for the same workspace converge on one key.
+        // Multi-workspace: Codex native identity is accountId + userId (same as
+        // AccountCredentialStore). Path-first incorrectly keeps AuthImports copies
+        // of ~/.codex/auth.json as a second card. Fall back to path / cred only
+        // when native components are incomplete.
         if AccountCredentialStore.isMultiWorkspace(providerId) {
+            if providerId.lowercased() == "codex" {
+                let accountId = normalizedIdentity(result.resultAccountId)
+                    ?? normalizedIdentity(result.summary?.accountId)
+                    ?? normalizedIdentity(result.usage?.usageAccountId)
+                let userId = normalizedIdentity(result.usage?.extra["userId"]?.value as? String)
+                let email = normalizedIdentity(result.usage?.accountEmail)
+                    ?? normalizedIdentity(result.summary?.accountLabel)
+                if let accountId, let userId {
+                    return "\(providerId):account:\(accountId):user:\(userId)"
+                }
+                if let accountId, let email {
+                    return "\(providerId):account:\(accountId):email:\(email)"
+                }
+            }
+
             if let path = result.summary?.sourceFilePath?.nilIfBlank {
                 let normalized = AccountCredentialStore.normalizedAuthFilePath(path)
                 return "\(providerId):path:\(normalized)"

@@ -10,7 +10,8 @@ import QuotaBackend
 // 热替换上游（复用 Claude 轨 admin 路由），Science 无感、端口不变。
 //
 // 只做调度：协议转换/上游客户端复用现成 QuotaServer；节点筛选与 env/payload 投影复用
-// ClaudeGlobalProxyAdapter（Science 推理即 Anthropic Messages API，等价 Claude Code 走 convert）。
+// ClaudeGlobalProxyAdapter（Science 推理即 Anthropic Messages API）。CPA 网关节点默认 Anthropic
+// 透传；其它 OpenAI 兼容节点仍走 convert。
 // 与 Claude Code 轨完全独立（独立端口 14402、独立进程、不写 ~/.claude/settings.json）。
 
 private let scienceMgrLog = Logger(subsystem: "com.aiusage.desktop", category: "ScienceProxyManager")
@@ -500,6 +501,34 @@ final class ScienceProxyManager: ObservableObject {
         } catch {
             operationError = error.localizedDescription
             scienceMgrLog.error("Failed to hot-switch Science node: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// CPA/节点配置变更后强制再推当前激活上游（允许同 nodeId）。
+    func reapplyActiveUpstream() async {
+        guard !isBusy else { return }
+        guard config.isEnabled, runtime.isProcessRunning,
+              let nodeId = config.activeNodeId else { return }
+        isBusy = true
+        operationError = nil
+        defer { isBusy = false }
+
+        guard let node = node(for: nodeId),
+              var payload = adapter.switchPayload(config: config, nodeId: nodeId),
+              let catalog = modelCatalog(for: nodeId) else { return }
+        payload["availableModels"] = catalog.models.map(\.upstreamModel)
+        payload["defaultModel"] = catalog.defaultUpstreamModel
+        do {
+            try await runtime.switchUpstream(
+                payload: payload,
+                adminPath: adapter.adminPath(config: config),
+                nodeId: node.id,
+                nodeName: node.name
+            )
+            ScienceAuthProxy.shared.updateModelCatalog(catalog)
+        } catch {
+            operationError = error.localizedDescription
+            scienceMgrLog.error("Failed to reapply Science upstream: \(String(describing: error), privacy: .public)")
         }
     }
 

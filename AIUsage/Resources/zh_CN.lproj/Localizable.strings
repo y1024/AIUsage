@@ -1220,7 +1220,8 @@
 "dashboard.overview" = "概览";
 
 /* Views/DashboardView.swift */
-"dashboard.providers" = "服务商";
+"dashboard.providers" = "订阅额度";
+"dashboard.quota_attention" = "需要关注";
 
 /* Views/DashboardView.swift */
 "dashboard.summary.cost_tracking" = "用量统计";

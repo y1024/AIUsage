@@ -3,8 +3,9 @@ import SwiftUI
 import QuotaBackend
 
 // MARK: - API Provider Distributor
-// 把「API 提供商」主配置分发到 Codex / Claude / OpenCode 三套代理，并维护「继承 + 局部覆盖」同步：
+// 把「API 提供商」主配置分发到 Codex / Claude / OpenCode 本地代理，以及 CPA 的 OpenAI 兼容上游：
 //   - 分发即生成各代理的「链接节点」（携带 linkedProviderId），按目标去重 upsert。
+//   - CPA：写入 openai-compatibility，并用 APIProviderCPALinkStore 维护 providerId→name 映射。
 //   - 主配置变更时，链接节点里未被 overriddenKeys 标记的共享字段跟随同步；代理专属字段本地独立。
 //   - 取消分发某代理 = 删除该代理下的链接节点；解除链接 = 链接节点转为普通独立节点。
 // Codex/Claude 节点经 ProxyViewModel（落 ~/.config/aiusage/profiles），OpenCode 经 OpenCodeNodeStore。
@@ -16,15 +17,18 @@ final class APIProviderDistributor {
     private var proxyVM: ProxyViewModel { ProxyViewModel.shared }
     private var profileStore: NodeProfileStore { NodeProfileStore.shared }
     private var openCodeStore: OpenCodeNodeStore { OpenCodeNodeStore.shared }
+    private var cpaLinks: APIProviderCPALinkStore { APIProviderCPALinkStore.shared }
+    private var gateway: CLIProxyGatewayManager { CLIProxyGatewayManager.shared }
 
     // MARK: - Distribution State
 
-    /// 该主配置当前已在哪些代理生成了链接节点。
+    /// 该主配置当前已在哪些目标生成了链接。
     func currentTargets(for providerId: String) -> Set<ProxyTarget> {
         var result: Set<ProxyTarget> = []
         if codexChild(for: providerId) != nil { result.insert(.codex) }
         if claudeChild(for: providerId) != nil { result.insert(.claude) }
         if openCodeChild(for: providerId) != nil { result.insert(.openCode) }
+        if cpaLinks.hasLink(for: providerId) { result.insert(.cpa) }
         return result
     }
 
@@ -32,22 +36,38 @@ final class APIProviderDistributor {
 
     /// 把主配置的分发集合对齐到 `targets`：被选中且兼容的目标 upsert 链接节点（已存在则同步），
     /// 未选中（或不兼容）的目标若有链接节点则删除。
-    func setDistribution(_ provider: APIProvider, targets: Set<ProxyTarget>) async {
+    /// 主配置内容变更后，把变更同步到所有已存在的链接；返回失败原因（成功为 nil）。
+    @discardableResult
+    func syncFromMaster(_ provider: APIProvider) async -> String? {
+        gateway.lastError = nil
+        for target in currentTargets(for: provider.id) {
+            if target == .cpa, let reason = APIProviderCPALoopGuard.blockReason(for: provider) {
+                gateway.lastError = reason
+                await removeChild(for: provider.id, target: .cpa)
+                continue
+            }
+            await upsertChild(provider, target: target)
+        }
+        return gateway.lastError
+    }
+
+    /// 对齐分发集合；返回失败原因（成功为 nil）。
+    @discardableResult
+    func setDistribution(_ provider: APIProvider, targets: Set<ProxyTarget>) async -> String? {
+        gateway.lastError = nil
         for target in ProxyTarget.allCases {
-            let want = targets.contains(target) && target.supports(provider.format)
+            var want = targets.contains(target) && target.supports(provider.format)
+            if want, target == .cpa, let reason = APIProviderCPALoopGuard.blockReason(for: provider) {
+                gateway.lastError = reason
+                want = false
+            }
             if want {
                 await upsertChild(provider, target: target)
             } else {
                 await removeChild(for: provider.id, target: target)
             }
         }
-    }
-
-    /// 主配置内容变更后，把变更同步到所有已存在的链接节点（不改分发集合）。
-    func syncFromMaster(_ provider: APIProvider) async {
-        for target in currentTargets(for: provider.id) {
-            await upsertChild(provider, target: target)
-        }
+        return gateway.lastError
     }
 
     /// 删除主配置：要么级联删除所有链接节点，要么解除链接（保留为独立节点）。
@@ -73,10 +93,56 @@ final class APIProviderDistributor {
             let existing = claudeChild(for: provider.id)
             let profile = makeProfile(provider, family: .claude, existing: existing)
             if existing != nil { await proxyVM.updateProfile(profile) } else { proxyVM.addProfile(profile) }
+            // CPA→Claude 从 convert 切到 Anthropic 透传后，正在跑的 Science/Claude 全局代理
+            // 需热推上游，否则仍停在旧 convert 进程配置上。
+            if provider.id == CLIProxyGatewayManager.managedProviderID {
+                await reapplyRunningClaudeTracks(for: profile.metadata.id)
+            }
         case .openCode:
             let existing = openCodeChild(for: provider.id)
             let node = makeOpenCodeNode(provider, existing: existing)
             openCodeStore.upsert(node)
+            if provider.id == CLIProxyGatewayManager.managedProviderID {
+                await reapplyRunningOpenCodeTrack(for: node.id)
+            }
+        case .cpa:
+            if let reason = APIProviderCPALoopGuard.blockReason(for: provider) {
+                gateway.lastError = reason
+                return
+            }
+            await upsertCPAChild(provider)
+        }
+    }
+
+    private func upsertCPAChild(_ provider: APIProvider) async {
+        let existingName = cpaLinks.cpaName(for: provider.id)
+        do {
+            let name = try await gateway.upsertOpenAICompatibleProvider(
+                fromAPIProvider: provider,
+                existingCPAName: existingName
+            )
+            cpaLinks.setLink(providerId: provider.id, cpaName: name)
+        } catch {
+            gateway.lastError = error.localizedDescription
+        }
+    }
+
+    /// Science / Claude 全局代理若正用该节点，强制再推一次上游（允许同 nodeId 重入）。
+    private func reapplyRunningClaudeTracks(for nodeId: String) async {
+        let science = ScienceProxyManager.shared
+        if science.isEnabled, science.isProxyRunning, science.activeNodeId == nodeId {
+            await science.reapplyActiveUpstream()
+        }
+        let claude = GlobalProxyManager.claude
+        if claude.isEnabled, claude.isProxyRunning, claude.activeNodeId == nodeId {
+            await claude.reapplyActiveUpstream()
+        }
+    }
+
+    private func reapplyRunningOpenCodeTrack(for nodeId: String) async {
+        let opencode = GlobalProxyManager.opencode
+        if opencode.isEnabled, opencode.isProxyRunning, opencode.activeNodeId == nodeId {
+            await opencode.reapplyActiveUpstream()
         }
     }
 
@@ -88,6 +154,15 @@ final class APIProviderDistributor {
             if let child = claudeChild(for: providerId) { await proxyVM.deleteConfiguration(child.id) }
         case .openCode:
             if let child = openCodeChild(for: providerId) { openCodeStore.delete(child) }
+        case .cpa:
+            if let name = cpaLinks.cpaName(for: providerId) {
+                do {
+                    try await gateway.deleteOpenAICompatibleProviderLinked(cpaName: name)
+                } catch {
+                    gateway.lastError = error.localizedDescription
+                }
+                cpaLinks.removeLink(providerId: providerId)
+            }
         }
     }
 
@@ -110,6 +185,9 @@ final class APIProviderDistributor {
             child.linkedProviderId = nil
             child.overriddenKeys = nil
             openCodeStore.upsert(child)
+        case .cpa:
+            // 解除链接：保留 CPA 上游条目，仅丢掉本地映射。
+            cpaLinks.removeLink(providerId: providerId)
         }
     }
 
@@ -133,10 +211,20 @@ final class APIProviderDistributor {
         let overridden = existing?.metadata.overriddenKeys ?? []
         func wins(_ key: String) -> Bool { !overridden.contains(key) }
 
+        // CPA 一键网关主配置固定为 OpenAI Responses（Codex 必需）；Claude/Science 默认 Anthropic
+        // 透传，也可在接入页改为本地 OpenAI 转换。
+        let isCPAManagedClaude = family == .claude
+            && provider.id == CLIProxyGatewayManager.managedProviderID
+
         // 节点类型由格式推导（Codex 恒 codexProxy；Claude：Anthropic→透传直连，OpenAI→转换代理）。
         let nodeType: NodeType
         if family.isCodex {
             nodeType = .codexProxy
+        } else if isCPAManagedClaude {
+            switch CLIProxyGatewayManager.shared.managedClaudeProtocol {
+            case .anthropicPassthrough: nodeType = .anthropicDirect
+            case .openAIConvert: nodeType = .openaiProxy
+            }
         } else {
             nodeType = (provider.format == .anthropic) ? .anthropicDirect : .openaiProxy
         }
@@ -152,7 +240,11 @@ final class APIProviderDistributor {
         }
         if wins(APIProviderSharedKey.baseURL) {
             switch nodeType {
-            case .anthropicDirect: proxy.anthropicBaseURL = provider.baseURL
+            case .anthropicDirect:
+                // CPA Anthropic 入口是 Origin（无 /v1）；Responses 主配置带 /v1，Claude 侧需剥离。
+                proxy.anthropicBaseURL = isCPAManagedClaude
+                    ? Self.stripTrailingV1Path(provider.baseURL)
+                    : provider.baseURL
             case .openaiProxy, .codexProxy: proxy.upstreamBaseURL = provider.baseURL
             }
         }
@@ -212,6 +304,17 @@ final class APIProviderDistributor {
         return profile
     }
 
+    /// 去掉末尾 `/v1`，得到 Anthropic 客户端期望的 Origin / REST API Root。
+    static func stripTrailingV1Path(_ urlString: String) -> String {
+        var value = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        while value.hasSuffix("/") { value.removeLast() }
+        if value.lowercased().hasSuffix("/v1") {
+            value = String(value.dropLast(3))
+            while value.hasSuffix("/") { value.removeLast() }
+        }
+        return value
+    }
+
     private func defaultProxy(for nodeType: NodeType) -> ProxySettings {
         switch nodeType {
         case .codexProxy: return .defaultCodex
@@ -226,14 +329,24 @@ final class APIProviderDistributor {
         let overridden = existing?.overriddenKeys ?? []
         func wins(_ key: String) -> Bool { !overridden.contains(key) }
 
+        let isCPAManaged = provider.id == CLIProxyGatewayManager.managedProviderID
+        let protocolType: OpenCodeProtocol = isCPAManaged
+            ? CLIProxyGatewayManager.shared.managedOpenCodeProtocol
+            : provider.format.openCodeProtocol
+
         var node = existing ?? OpenCodeNode()
         node.linkedProviderId = provider.id
         node.overriddenKeys = overridden.isEmpty ? nil : overridden
-        // 协议由格式决定（跟随主配置）。
-        node.protocolType = provider.format.openCodeProtocol
+        // CPA 托管 OpenCode：协议由接入页选择；其它主配置仍跟随 format。
+        node.protocolType = protocolType
 
         if wins(APIProviderSharedKey.name) { node.name = provider.displayName }
-        if wins(APIProviderSharedKey.baseURL) { node.baseURL = provider.baseURL }
+        if wins(APIProviderSharedKey.baseURL) {
+            // Anthropic 入口是 Origin（无 /v1）；Chat/Responses 使用带 /v1 的 Base URL。
+            node.baseURL = (isCPAManaged && protocolType == .anthropic)
+                ? Self.stripTrailingV1Path(provider.baseURL)
+                : provider.baseURL
+        }
         if wins(APIProviderSharedKey.apiKey) { node.apiKey = provider.apiKey }
         if wins(APIProviderSharedKey.models) {
             let entries = Self.openCodeEntries(from: provider.models)
@@ -339,6 +452,8 @@ final class APIProviderDistributor {
             guard var child = openCodeChild(for: providerId) else { return }
             child.overriddenKeys = nil
             openCodeStore.upsert(child)
+        case .cpa:
+            break
         }
         guard let master = APIProviderStore.shared.provider(id: providerId) else { return }
         await upsertChild(master, target: target)

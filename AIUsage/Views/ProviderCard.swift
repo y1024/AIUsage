@@ -20,6 +20,7 @@ struct ProviderCard: View {
     @State private var showingNoteEditor = false
     @State private var activationMessage: String?
     @State private var showActivationAlert = false
+    @State private var pendingAccountDeletion = false
 
     init(
         provider: ProviderData,
@@ -45,148 +46,99 @@ struct ProviderCard: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .center, spacing: 10) {
                 providerIcon
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(headerTitle)
-                        .font(.headline)
-                        .bold()
-                    
-                    if let subtitle = headerSubtitle {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+
+                Text(headerTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+
+                if isActiveProviderAccount && canActivateProvider {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 6, height: 6)
+                        .help(L("Active CLI account", "当前 CLI 账号"))
                 }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: 6) {
-                    HStack(spacing: 6) {
-                        if isActiveProviderAccount && canActivateProvider {
-                            badge(text: L("Active", "当前"), tint: .green)
-                        }
 
-                        if let membership = provider.membershipLabel {
-                            badge(text: membership, tint: membershipBadgeTint(for: membership))
-                        }
+                if isPinnedToMenuBar {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(accentColor.opacity(0.7))
+                        .rotationEffect(.degrees(45))
+                }
 
-                        if shouldShowStatusBadge {
-                            statusBadge
-                        }
+                Spacer(minLength: 8)
 
-                        if let candidate = cpaSyncCandidate, cpaGateway.isSynced(candidate) {
-                            badge(text: "CPA", tint: .indigo)
-                        }
-                    }
+                if let membership = provider.membershipLabel {
+                    GatewayQuietBadge(text: membership, tint: membershipBadgeTint(for: membership))
+                }
+                if shouldShowStatusBadge {
+                    GatewayQuietBadge(text: localizedStatusLabel(provider.statusLabel), tint: statusColor)
                 }
             }
 
             if let headlineValue = compactHeadlineValue {
                 Text(headlineValue)
-                    .font(.system(size: provider.remainingPercent == nil ? 30 : 24, weight: .bold, design: .rounded))
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
+                if let secondary = provider.headline.secondary.nilIfBlank {
+                    Text(secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
 
             if useMultiWindowLayout {
-                Spacer(minLength: 0)
                 MultiWindowQuotaView(windows: provider.windows, accentColor: accentColor)
-            } else {
-                Spacer(minLength: 0)
-
-                if let remaining = provider.remainingPercent {
-                    QuotaIndicatorView(remainingPercent: remaining, accentColor: accentColor, resetAt: provider.nextResetAt)
-                } else {
-                    Color.clear.frame(height: quotaIndicatorPlaceholderHeight)
-                }
+            } else if let remaining = provider.remainingPercent {
+                QuotaIndicatorView(remainingPercent: remaining, accentColor: accentColor, resetAt: provider.nextResetAt)
             }
-            
-            // 底部信息
-            HStack(alignment: .center) {
+
+            HStack(alignment: .center, spacing: 8) {
                 if let account = footerAccountLabel {
                     Label(account, systemImage: accountIdentityIcon(for: account))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else if let subtitle = headerSubtitle {
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 0)
 
-                if canActivateProvider && !isActiveProviderAccount {
-                    Button {
-                        activateThisAccount()
-                    } label: {
-                        Label(L("Activate", "激活"), systemImage: "bolt.fill")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    .opacity(isHovered ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.15), value: isHovered)
-                    .help(L("Set as active CLI account", "设为当前 CLI 账号"))
-                }
-
-                Button {
-                    Task {
-                        if let refreshAction {
-                            await refreshAction()
-                        } else {
-                            await refreshCoordinator.refreshProviderCardNow(provider)
-                        }
-                    }
-                } label: {
-                    ZStack {
-                        if isRefreshing {
-                            SmallProgressView()
-                                .frame(width: 14, height: 14)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.caption)
-                                .foregroundStyle(isHovered ? accentColor : .secondary)
-                        }
-                    }
-                    .frame(width: 24, height: 24)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(isHovered ? accentColor.opacity(0.1) : Color.clear)
-                    )
-                }
-                .buttonStyle(.plain)
-                .opacity(isHovered || isRefreshing ? 1 : 0)
-                .animation(.easeInOut(duration: 0.15), value: isHovered)
-                .disabled(isRefreshing)
-                .help(L("Refresh only this account", "只刷新这个账号"))
-
-                if let refreshTimestamp, !isRefreshing {
+                if isRefreshing {
+                    SmallProgressView()
+                        .frame(width: 12, height: 12)
+                } else if let refreshTimestamp {
                     RefreshableTimeView(
                         date: refreshTimestamp,
                         language: appState.language,
                         font: .caption2,
-                        foregroundStyle: .secondary
+                        foregroundStyle: .secondary,
+                        style: .relativeOnly
                     )
                 }
             }
         }
-        .frame(minHeight: 148)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .frame(minHeight: 124)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(cardBackgroundColor)
-                .shadow(color: cardShadowColor,
-                       radius: isHovered ? 12 : 4, 
-                       x: 0, 
-                       y: isHovered ? 6 : 2)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(cardBorderColor, lineWidth: isHovered ? 1.5 : 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(cardBorderColor, lineWidth: 1)
         )
-        .scaleEffect(isHovered ? 1.02 : 1.0)
-        .animation(.easeInOut(duration: 0.2), value: isHovered)
+        .shadow(color: cardShadowColor, radius: isHovered ? 10 : 3, x: 0, y: isHovered ? 4 : 1)
+        .animation(.easeInOut(duration: 0.18), value: isHovered)
         .onHover { hovering in
             isHovered = hovering
         }
@@ -194,6 +146,19 @@ struct ProviderCard: View {
             showingDetail = true
         }
         .contextMenu {
+            if canActivateProvider {
+                if isActiveProviderAccount {
+                    Label(L("Active Account", "当前账号"), systemImage: "checkmark.circle.fill")
+                } else {
+                    Button {
+                        activateThisAccount()
+                    } label: {
+                        Label(L("Activate", "激活"), systemImage: "bolt.fill")
+                    }
+                }
+                Divider()
+            }
+
             Button {
                 showingDetail = true
             } label: {
@@ -218,19 +183,6 @@ struct ProviderCard: View {
                 }
             } label: {
                 Label(L("Refresh This Account", "刷新此账号"), systemImage: "arrow.clockwise")
-            }
-
-            if canActivateProvider {
-                Divider()
-                if isActiveProviderAccount {
-                    Label(L("Active Account", "当前账号"), systemImage: "checkmark.circle.fill")
-                } else {
-                    Button {
-                        activateThisAccount()
-                    } label: {
-                        Label(L("Set as Active Account", "设为当前账号"), systemImage: "bolt.fill")
-                    }
-                }
             }
 
             if let candidate = cpaSyncCandidate {
@@ -262,6 +214,35 @@ struct ProviderCard: View {
                 } label: {
                     Label(L("Copy Account", "复制账号"), systemImage: "doc.on.doc")
                 }
+            }
+
+            if let accountEntry {
+                let pinned = settings.menuBarPinnedQuotaAccountIds.contains(accountEntry.id)
+                Button {
+                    var ids = settings.menuBarPinnedQuotaAccountIds
+                    if pinned { ids.remove(accountEntry.id) } else { ids.insert(accountEntry.id) }
+                    settings.menuBarPinnedQuotaAccountIds = ids
+                } label: {
+                    if pinned {
+                        Label(L("Unpin from Menu Bar", "从菜单栏取消固定"), systemImage: "pin.slash")
+                    } else {
+                        Label(L("Pin to Menu Bar", "固定到菜单栏"), systemImage: "pin")
+                    }
+                }
+
+                SubscriptionAccountDestructiveMenuItems(
+                    onHide: {
+                        appState.hideAccount(accountEntry)
+                    },
+                    onRequestDelete: {
+                        pendingAccountDeletion = true
+                    }
+                )
+            }
+        }
+        .subscriptionAccountDeleteConfirmation(isPresented: $pendingAccountDeletion) {
+            if let accountEntry {
+                appState.deleteAccount(accountEntry)
             }
         }
         .sheet(isPresented: $showingDetail) {
@@ -295,9 +276,14 @@ struct ProviderCard: View {
     // MARK: - Components
     
     private var providerIcon: some View {
-        ProviderIconView(provider.providerId, size: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .frame(width: 44, height: 44)
+        ProviderIconView(provider.providerId, size: 34)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .frame(width: 34, height: 34)
+    }
+
+    private var isPinnedToMenuBar: Bool {
+        guard let accountEntry else { return false }
+        return settings.menuBarPinnedQuotaAccountIds.contains(accountEntry.id)
     }
 
     private var headerTitle: String {
@@ -309,14 +295,8 @@ struct ProviderCard: View {
     }
 
     private var footerAccountLabel: String? {
-        if let wsLabel = provider.workspaceLabel, wsLabel != "Personal",
-           let email = preferredAccountIdentityLabel(
-               [footerAccountLabelOverride, provider.accountLabel, provider.accountId],
-               excluding: headerTitle
-           ) {
-            return "\(wsLabel) · \(email)"
-        }
-        return preferredAccountIdentityLabel(
+        // 右上角已有 membership badge（Business / Edu 等）时，不再在邮箱前拼 workspace，避免重复。
+        let emailOnly = preferredAccountIdentityLabel(
             [
                 footerAccountLabelOverride,
                 provider.accountLabel,
@@ -324,6 +304,14 @@ struct ProviderCard: View {
             ],
             excluding: headerTitle
         )
+        if provider.membershipLabel?.nilIfBlank != nil {
+            return emailOnly
+        }
+        if let wsLabel = provider.workspaceLabel, wsLabel != "Personal",
+           let email = emailOnly {
+            return "\(wsLabel) · \(email)"
+        }
+        return emailOnly
     }
 
     private var compactHeadlineValue: String? {
@@ -439,21 +427,21 @@ struct ProviderCard: View {
         if colorScheme == .dark {
             return Color.white.opacity(isHovered ? 0.09 : 0.065)
         }
-        return Color(nsColor: .controlBackgroundColor)
+        return AppSurface.card(.light)
     }
 
     private var cardBorderColor: Color {
         if isHovered {
-            return accentColor.opacity(colorScheme == .dark ? 0.55 : 0.28)
+            return accentColor.opacity(colorScheme == .dark ? 0.55 : 0.32)
         }
-        return colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.05)
+        return AppStroke.card(colorScheme)
     }
 
     private var cardShadowColor: Color {
         if colorScheme == .dark {
             return Color.black.opacity(isHovered ? 0.35 : 0.2)
         }
-        return isHovered ? Color.accentColor.opacity(0.22) : Color.black.opacity(0.05)
+        return isHovered ? Color.black.opacity(0.10) : Color.black.opacity(0.04)
     }
     
     private var statusColor: Color { provider.statusColor }

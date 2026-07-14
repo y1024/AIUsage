@@ -118,7 +118,10 @@ struct LoadingAccountCard: View {
     let providerId: String
     let title: String
     let accountLabel: String?
+    var account: ProviderAccountEntry? = nil
+    @EnvironmentObject private var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
+    @State private var pendingAccountDeletion = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -169,7 +172,7 @@ struct LoadingAccountCard: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(minHeight: 180)
+        .frame(minHeight: 148)
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16)
@@ -179,6 +182,19 @@ struct LoadingAccountCard: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05), lineWidth: 1)
         )
+        .contextMenu {
+            if let account {
+                SubscriptionAccountDestructiveMenuItems(
+                    onHide: { appState.hideAccount(account) },
+                    onRequestDelete: { pendingAccountDeletion = true }
+                )
+            }
+        }
+        .subscriptionAccountDeleteConfirmation(isPresented: $pendingAccountDeletion) {
+            if let account {
+                appState.deleteAccount(account)
+            }
+        }
     }
 }
 
@@ -190,7 +206,10 @@ struct NeedsConnectionCard: View {
     let title: String
     let accountLabel: String?
     let onConnect: () -> Void
+    var account: ProviderAccountEntry? = nil
+    @EnvironmentObject private var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
+    @State private var pendingAccountDeletion = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -248,7 +267,7 @@ struct NeedsConnectionCard: View {
                 .controlSize(.small)
             }
         }
-        .frame(minHeight: 180)
+        .frame(minHeight: 148)
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16)
@@ -258,5 +277,21 @@ struct NeedsConnectionCard: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05), lineWidth: 1)
         )
+        .contextMenu {
+            Button(action: onConnect) {
+                Label(L("Connect account", "连接账号"), systemImage: "link.badge.plus")
+            }
+            if let account {
+                SubscriptionAccountDestructiveMenuItems(
+                    onHide: { appState.hideAccount(account) },
+                    onRequestDelete: { pendingAccountDeletion = true }
+                )
+            }
+        }
+        .subscriptionAccountDeleteConfirmation(isPresented: $pendingAccountDeletion) {
+            if let account {
+                appState.deleteAccount(account)
+            }
+        }
     }
 }

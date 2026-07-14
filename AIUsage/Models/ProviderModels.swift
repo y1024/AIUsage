@@ -39,7 +39,11 @@ struct StoredProviderAccount: Identifiable, Codable, Hashable, Sendable {
     let createdAt: String
     var lastSeenAt: String?
     var isHidden: Bool
+    /// Permanent delete tombstone: suppresses rediscovery like hide, but never listed under Hidden Accounts.
+    var isPermanentlyRemoved: Bool
     var sourceFilePath: String?
+    /// Codex workspace member id (`user-…`); used with `accountId` for native dedup.
+    var workspaceUserId: String?
 
     nonisolated init(
         id: String,
@@ -53,7 +57,9 @@ struct StoredProviderAccount: Identifiable, Codable, Hashable, Sendable {
         createdAt: String,
         lastSeenAt: String?,
         isHidden: Bool = false,
-        sourceFilePath: String? = nil
+        isPermanentlyRemoved: Bool = false,
+        sourceFilePath: String? = nil,
+        workspaceUserId: String? = nil
     ) {
         self.id = id
         self.providerId = providerId
@@ -66,7 +72,9 @@ struct StoredProviderAccount: Identifiable, Codable, Hashable, Sendable {
         self.createdAt = createdAt
         self.lastSeenAt = lastSeenAt
         self.isHidden = isHidden
+        self.isPermanentlyRemoved = isPermanentlyRemoved
         self.sourceFilePath = sourceFilePath
+        self.workspaceUserId = workspaceUserId
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -82,7 +90,9 @@ struct StoredProviderAccount: Identifiable, Codable, Hashable, Sendable {
         createdAt = try container.decode(String.self, forKey: .createdAt)
         lastSeenAt = try container.decodeIfPresent(String.self, forKey: .lastSeenAt)
         isHidden = try container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+        isPermanentlyRemoved = try container.decodeIfPresent(Bool.self, forKey: .isPermanentlyRemoved) ?? false
         sourceFilePath = try container.decodeIfPresent(String.self, forKey: .sourceFilePath)
+        workspaceUserId = try container.decodeIfPresent(String.self, forKey: .workspaceUserId)
     }
 
     nonisolated var normalizedEmail: String {

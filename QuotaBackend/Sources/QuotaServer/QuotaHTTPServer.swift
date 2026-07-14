@@ -58,6 +58,28 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         let stream: Bool?
     }
 
+    /// 把 DecodingError 收成可日志的路径摘要（不含 body / token 原文）。
+    static func describeDecodingFailure(_ error: Error) -> String {
+        guard let decoding = error as? DecodingError else {
+            return error.localizedDescription
+        }
+        func path(_ context: DecodingError.Context) -> String {
+            context.codingPath.map(\.stringValue).joined(separator: ".")
+        }
+        switch decoding {
+        case .keyNotFound(let key, let context):
+            return "keyNotFound:\(key.stringValue) at \(path(context))"
+        case .typeMismatch(let type, let context):
+            return "typeMismatch:\(type) at \(path(context))"
+        case .valueNotFound(let type, let context):
+            return "valueNotFound:\(type) at \(path(context))"
+        case .dataCorrupted(let context):
+            return "dataCorrupted at \(path(context)): \(context.debugDescription)"
+        @unknown default:
+            return String(describing: decoding)
+        }
+    }
+
     let host: String
     let port: Int
     private let startupToken: String?
@@ -470,7 +492,8 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             if proxyService != nil, cleanPath == "/v1/messages" {
                 // 单次解码：一次拿到 stream 标志与完整请求，流式/非流式 handler 直接复用，
                 // 不再「JSONSerialization 全量建图读 stream + handler 再 JSONDecoder 解一遍」。
-                if let claudeRequest = try? Self.requestDecoder.decode(ClaudeMessageRequest.self, from: request.body) {
+                do {
+                    let claudeRequest = try Self.requestDecoder.decode(ClaudeMessageRequest.self, from: request.body)
                     if claudeRequest.stream == true {
                         await handleStreamingProxy(connection, request: request, claudeRequest: claudeRequest)
                     } else {
@@ -483,8 +506,12 @@ public final class QuotaHTTPServer: @unchecked Sendable {
                         connection.cancel()
                     }
                     return
+                } catch {
+                    httpLog.error(
+                        "Failed to parse Claude /v1/messages body (\(request.body.count) bytes): \(Self.describeDecodingFailure(error), privacy: .public)"
+                    )
+                    // 解码失败：交由通用路由按非流式流程返回 400。
                 }
-                // 解码失败：交由通用路由按非流式流程返回 400。
             }
         }
 

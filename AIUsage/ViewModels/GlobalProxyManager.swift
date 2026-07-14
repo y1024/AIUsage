@@ -38,6 +38,7 @@ final class GlobalProxyManager: ObservableObject {
 
     var isEnabled: Bool { config.isEnabled }
     var activeNodeId: String? { config.activeNodeId }
+    var isProxyRunning: Bool { runtime.isProcessRunning }
 
     /// 可参与全局代理的节点（由适配器按轨/接口筛选）。
     func availableNodes() -> [GlobalProxyNodeRef] { adapter.availableNodes(config: config) }
@@ -155,6 +156,32 @@ final class GlobalProxyManager: ObservableObject {
         } catch {
             operationError = error.localizedDescription
             globalProxyManagerLog.error("Failed to switch global proxy node (\(self.track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// 节点配置已变（例如 CPA 从 convert 切到 Anthropic 透传）时，对当前激活节点强制再推上游。
+    func reapplyActiveUpstream() async {
+        guard !isBusy else { return }
+        guard config.isEnabled, runtime.isProcessRunning,
+              let nodeId = config.activeNodeId else { return }
+        isBusy = true
+        operationError = nil
+        defer { isBusy = false }
+
+        guard let node = node(for: nodeId),
+              let payload = adapter.switchPayload(config: config, nodeId: nodeId) else { return }
+        do {
+            try await runtime.switchUpstream(
+                payload: payload,
+                adminPath: adapter.adminPath(config: config),
+                nodeId: node.id,
+                nodeName: node.name
+            )
+        } catch {
+            operationError = error.localizedDescription
+            globalProxyManagerLog.error(
+                "Failed to reapply global proxy upstream (\(self.track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)"
+            )
         }
     }
 

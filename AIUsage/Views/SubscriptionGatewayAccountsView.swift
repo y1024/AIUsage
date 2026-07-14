@@ -3,34 +3,8 @@ import Foundation
 import SwiftUI
 
 // MARK: - CPA Account Center
-// 账号中心只展示已经真实存在于 CPA 的上游（OAuth、插件、导入文件、AIUsage
-// 托管副本、API 兼容上游）。尚未同步的 AIUsage 账号不再混入主列表，只保留
-// 顶部“可从 AIUsage 接入 N 个账号”的紧凑入口，点击后进入“添加上游”向导的
-// “从 AIUsage 接入”分区。
-
-private enum GatewayAccountFilter: String, CaseIterable, Hashable {
-    case all
-    case ready
-    case attention
-    case paused
-    case fromAIUsage
-
-    var title: String {
-        switch self {
-        case .all: L("All", "全部")
-        case .ready: L("Ready", "可用")
-        case .attention: L("Attention", "异常")
-        case .paused: L("Paused", "已停用")
-        case .fromAIUsage: L("From AIUsage", "来自 AIUsage")
-        }
-    }
-}
-
-private struct GatewayAccountGroup: Identifiable {
-    let providerID: String
-    let files: [CLIProxyAuthFile]
-    var id: String { providerID }
-}
+// 账号中心只展示已经真实存在于 CPA 的上游。尚未同步的 AIUsage 账号走顶部
+// 「可从 AIUsage 接入」入口。列表行 UI 见 GatewayAccountRow；筛选/计数见 GatewayAccountListLogic。
 
 struct SubscriptionGatewayAccountsView: View {
     @ObservedObject var manager: CLIProxyGatewayManager
@@ -45,25 +19,24 @@ struct SubscriptionGatewayAccountsView: View {
     @State private var upstreamSection: GatewayUpstreamSection = .oauth
 
     var body: some View {
-        let groups = filteredGroups
-        let linkedCandidates = linkedCandidateByAuthFileName
+        let syncStates = GatewayAccountListLogic.syncStatesByAuthFileName(manager: manager)
+        let groups = GatewayAccountListLogic.filteredGroups(
+            authFiles: manager.authFiles,
+            query: query,
+            filter: filter,
+            syncStatesByAuthFileName: syncStates
+        )
+        let linkedCandidates = GatewayAccountListLogic.linkedCandidateByAuthFileName(manager: manager)
+
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 errorBanners
                 GatewaySectionTitle(
                     title: L("Account center", "账号中心"),
-                    subtitle: L(
-                        "Upstreams that actually exist in CPA: OAuth accounts, plugin accounts, imported auth files, AIUsage-managed copies, and API upstreams.",
-                        "此处只展示真实存在于 CPA 的上游：OAuth 账号、插件账号、导入的认证文件、AIUsage 托管副本与 API 兼容上游。"
-                    ),
-                    actionTitle: L("Add Upstream", "添加上游"),
-                    actionSystemImage: "plus"
-                ) {
-                    upstreamSection = .oauth
-                    showAddAccount = true
-                }
+                    subtitle: L("Upstreams already in CPA. Use Add Upstream in the top bar.", "已在 CPA 中的上游。添加请用顶部「添加上游」。")
+                )
 
-                summaryRow
+                summaryRow(syncStates: syncStates)
                 if unsyncedCandidateCount > 0 { aiusageEntryCard }
                 toolbar
 
@@ -116,6 +89,8 @@ struct SubscriptionGatewayAccountsView: View {
         }
     }
 
+    // MARK: - Banners & Summary
+
     @ViewBuilder
     private var errorBanners: some View {
         if let error = manager.lastError { GatewayErrorBanner(message: error) }
@@ -149,38 +124,53 @@ struct SubscriptionGatewayAccountsView: View {
         }
     }
 
-    private var summaryRow: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 165), spacing: 10)], spacing: 10) {
-            summaryChip(
-                value: manager.authFiles.count,
-                title: L("in CPA", "CPA 账号"),
-                icon: "person.2.fill",
-                tint: .indigo
-            )
-            summaryChip(
-                value: readyCount,
-                title: L("ready", "可用"),
-                icon: "checkmark.circle.fill",
-                tint: .green
-            )
-            summaryChip(
-                value: attentionCount,
-                title: L("need attention", "需要处理"),
-                icon: "exclamationmark.triangle.fill",
-                tint: .orange
-            )
-            summaryChip(
-                value: managedCopyCount,
-                title: L("from AIUsage", "AIUsage 副本"),
-                icon: "arrow.right.circle.fill",
-                tint: .blue
-            )
-        }
+    private func summaryRow(syncStates: [String: CLIProxyAccountSyncState]) -> some View {
+        let attention = GatewayAccountListLogic.attentionCount(
+            in: manager.authFiles,
+            deduplicationConflicts: manager.authDeduplicationConflictCount,
+            hasSyncManifestError: manager.syncManifestError != nil,
+            syncStatesByAuthFileName: syncStates
+        )
+        return GatewayStatCapsuleRow(
+            items: [
+                .init(
+                    id: "all",
+                    value: "\(manager.authFiles.count)",
+                    title: L("in CPA", "CPA 账号"),
+                    systemImage: "person.2.fill",
+                    tint: .indigo
+                ),
+                .init(
+                    id: "ready",
+                    value: "\(GatewayAccountListLogic.readyCount(in: manager.authFiles, syncStatesByAuthFileName: syncStates))",
+                    title: L("ready", "可用"),
+                    systemImage: "checkmark.circle.fill",
+                    tint: .green
+                ),
+                .init(
+                    id: "attention",
+                    value: "\(attention)",
+                    title: L("need attention", "需要处理"),
+                    systemImage: "exclamationmark.triangle.fill",
+                    tint: .orange
+                ),
+                .init(
+                    id: "fromAIUsage",
+                    value: "\(GatewayAccountListLogic.managedCopyCount(in: manager.authFiles))",
+                    title: L("from AIUsage", "AIUsage 副本"),
+                    systemImage: "arrow.right.circle.fill",
+                    tint: .blue
+                ),
+            ],
+            selectedId: filter.rawValue,
+            onSelect: { id in
+                if let next = GatewayAccountFilter(rawValue: id) {
+                    withAnimation(.easeInOut(duration: 0.15)) { filter = next }
+                }
+            }
+        )
     }
 
-    /// The compact entry replacing candidate rows in the main list. It leads
-    /// straight to the wizard's "From AIUsage" section, which only lists
-    /// accounts with a verified conversion adapter.
     private var aiusageEntryCard: some View {
         Button {
             upstreamSection = .aiusage
@@ -229,6 +219,8 @@ struct SubscriptionGatewayAccountsView: View {
         .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(Color.primary.opacity(0.055)))
     }
 
+    // MARK: - Toolbar
+
     private var toolbar: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 12) {
@@ -262,21 +254,18 @@ struct SubscriptionGatewayAccountsView: View {
             }
         }
         .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .frame(maxWidth: 290)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 9))
+        .padding(.vertical, 7)
+        .frame(maxWidth: 240)
+        .background(Color.primary.opacity(0.045), in: Capsule())
     }
 
     private var filterPicker: some View {
-        Picker(L("Account filter", "账号筛选"), selection: $filter) {
-            ForEach(GatewayAccountFilter.allCases, id: \.self) { value in
-                Text(value.title).tag(value)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(maxWidth: 430)
-        .accessibilityLabel(L("Account filter", "账号筛选"))
+        GatewayCapsuleFilterBar(
+            values: GatewayAccountFilter.allCases,
+            selection: $filter,
+            title: { $0.title }
+        )
+        .frame(maxWidth: 520)
     }
 
     private var refreshButton: some View {
@@ -292,218 +281,55 @@ struct SubscriptionGatewayAccountsView: View {
         }
     }
 
+    // MARK: - Groups & Rows
+
     private func providerGroup(
         _ group: GatewayAccountGroup,
         linkedCandidates: [String: CLIProxyAccountSyncCandidate]
     ) -> some View {
         GatewayCard(padding: 0) {
             VStack(spacing: 0) {
-                HStack(spacing: 11) {
-                    GatewayProviderIcon(providerID: group.providerID, size: 38)
-                    Text(gatewayProviderDisplayName(group.providerID)).font(.headline)
+                HStack(spacing: 10) {
+                    GatewayProviderIcon(providerID: group.providerID, size: 26)
+                    Text(gatewayProviderDisplayName(group.providerID))
+                        .font(.subheadline.weight(.semibold))
                     Text("\(group.files.count)")
-                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .font(.caption2.weight(.semibold).monospacedDigit())
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
                         .background(Color.primary.opacity(0.055), in: Capsule())
                     Spacer()
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
 
                 Divider()
 
                 ForEach(Array(group.files.enumerated()), id: \.element.id) { index, file in
-                    authRow(
-                        file,
-                        linkedCandidate: linkedCandidates[file.name.lowercased()]
+                    let linked = linkedCandidates[file.name.lowercased()]
+                    GatewayAccountRow(
+                        file: file,
+                        identity: manager.accountIdentity(for: file),
+                        linkedCandidate: linked,
+                        syncState: linked.map { manager.syncStatus(for: $0) },
+                        syncMode: linked.flatMap { manager.syncMode(for: $0) },
+                        isBusy: manager.isManagingAccounts,
+                        onOpenDetail: { selectedDetail = file },
+                        onRequestSync: requestSync,
+                        onSetEnabled: { enabled in
+                            Task { await manager.setAuthFile(file, disabled: !enabled) }
+                        },
+                        onSetSyncMode: { candidate, mode in
+                            Task { await manager.setSyncMode(candidate, mode: mode) }
+                        },
+                        onDelete: { pendingDeletion = file }
                     )
                     if index < group.files.count - 1 {
-                        Divider().padding(.leading, 70)
+                        Divider().padding(.leading, 56)
                     }
                 }
             }
-        }
-    }
-
-    private func authRow(
-        _ file: CLIProxyAuthFile,
-        linkedCandidate: CLIProxyAccountSyncCandidate?
-    ) -> some View {
-        let identitySummary = gatewayNativeIdentitySummary(manager.accountIdentity(for: file))
-        return HStack(spacing: 13) {
-            GatewayProviderIcon(providerID: file.gatewayProviderID, size: 42)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(file.displayLabel)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                HStack(spacing: 7) {
-                    authStatusPill(file)
-                    if let linkedCandidate {
-                        syncStatePill(manager.syncStatus(for: linkedCandidate))
-                    }
-                }
-                Text(file.gatewaySourceTitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let identitySummary {
-                    Text(identitySummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                if file.gatewayNeedsAttention, let message = file.statusMessage, !message.isEmpty {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .lineLimit(2)
-                } else if let note = file.gatewayVisibleNote {
-                    Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 12)
-
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 13) {
-                    if let priority = file.priority {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(L("Priority", "优先级")).font(.caption2).foregroundStyle(.secondary)
-                            Text("\(priority)").font(.caption.monospacedDigit())
-                        }
-                    }
-
-                    if file.success > 0 || file.failed > 0 {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(L("Requests", "请求")).font(.caption2).foregroundStyle(.secondary)
-                            HStack(spacing: 5) {
-                                Text("✓ \(file.success)").foregroundStyle(.green)
-                                if file.failed > 0 { Text("× \(file.failed)").foregroundStyle(.orange) }
-                            }
-                            .font(.caption.monospacedDigit())
-                        }
-                    }
-                }
-                EmptyView()
-            }
-
-            if let linkedCandidate {
-                Button {
-                    requestSync(linkedCandidate)
-                } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                }
-                .buttonStyle(.borderless)
-                .help(L("Resync the AIUsage copy", "重新同步 AIUsage 副本"))
-                .accessibilityLabel(L("Resync \(file.displayLabel)", "重新同步 \(file.displayLabel)"))
-                .disabled(manager.isManagingAccounts)
-            }
-
-            Toggle(
-                L("Enable \(file.displayLabel)", "启用 \(file.displayLabel)"),
-                isOn: Binding(
-                    get: { !file.disabled },
-                    set: { enabled in Task { await manager.setAuthFile(file, disabled: !enabled) } }
-                )
-            )
-            .labelsHidden()
-            .accessibilityLabel(L("Enable account \(file.displayLabel)", "启用账号 \(file.displayLabel)"))
-            .disabled(manager.isManagingAccounts)
-
-            Button {
-                selectedDetail = file
-            } label: {
-                Image(systemName: "info.circle")
-            }
-            .buttonStyle(.borderless)
-            .help(L("Account details", "账号详情"))
-            .accessibilityLabel(L("Show details for \(file.displayLabel)", "查看 \(file.displayLabel) 的详情"))
-
-            Menu {
-                Button {
-                    selectedDetail = file
-                } label: {
-                    Label(L("Account Details", "账号详情"), systemImage: "info.circle")
-                }
-                if let linkedCandidate {
-                    Button {
-                        requestSync(linkedCandidate)
-                    } label: {
-                        Label(L("Resync from AIUsage", "从 AIUsage 重新同步"), systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    Menu {
-                        Button {
-                            Task { await manager.setSyncMode(linkedCandidate, mode: .manualCopy) }
-                        } label: {
-                            if manager.syncMode(for: linkedCandidate) != .keepUpdated {
-                                Label(L("Manual copy", "手动同步副本"), systemImage: "checkmark")
-                            } else {
-                                Text(L("Manual copy", "手动同步副本"))
-                            }
-                        }
-                        Button {
-                            Task { await manager.setSyncMode(linkedCandidate, mode: .keepUpdated) }
-                        } label: {
-                            if manager.syncMode(for: linkedCandidate) == .keepUpdated {
-                                Label(L("Keep updated", "保持单向同步"), systemImage: "checkmark")
-                            } else {
-                                Text(L("Keep updated", "保持单向同步"))
-                            }
-                        }
-                    } label: {
-                        Label(L("Sync mode", "同步模式"), systemImage: "arrow.left.arrow.right")
-                    }
-                }
-                Divider()
-                Button(role: .destructive) { pendingDeletion = file } label: {
-                    Label(L("Remove from CPA", "从 CPA 删除"), systemImage: "trash")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(width: 24, height: 24)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel(L("More actions for \(file.displayLabel)", "\(file.displayLabel) 的更多操作"))
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 13)
-        .contentShape(Rectangle())
-        .onTapGesture { selectedDetail = file }
-        .accessibilityAction(named: L("Show account details", "查看账号详情")) {
-            selectedDetail = file
-        }
-    }
-
-    private func authStatusPill(_ file: CLIProxyAuthFile) -> some View {
-        if file.disabled {
-            return GatewayStatusPill(text: L("Paused", "已停用"), color: .secondary, systemImage: "pause.circle.fill")
-        }
-        if file.gatewayNeedsAttention {
-            return GatewayStatusPill(text: L("Attention", "需要处理"), color: .orange, systemImage: "exclamationmark.triangle.fill")
-        }
-        if file.gatewayProviderID == "unknown" {
-            return GatewayStatusPill(text: L("Unrecognized · review", "无法识别 · 需要检查"), color: .orange, systemImage: "questionmark.circle.fill")
-        }
-        let text = file.status?.isEmpty == false ? file.status!.capitalized : L("Ready", "可用")
-        return GatewayStatusPill(text: text, color: .green, systemImage: "checkmark.circle.fill")
-    }
-
-    private func syncStatePill(_ state: CLIProxyAccountSyncState) -> GatewayStatusPill {
-        switch state {
-        case .notSynced:
-            return GatewayStatusPill(text: L("Not connected", "未接入"), color: .secondary, systemImage: "circle")
-        case .current:
-            return GatewayStatusPill(text: L("Synced", "副本最新"), color: .blue, systemImage: "checkmark.circle.fill")
-        case .sourceChanged:
-            return GatewayStatusPill(text: L("AIUsage changed", "AIUsage 已更新"), color: .orange, systemImage: "arrow.up.circle.fill")
-        case .cpaChanged:
-            return GatewayStatusPill(text: L("CPA changed", "CPA 副本已修改"), color: .orange, systemImage: "pencil.circle.fill")
-        case .conflict:
-            return GatewayStatusPill(text: L("Sync conflict", "同步冲突"), color: .red, systemImage: "exclamationmark.triangle.fill")
-        case .missing:
-            return GatewayStatusPill(text: L("CPA copy missing", "CPA 副本缺失"), color: .orange, systemImage: "questionmark.circle.fill")
         }
     }
 
@@ -515,6 +341,8 @@ struct SubscriptionGatewayAccountsView: View {
             Task { await manager.syncAccount(candidate) }
         }
     }
+
+    // MARK: - Empty / Stopped
 
     private var serviceStoppedState: some View {
         GatewayCard {
@@ -555,7 +383,9 @@ struct SubscriptionGatewayAccountsView: View {
                 Image(systemName: query.isEmpty ? "person.2.badge.plus" : "magnifyingglass")
                     .font(.system(size: 34))
                     .foregroundStyle(.indigo)
-                Text(query.isEmpty ? L("No upstreams in this view", "当前没有上游账号") : L("No matching accounts", "没有匹配的账号"))
+                Text(query.isEmpty
+                     ? L("No upstreams in this view", "当前没有上游账号")
+                     : L("No matching accounts", "没有匹配的账号"))
                     .font(.headline)
                 Text(query.isEmpty
                      ? L("Add an upstream with CPA OAuth, an official plugin, an AIUsage copy, an API key, or a migrated auth file.", "可通过 CPA OAuth、官方插件、AIUsage 副本、API Key 或迁移认证文件添加上游。")
@@ -574,68 +404,8 @@ struct SubscriptionGatewayAccountsView: View {
         }
     }
 
-    private var filteredGroups: [GatewayAccountGroup] {
-        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let files = manager.authFiles.filter { file in
-            let searchText = [file.displayLabel, file.displayProvider, file.name, file.note ?? ""]
-                .joined(separator: " ").lowercased()
-            let matchesSearch = normalizedQuery.isEmpty || searchText.contains(normalizedQuery)
-            guard matchesSearch else { return false }
-            switch filter {
-            case .all: return true
-            case .ready: return !file.disabled && !file.gatewayNeedsAttention
-            case .attention: return file.gatewayNeedsAttention
-            case .paused: return file.disabled
-            case .fromAIUsage: return file.name.lowercased().hasPrefix("aiusage-")
-            }
-        }
-        return Dictionary(grouping: files, by: \.gatewayProviderID)
-            .map { GatewayAccountGroup(providerID: $0.key, files: $0.value) }
-            .sorted {
-                gatewayProviderDisplayName($0.providerID)
-                    .localizedStandardCompare(gatewayProviderDisplayName($1.providerID)) == .orderedAscending
-            }
-    }
-
-    private var linkedCandidateByAuthFileName: [String: CLIProxyAccountSyncCandidate] {
-        let candidatesByIdentity = manager.syncCandidates.reduce(
-            into: [String: CLIProxyAccountSyncCandidate]()
-        ) { result, candidate in
-            result["\(candidate.providerId.lowercased()):\(candidate.credentialId.lowercased())"] = candidate
-        }
-        var result: [String: CLIProxyAccountSyncCandidate] = [:]
-        for record in manager.syncRecords {
-            let identity = "\(record.providerId.lowercased()):\(record.credentialId.lowercased())"
-            if let candidate = candidatesByIdentity[identity] {
-                result[record.authFileName.lowercased()] = candidate
-            }
-        }
-        for candidate in manager.syncCandidates {
-            let fileName = manager.authFileName(for: candidate).lowercased()
-            if result[fileName] == nil { result[fileName] = candidate }
-        }
-        return result
-    }
-
-    private var readyCount: Int {
-        manager.authFiles.filter { !$0.disabled && !$0.gatewayNeedsAttention }.count
-    }
-
-    private var attentionCount: Int {
-        manager.authFiles.filter(\.gatewayNeedsAttention).count
-            + manager.authDeduplicationConflictCount
-            + (manager.syncManifestError == nil ? 0 : 1)
-    }
-
-    private var managedCopyCount: Int {
-        manager.authFiles.filter { $0.name.lowercased().hasPrefix("aiusage-") }.count
-    }
-
     private var unsyncedCandidateCount: Int {
-        manager.syncCandidates.filter { candidate in
-            guard case .compatible = candidate.compatibility else { return false }
-            return !manager.isSynced(candidate)
-        }.count
+        GatewayAccountListLogic.unsyncedCandidateCount(manager: manager)
     }
 
     private func beginAccountPrerequisite() {
@@ -645,18 +415,5 @@ struct SubscriptionGatewayAccountsView: View {
             await runtime.start()
             if runtime.state.isRunning { await manager.refreshAccounts() }
         }
-    }
-}
-
-private extension CLIProxyAuthFile {
-    var gatewayVisibleNote: String? {
-        guard let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty else {
-            return nil
-        }
-        let normalized = note.lowercased()
-        if normalized == "synced from aiusage" || normalized == "来自 aiusage 的同步副本" {
-            return nil
-        }
-        return note
     }
 }

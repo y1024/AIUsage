@@ -62,9 +62,14 @@
 		5EFREF222F93000100A15674 /* ProviderRefreshCoordinator+FetchPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFREF212F93000100A15674 /* ProviderRefreshCoordinator+FetchPipeline.swift */; };
 		5EFREF322F93000100A15674 /* ProviderRefreshCoordinator+Conversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFREF312F93000100A15674 /* ProviderRefreshCoordinator+Conversion.swift */; };
 		5EFSCD012F99003100A15674 /* DashboardStatCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSCD002F99003100A15674 /* DashboardStatCards.swift */; };
+		5EFDAQ012F99005000A15674 /* DashboardQuotaAttentionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFDAQ002F99005000A15674 /* DashboardQuotaAttentionSection.swift */; };
+		5EFASR012F99006000A15674 /* AppSurfaceTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFASR002F99006000A15674 /* AppSurfaceTokens.swift */; };
 		5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSNV002F99003300A15674 /* SidebarNavigation.swift */; };
 		5EFSSB012F99003400A15674 /* SettingsView+Sidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */; };
 		5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSTC002F99003200A15674 /* DashboardStateCards.swift */; };
+		5EFSAA012F99004000A15674 /* SubscriptionAccountActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSAA002F99004000A15674 /* SubscriptionAccountActions.swift */; };
+		5EFSAL012F99004100A15674 /* SubscriptionAccountListModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSAL002F99004100A15674 /* SubscriptionAccountListModels.swift */; };
+		5EFSAS012F99004200A15674 /* SubscriptionAppScopeControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFSAS002F99004200A15674 /* SubscriptionAppScopeControl.swift */; };
 		7A3790A33E2F7B1157812AA1 /* ScienceRealAdopt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C8773DDEF6B585EC2A61FE2 /* ScienceRealAdopt.swift */; };
 		AB01SCAP01F92000000A15674 /* ScienceAuthProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01SCAP02F92000000A15674 /* ScienceAuthProxy.swift */; };
 		AB01SCAP03F92000000A15674 /* ScienceAuthProxy+Helpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB01SCAP04F92000000A15674 /* ScienceAuthProxy+Helpers.swift */; };
@@ -100,6 +105,7 @@
 		B1AP00012FA1000100A15674 /* APIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00002FA1000100A15674 /* APIProvider.swift */; };
 		B1AP00112FA1000100A15674 /* APIProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00102FA1000100A15674 /* APIProviderStore.swift */; };
 		B1AP00212FA1000100A15674 /* APIProviderDistributor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00202FA1000100A15674 /* APIProviderDistributor.swift */; };
+		B1AP00312FA1000200A15674 /* APIProviderCPALinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00302FA1000200A15674 /* APIProviderCPALinkStore.swift */; };
 		B1AP00312FA1000100A15674 /* APIProviderListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00302FA1000100A15674 /* APIProviderListView.swift */; };
 		B1AP00412FA1000100A15674 /* APIProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00402FA1000100A15674 /* APIProviderCard.swift */; };
 		B1AP00512FA1000100A15674 /* APIProviderEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AP00502FA1000100A15674 /* APIProviderEditorView.swift */; };
@@ -138,6 +144,9 @@
 		C1CPA0192FD000D000B26789 /* SubscriptionGatewayComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0182FD000D000B26789 /* SubscriptionGatewayComponents.swift */; };
 		C1CPA01B2FD000E000B26789 /* SubscriptionGatewayOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA01A2FD000E000B26789 /* SubscriptionGatewayOverviewView.swift */; };
 		C1CPA01D2FD000F000B26789 /* SubscriptionGatewayAccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA01C2FD000F000B26789 /* SubscriptionGatewayAccountsView.swift */; };
+		C1CPA0432FD0027000B26789 /* GatewayAccountRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0422FD0027000B26789 /* GatewayAccountRow.swift */; };
+		C1CPA0452FD0028000B26789 /* GatewayChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0442FD0028000B26789 /* GatewayChrome.swift */; };
+		C1CPA0412FD0026000B26789 /* GatewayAccountListModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0402FD0026000B26789 /* GatewayAccountListModels.swift */; };
 		C1CPA01F2FD0010000B26789 /* SubscriptionGatewayConnectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA01E2FD0010000B26789 /* SubscriptionGatewayConnectionsView.swift */; };
 		C1CPA0212FD0011000B26789 /* SubscriptionGatewaySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA0202FD0011000B26789 /* SubscriptionGatewaySettingsView.swift */; };
 		C1CPA00D2FD0007000B26789 /* CLIProxySecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CPA00C2FD0007000B26789 /* CLIProxySecretStore.swift */; };
@@ -264,9 +273,14 @@
 		5EFREF212F93000100A15674 /* ProviderRefreshCoordinator+FetchPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProviderRefreshCoordinator+FetchPipeline.swift"; sourceTree = "<group>"; };
 		5EFREF312F93000100A15674 /* ProviderRefreshCoordinator+Conversion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProviderRefreshCoordinator+Conversion.swift"; sourceTree = "<group>"; };
 		5EFSCD002F99003100A15674 /* DashboardStatCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStatCards.swift; sourceTree = "<group>"; };
+		5EFDAQ002F99005000A15674 /* DashboardQuotaAttentionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardQuotaAttentionSection.swift; sourceTree = "<group>"; };
+		5EFASR002F99006000A15674 /* AppSurfaceTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSurfaceTokens.swift; sourceTree = "<group>"; };
 		5EFSNV002F99003300A15674 /* SidebarNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarNavigation.swift; sourceTree = "<group>"; };
 		5EFSSB002F99003400A15674 /* SettingsView+Sidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+Sidebar.swift"; sourceTree = "<group>"; };
 		5EFSTC002F99003200A15674 /* DashboardStateCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardStateCards.swift; sourceTree = "<group>"; };
+		5EFSAA002F99004000A15674 /* SubscriptionAccountActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionAccountActions.swift; sourceTree = "<group>"; };
+		5EFSAL002F99004100A15674 /* SubscriptionAccountListModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionAccountListModels.swift; sourceTree = "<group>"; };
+		5EFSAS002F99004200A15674 /* SubscriptionAppScopeControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionAppScopeControl.swift; sourceTree = "<group>"; };
 		7EFAD0012F87AC7100A15674 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		82D41358A2C2078B7BFD2F91 /* ScienceProxyManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceProxyManager.swift; sourceTree = "<group>"; };
 		87DC6FD8E42B87DB056A69CB /* ScienceProxyManagementView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScienceProxyManagementView.swift; sourceTree = "<group>"; };
@@ -298,6 +312,7 @@
 		B1AP00002FA1000100A15674 /* APIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProvider.swift; sourceTree = "<group>"; };
 		B1AP00102FA1000100A15674 /* APIProviderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderStore.swift; sourceTree = "<group>"; };
 		B1AP00202FA1000100A15674 /* APIProviderDistributor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderDistributor.swift; sourceTree = "<group>"; };
+		B1AP00302FA1000200A15674 /* APIProviderCPALinkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderCPALinkStore.swift; sourceTree = "<group>"; };
 		B1AP00302FA1000100A15674 /* APIProviderListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderListView.swift; sourceTree = "<group>"; };
 		B1AP00402FA1000100A15674 /* APIProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderCard.swift; sourceTree = "<group>"; };
 		B1AP00502FA1000100A15674 /* APIProviderEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIProviderEditorView.swift; sourceTree = "<group>"; };
@@ -334,6 +349,9 @@
 		C1CPA0182FD000D000B26789 /* SubscriptionGatewayComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayComponents.swift; sourceTree = "<group>"; };
 		C1CPA01A2FD000E000B26789 /* SubscriptionGatewayOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayOverviewView.swift; sourceTree = "<group>"; };
 		C1CPA01C2FD000F000B26789 /* SubscriptionGatewayAccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionGatewayAccountsView.swift; sourceTree = "<group>"; };
+		C1CPA0402FD0026000B26789 /* GatewayAccountListModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayAccountListModels.swift; sourceTree = "<group>"; };
+		C1CPA0422FD0027000B26789 /* GatewayAccountRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayAccountRow.swift; sourceTree = "<group>"; };
+		C1CPA0442FD0028000B26789 /* GatewayChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatewayChrome.swift; sourceTree = "<group>"; };
 		C1CPA0302FD0020000B26789 /* CLIProxyUpstreamCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProxyUpstreamCapability.swift; sourceTree = "<group>"; };
 		C1CPA0322FD0021000B26789 /* CLIProxyAuthImportPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLIProxyAuthImportPlanner.swift; sourceTree = "<group>"; };
 		C1CPA0342FD0022000B26789 /* CLIProxyGatewayManager+Import.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CLIProxyGatewayManager+Import.swift"; sourceTree = "<group>"; };
@@ -438,6 +456,7 @@
 				B1GP00402F97002000A15674 /* GlobalProxyTrackAdapters.swift */,
 				B1AP00102FA1000100A15674 /* APIProviderStore.swift */,
 				B1AP00202FA1000100A15674 /* APIProviderDistributor.swift */,
+				B1AP00302FA1000200A15674 /* APIProviderCPALinkStore.swift */,
 				5EFREF002F93000100A15674 /* ProviderRefreshCoordinator.swift */,
 				5EFREF212F93000100A15674 /* ProviderRefreshCoordinator+FetchPipeline.swift */,
 				5EFREF312F93000100A15674 /* ProviderRefreshCoordinator+Conversion.swift */,
@@ -549,6 +568,9 @@
 				C1CPA0182FD000D000B26789 /* SubscriptionGatewayComponents.swift */,
 				C1CPA01A2FD000E000B26789 /* SubscriptionGatewayOverviewView.swift */,
 				C1CPA01C2FD000F000B26789 /* SubscriptionGatewayAccountsView.swift */,
+				C1CPA0402FD0026000B26789 /* GatewayAccountListModels.swift */,
+				C1CPA0422FD0027000B26789 /* GatewayAccountRow.swift */,
+				C1CPA0442FD0028000B26789 /* GatewayChrome.swift */,
 				C1CPA0362FD0023000B26789 /* SubscriptionGatewayAddUpstreamSheet.swift */,
 				C1CPA0382FD0024000B26789 /* SubscriptionGatewayImportSheet.swift */,
 				C1CPA03A2FD0025000B26789 /* SubscriptionGatewayAccountDetailSheet.swift */,
@@ -582,7 +604,12 @@
 				5EFAD7472F87AC7100A15674 /* DashboardView.swift */,
 				5EFHMP002F99002100A15674 /* DashboardView+Heatmap.swift */,
 				5EFSCD002F99003100A15674 /* DashboardStatCards.swift */,
+				5EFDAQ002F99005000A15674 /* DashboardQuotaAttentionSection.swift */,
+				5EFASR002F99006000A15674 /* AppSurfaceTokens.swift */,
 				5EFSTC002F99003200A15674 /* DashboardStateCards.swift */,
+				5EFSAA002F99004000A15674 /* SubscriptionAccountActions.swift */,
+				5EFSAL002F99004100A15674 /* SubscriptionAccountListModels.swift */,
+				5EFSAS002F99004200A15674 /* SubscriptionAppScopeControl.swift */,
 				5EFAD7482F87AC7100A15674 /* MenuBarView.swift */,
 				C1MB00012FB0000400B26789 /* MenuBarView+TrackSwitcher.swift */,
 				C1MB00A12FB0000400B26789 /* MenuBarTrackPanel.swift */,
@@ -812,6 +839,9 @@
 				C1CPA0192FD000D000B26789 /* SubscriptionGatewayComponents.swift in Sources */,
 				C1CPA01B2FD000E000B26789 /* SubscriptionGatewayOverviewView.swift in Sources */,
 				C1CPA01D2FD000F000B26789 /* SubscriptionGatewayAccountsView.swift in Sources */,
+				C1CPA0412FD0026000B26789 /* GatewayAccountListModels.swift in Sources */,
+				C1CPA0432FD0027000B26789 /* GatewayAccountRow.swift in Sources */,
+				C1CPA0452FD0028000B26789 /* GatewayChrome.swift in Sources */,
 				C1CPA01F2FD0010000B26789 /* SubscriptionGatewayConnectionsView.swift in Sources */,
 				C1CPA0212FD0011000B26789 /* SubscriptionGatewaySettingsView.swift in Sources */,
 				C1CPA00D2FD0007000B26789 /* CLIProxySecretStore.swift in Sources */,
@@ -829,7 +859,12 @@
 				5EFSNV012F99003300A15674 /* SidebarNavigation.swift in Sources */,
 				5EFHMP012F99002100A15674 /* DashboardView+Heatmap.swift in Sources */,
 				5EFSCD012F99003100A15674 /* DashboardStatCards.swift in Sources */,
+				5EFDAQ012F99005000A15674 /* DashboardQuotaAttentionSection.swift in Sources */,
+				5EFASR012F99006000A15674 /* AppSurfaceTokens.swift in Sources */,
 				5EFSTC012F99003200A15674 /* DashboardStateCards.swift in Sources */,
+				5EFSAA012F99004000A15674 /* SubscriptionAccountActions.swift in Sources */,
+				5EFSAL012F99004100A15674 /* SubscriptionAccountListModels.swift in Sources */,
+				5EFSAS012F99004200A15674 /* SubscriptionAppScopeControl.swift in Sources */,
 				5EFAD7742F87AFE700A15674 /* APIService.swift in Sources */,
 				B1REFA012F97002000A15674 /* ProxyRuntimeService.swift in Sources */,
 				B1PA00012F97002000A15674 /* ProxyPortArbiter.swift in Sources */,
@@ -840,6 +875,7 @@
 				B1AP00012FA1000100A15674 /* APIProvider.swift in Sources */,
 				B1AP00112FA1000100A15674 /* APIProviderStore.swift in Sources */,
 				B1AP00212FA1000100A15674 /* APIProviderDistributor.swift in Sources */,
+				B1AP00312FA1000200A15674 /* APIProviderCPALinkStore.swift in Sources */,
 				B1AP00312FA1000100A15674 /* APIProviderListView.swift in Sources */,
 				B1AP00412FA1000100A15674 /* APIProviderCard.swift in Sources */,
 				B1AP00512FA1000100A15674 /* APIProviderEditorView.swift in Sources */,
@@ -1146,7 +1182,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.14.4;
+				MARKETING_VERSION = 0.14.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1178,7 +1214,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.14.4;
+				MARKETING_VERSION = 0.14.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aiusage.desktop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

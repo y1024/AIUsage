@@ -30,10 +30,19 @@ enum CLIProxyGatewaySection: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .overview: "square.grid.2x2"
-        case .accounts: "person.2"
+        case .overview: "square.grid.2x2.fill"
+        case .accounts: "person.2.fill"
         case .connections: "arrow.triangle.branch"
-        case .settings: "gearshape.2"
+        case .settings: "gearshape.fill"
+        }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .overview: Color(red: 0.28, green: 0.50, blue: 0.96)
+        case .accounts: Color(red: 0.42, green: 0.36, blue: 0.90)
+        case .connections: Color(red: 0.12, green: 0.62, blue: 0.58)
+        case .settings: Color(red: 0.45, green: 0.50, blue: 0.58)
         }
     }
 }
@@ -82,22 +91,24 @@ struct GatewaySectionTitle: View {
     var action: (() -> Void)?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.title3.weight(.bold))
                     .accessibilityAddTraits(.isHeader)
                 Text(subtitle)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 16)
+            Spacer(minLength: 12)
             if let actionTitle, let action {
                 Button(action: action) {
                     Label(actionTitle, systemImage: actionSystemImage)
+                        .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
             }
         }
     }
@@ -319,6 +330,15 @@ extension CLIProxyAuthFile {
         return L("CPA OAuth or imported file", "CPA OAuth 或导入文件")
     }
 
+    /// 列表副行用的短来源词，避免把完整句子塞进紧凑行。
+    var gatewaySourceShortTitle: String {
+        if name.hasPrefix("aiusage-") { return "AIUsage" }
+        if runtimeOnly { return L("Runtime", "运行时") }
+        if source?.lowercased().contains("plugin") == true { return L("Plugin", "插件") }
+        if source?.lowercased().contains("config") == true { return "API Key" }
+        return "OAuth"
+    }
+
     var gatewayNeedsAttention: Bool {
         guard !disabled else { return false }
         if unavailable { return true }
@@ -379,6 +399,7 @@ extension ProxyTarget {
         case .codex: "codex"
         case .claude: "claude"
         case .openCode: "opencode"
+        case .cpa: "cpa"
         }
     }
 
@@ -387,6 +408,7 @@ extension ProxyTarget {
         case .codex: "Codex"
         case .claude: L("Claude family", "Claude 系列")
         case .openCode: "OpenCode"
+        case .cpa: "CPA"
         }
     }
 
@@ -395,6 +417,7 @@ extension ProxyTarget {
         case .codex: "Codex CLI"
         case .claude: "Code · Science"
         case .openCode: "OpenCode"
+        case .cpa: L("OpenAI-compatible upstream", "OpenAI 兼容上游")
         }
     }
 }

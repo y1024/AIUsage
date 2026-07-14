@@ -85,6 +85,20 @@ final class CLIProxyGatewayManager: ObservableObject {
     @Published private(set) var oauthFlowState: CLIProxyOAuthFlowState = .idle
     @Published private(set) var currentDistributionTargets: Set<ProxyTarget> = []
     @Published private(set) var managedProviderExists = false
+    /// CPA→OpenCode 托管节点使用的协议（独立于主配置 Responses，可在接入页选择）。
+    @Published var managedOpenCodeProtocol: OpenCodeProtocol = .openAIResponses {
+        didSet {
+            guard managedOpenCodeProtocol != oldValue else { return }
+            UserDefaults.standard.set(managedOpenCodeProtocol.rawValue, forKey: Self.openCodeProtocolDefaultsKey)
+        }
+    }
+    /// CPA→Claude/Science 共用形态（透传 / 转换）；接入页右键选择。
+    @Published var managedClaudeProtocol: ManagedClaudeProtocol = .anthropicPassthrough {
+        didSet {
+            guard managedClaudeProtocol != oldValue else { return }
+            UserDefaults.standard.set(managedClaudeProtocol.rawValue, forKey: Self.claudeProtocolDefaultsKey)
+        }
+    }
     @Published private(set) var isApplyingDistribution = false
     @Published private(set) var pluginsEnabled = false
     @Published private(set) var providerPlugins: [CLIProxyPlugin] = []
@@ -132,6 +146,10 @@ final class CLIProxyGatewayManager: ObservableObject {
 
     var isInstalled: Bool { currentVersion != nil }
 
+    static let managedProviderID = "aiusage.cliproxyapi.gateway"
+    private static let openCodeProtocolDefaultsKey = "aiusage.cliproxyapi.managedOpenCodeProtocol"
+    private static let claudeProtocolDefaultsKey = "aiusage.cliproxyapi.managedClaudeProtocol"
+
     init(
         paths: CLIProxyPaths,
         releaseClient: CLIProxyReleaseClient = CLIProxyReleaseClient(),
@@ -144,6 +162,14 @@ final class CLIProxyGatewayManager: ObservableObject {
         self.downloader = downloader
         self.binaryStore = binaryStore ?? CLIProxyBinaryStore(paths: paths)
         self.runtime = runtime ?? CLIProxyRuntimeController.shared
+        if let raw = UserDefaults.standard.string(forKey: Self.openCodeProtocolDefaultsKey),
+           let proto = OpenCodeProtocol(rawValue: raw) {
+            self.managedOpenCodeProtocol = proto
+        }
+        if let raw = UserDefaults.standard.string(forKey: Self.claudeProtocolDefaultsKey),
+           let proto = ManagedClaudeProtocol(rawValue: raw) {
+            self.managedClaudeProtocol = proto
+        }
         do {
             try paths.prepare()
             syncManifest = try Self.loadSyncManifest(from: paths.syncManifestURL)
@@ -669,6 +695,87 @@ final class CLIProxyGatewayManager: ObservableObject {
         }
     }
 
+    /// 由「API 提供商」分发/同步写入 CPA OpenAI 兼容上游。成功返回实际使用的 CPA name。
+    @discardableResult
+    func upsertOpenAICompatibleProvider(fromAPIProvider provider: APIProvider, existingCPAName: String?) async throws -> String {
+        guard let client = managementClient() else {
+            throw CLIProxyGatewayError.process("CPA is not running")
+        }
+        let display = provider.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !display.isEmpty else {
+            throw CLIProxyGatewayError.configuration("provider name is required")
+        }
+        var cpaName = String(display.prefix(80))
+        // 若展示名已被其它上游占用，且不是本链接条目，追加短 id 后缀保证可写。
+        let occupied = openAICompatibleProviders.contains {
+            $0.name.caseInsensitiveCompare(cpaName) == .orderedSame
+                && (existingCPAName == nil
+                    || $0.name.caseInsensitiveCompare(existingCPAName!) != .orderedSame)
+        }
+        if occupied {
+            let suffix = "-" + String(provider.id.prefix(8))
+            cpaName = String((display + suffix).prefix(80))
+        }
+
+        let normalizedBaseURL = provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: normalizedBaseURL),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil else {
+            throw CLIProxyGatewayError.configuration("a valid HTTP or HTTPS base URL is required")
+        }
+        let normalizedKey = provider.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedKey.isEmpty else {
+            throw CLIProxyGatewayError.configuration("API key is required")
+        }
+        var seen = Set<String>()
+        let modelIDs = provider.models
+            .map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+        guard !modelIDs.isEmpty else {
+            throw CLIProxyGatewayError.configuration("at least one upstream model is required")
+        }
+
+        // 保留已有 priority / prefix / disabled / headers，避免同步冲掉 CPA 侧本地调优。
+        let previous = existingCPAName.flatMap { name in
+            openAICompatibleProviders.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        }
+        let payload = CLIProxyOpenAICompatibleProvider(
+            name: cpaName,
+            priority: previous?.priority ?? 0,
+            disabled: previous?.disabled ?? false,
+            prefix: previous?.prefix ?? "",
+            baseURL: normalizedBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+            apiKeyEntries: [.init(apiKey: normalizedKey, proxyURL: previous?.apiKeyEntries.first?.proxyURL)],
+            models: modelIDs.map { .init(name: $0, alias: "", forceMapping: false) },
+            headers: previous?.headers,
+            disableCooling: previous?.disableCooling ?? false
+        )
+        try await client.upsertOpenAICompatibleProvider(payload, replacingName: existingCPAName)
+        await runtime.restart()
+        guard runtime.state.isRunning, let refreshedClient = managementClient() else {
+            throw CLIProxyGatewayError.process("CPA did not restart after updating the provider")
+        }
+        authFiles = try await loadAuthPool(using: refreshedClient)
+        await refreshModelCatalogAndDistribution(using: refreshedClient)
+        return cpaName
+    }
+
+    /// 删除由 API 提供商链接的 CPA 上游（按 name）。
+    func deleteOpenAICompatibleProviderLinked(cpaName: String) async throws {
+        let normalized = cpaName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        guard let client = managementClient() else {
+            throw CLIProxyGatewayError.process("CPA is not running")
+        }
+        try await client.deleteOpenAICompatibleProvider(name: normalized)
+        await runtime.restart()
+        if runtime.state.isRunning, let refreshedClient = managementClient() {
+            authFiles = try await loadAuthPool(using: refreshedClient)
+            await refreshModelCatalogAndDistribution(using: refreshedClient)
+        }
+    }
+
     func refreshProviderPlugins(includeStore: Bool = true) async {
         guard runtime.state.isRunning, !isManagingPlugins, let client = managementClient() else { return }
         isManagingPlugins = true
@@ -764,13 +871,22 @@ final class CLIProxyGatewayManager: ObservableObject {
             let data = evaluation.copiedData
             let effectiveMode = mode ?? syncRecord(for: candidate)?.mode ?? .manualCopy
             try await client.uploadAuthFile(data: data, name: name)
+            // 回读 CPA 落盘内容作基线：上传后 CPA 可能立刻改写 access_token / last_refresh，
+            // 若仍用本地上传前 hash，下次 refresh 会误报「CPA 副本已修改」。
+            let baseline = await authFileBaselineAfterUpload(
+                name: name,
+                uploaded: data,
+                client: client
+            )
             let record = CLIProxyAccountSyncRecord(
                 providerId: candidate.providerId,
                 credentialId: candidate.credentialId,
                 authFileName: name,
                 accountIdentity: managedIdentityKey(for: candidate),
                 sourceFingerprint: evaluation.sourceFingerprint,
-                lastCopiedFingerprint: evaluation.copiedFingerprint,
+                lastCopiedFingerprint: baseline.fullFingerprint,
+                lastSourceSemanticFingerprint: evaluation.sourceSemanticFingerprint,
+                lastCopiedSemanticFingerprint: baseline.semanticFingerprint,
                 lastSyncedAt: Date(),
                 mode: effectiveMode
             )
@@ -1042,8 +1158,6 @@ final class CLIProxyGatewayManager: ObservableObject {
             refreshDistributionState()
         }
     }
-
-    static let managedProviderID = "aiusage.cliproxyapi.gateway"
 
     func refreshDistributionState() {
         managedProviderExists = APIProviderStore.shared.provider(id: Self.managedProviderID) != nil
@@ -1515,6 +1629,8 @@ final class CLIProxyGatewayManager: ObservableObject {
                 accountIdentity: identityKey,
                 sourceFingerprint: baseRecord.sourceFingerprint,
                 lastCopiedFingerprint: baseRecord.lastCopiedFingerprint,
+                lastSourceSemanticFingerprint: baseRecord.lastSourceSemanticFingerprint,
+                lastCopiedSemanticFingerprint: baseRecord.lastCopiedSemanticFingerprint,
                 lastSyncedAt: baseRecord.lastSyncedAt,
                 mode: keepUpdated ? .keepUpdated : baseRecord.mode
             )
@@ -1608,6 +1724,8 @@ final class CLIProxyGatewayManager: ObservableObject {
                 accountIdentity: identityKey,
                 sourceFingerprint: baseRecord.sourceFingerprint,
                 lastCopiedFingerprint: canonicalCopiedFingerprint,
+                lastSourceSemanticFingerprint: baseRecord.lastSourceSemanticFingerprint,
+                lastCopiedSemanticFingerprint: baseRecord.lastCopiedSemanticFingerprint,
                 lastSyncedAt: baseRecord.lastSyncedAt,
                 mode: keepUpdated ? .keepUpdated : baseRecord.mode
             )
@@ -1801,10 +1919,18 @@ final class CLIProxyGatewayManager: ObservableObject {
     private struct SyncEvaluation {
         let state: CLIProxyAccountSyncState
         let sourceFingerprint: String
+        /// 源侧语义指纹（基于转换后即将上传的副本）。
+        let sourceSemanticFingerprint: String?
         let copiedFingerprint: String
+        /// 写入 sync manifest 的全量 hash 基线（优先 CPA 落盘）。
+        let baselineFingerprint: String
+        /// 写入 sync manifest 的 CPA 语义指纹基线；不可用时为 nil。
+        let baselineSemanticFingerprint: String?
         let copiedData: Data
         let authFileName: String
         let canAdoptExistingCopy: Bool
+        /// 旧 manifest 缺语义指纹时，在判定为 current 后回填，避免下一轮再误报。
+        let shouldHealSemanticBaseline: Bool
     }
 
     private func refreshSyncStates(
@@ -1839,11 +1965,31 @@ final class CLIProxyGatewayManager: ObservableObject {
                         authFileName: evaluation.authFileName,
                         accountIdentity: managedIdentityKey(for: candidate),
                         sourceFingerprint: evaluation.sourceFingerprint,
-                        lastCopiedFingerprint: evaluation.copiedFingerprint,
+                        lastCopiedFingerprint: evaluation.baselineFingerprint,
+                        lastSourceSemanticFingerprint: evaluation.sourceSemanticFingerprint,
+                        lastCopiedSemanticFingerprint: evaluation.baselineSemanticFingerprint,
                         lastSyncedAt: Date(),
                         mode: .manualCopy
                     )
                     upsertSyncRecord(adopted)
+                    manifestChanged = true
+                } else if evaluation.shouldHealSemanticBaseline,
+                          let existing = syncRecord(for: candidate) {
+                    let healed = CLIProxyAccountSyncRecord(
+                        providerId: existing.providerId,
+                        credentialId: existing.credentialId,
+                        authFileName: existing.authFileName,
+                        accountIdentity: existing.accountIdentity,
+                        sourceFingerprint: evaluation.sourceFingerprint,
+                        lastCopiedFingerprint: evaluation.baselineFingerprint,
+                        lastSourceSemanticFingerprint: evaluation.sourceSemanticFingerprint
+                            ?? existing.lastSourceSemanticFingerprint,
+                        lastCopiedSemanticFingerprint: evaluation.baselineSemanticFingerprint
+                            ?? existing.lastCopiedSemanticFingerprint,
+                        lastSyncedAt: existing.lastSyncedAt,
+                        mode: existing.mode
+                    )
+                    upsertSyncRecord(healed)
                     manifestChanged = true
                 }
 
@@ -1853,13 +1999,20 @@ final class CLIProxyGatewayManager: ObservableObject {
                       record.mode == .keepUpdated else { continue }
 
                 try await client.uploadAuthFile(data: evaluation.copiedData, name: record.authFileName)
+                let baseline = await authFileBaselineAfterUpload(
+                    name: record.authFileName,
+                    uploaded: evaluation.copiedData,
+                    client: client
+                )
                 let updated = CLIProxyAccountSyncRecord(
                     providerId: record.providerId,
                     credentialId: candidate.credentialId,
                     authFileName: record.authFileName,
                     accountIdentity: managedIdentityKey(for: candidate) ?? record.accountIdentity,
                     sourceFingerprint: evaluation.sourceFingerprint,
-                    lastCopiedFingerprint: evaluation.copiedFingerprint,
+                    lastCopiedFingerprint: baseline.fullFingerprint,
+                    lastSourceSemanticFingerprint: evaluation.sourceSemanticFingerprint,
+                    lastCopiedSemanticFingerprint: baseline.semanticFingerprint,
                     lastSyncedAt: Date(),
                     mode: .keepUpdated
                 )
@@ -1900,32 +2053,65 @@ final class CLIProxyGatewayManager: ObservableObject {
             cpaData = nil
         }
 
+        let sourceSemantic = try? CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: copiedData)
+
         guard let cpaData else {
             return SyncEvaluation(
                 state: record == nil ? .notSynced : .missing,
                 sourceFingerprint: sourceFingerprint,
+                sourceSemanticFingerprint: sourceSemantic,
                 copiedFingerprint: copiedFingerprint,
+                baselineFingerprint: copiedFingerprint,
+                baselineSemanticFingerprint: sourceSemantic,
                 copiedData: copiedData,
                 authFileName: name,
-                canAdoptExistingCopy: false
+                canAdoptExistingCopy: false,
+                shouldHealSemanticBaseline: false
             )
         }
 
         let cpaFingerprint = try CLIProxyJSONFingerprint.hash(cpaData, requireObject: true)
+        let cpaSemantic = try? CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: cpaData)
+        // 无本地记录时：用语义（或全量）判断是否可认领已有 CPA 副本。
+        let semanticAligned: Bool = {
+            if let cpaSemantic, let sourceSemantic { return cpaSemantic == sourceSemantic }
+            return cpaFingerprint == copiedFingerprint
+        }()
         guard let record else {
-            let matches = cpaFingerprint == copiedFingerprint
             return SyncEvaluation(
-                state: matches ? .current : .conflict,
+                state: semanticAligned ? .current : .conflict,
                 sourceFingerprint: sourceFingerprint,
+                sourceSemanticFingerprint: sourceSemantic,
                 copiedFingerprint: copiedFingerprint,
+                baselineFingerprint: cpaFingerprint,
+                baselineSemanticFingerprint: cpaSemantic,
                 copiedData: copiedData,
                 authFileName: name,
-                canAdoptExistingCopy: matches
+                canAdoptExistingCopy: semanticAligned,
+                shouldHealSemanticBaseline: false
             )
         }
 
-        let sourceChanged = sourceFingerprint != record.sourceFingerprint
-        let cpaChanged = cpaFingerprint != record.lastCopiedFingerprint
+        // 源侧 / CPA 侧都只比语义基线，忽略双方正常的 token 轮换。
+        let sourceChanged: Bool
+        let cpaChanged: Bool
+        var shouldHeal = false
+        if let sourceSemantic, let stored = record.lastSourceSemanticFingerprint {
+            sourceChanged = sourceSemantic != stored
+        } else if sourceSemantic != nil {
+            sourceChanged = false
+            shouldHeal = true
+        } else {
+            sourceChanged = sourceFingerprint != record.sourceFingerprint
+        }
+        if let cpaSemantic, let stored = record.lastCopiedSemanticFingerprint {
+            cpaChanged = cpaSemantic != stored
+        } else if cpaSemantic != nil {
+            cpaChanged = false
+            shouldHeal = true
+        } else {
+            cpaChanged = cpaFingerprint != record.lastCopiedFingerprint
+        }
         let state: CLIProxyAccountSyncState
         switch (sourceChanged, cpaChanged) {
         case (false, false): state = .current
@@ -1936,11 +2122,34 @@ final class CLIProxyGatewayManager: ObservableObject {
         return SyncEvaluation(
             state: state,
             sourceFingerprint: sourceFingerprint,
+            sourceSemanticFingerprint: sourceSemantic,
             copiedFingerprint: copiedFingerprint,
+            baselineFingerprint: cpaFingerprint,
+            baselineSemanticFingerprint: cpaSemantic,
             copiedData: copiedData,
             authFileName: name,
-            canAdoptExistingCopy: false
+            canAdoptExistingCopy: false,
+            shouldHealSemanticBaseline: shouldHeal && !sourceChanged && !cpaChanged
         )
+    }
+
+    private struct AuthFileBaseline {
+        let fullFingerprint: String
+        let semanticFingerprint: String?
+    }
+
+    /// 上传后回读 CPA 文件指纹，吸收 CPA 写盘时的易变字段改写。
+    private func authFileBaselineAfterUpload(
+        name: String,
+        uploaded: Data,
+        client: CLIProxyManagementClient
+    ) async -> AuthFileBaseline {
+        let disk = (try? await client.downloadAuthFile(name: name)) ?? uploaded
+        let full = (try? CLIProxyJSONFingerprint.hash(disk, requireObject: true))
+            ?? (try? CLIProxyJSONFingerprint.hash(uploaded, requireObject: true))
+            ?? ""
+        let semantic = try? CLIProxyManagedAuthSafety.destructiveMergeFingerprint(for: disk)
+        return AuthFileBaseline(fullFingerprint: full, semanticFingerprint: semantic)
     }
 
     private func managedIdentityKey(for candidate: CLIProxyAccountSyncCandidate) -> String? {

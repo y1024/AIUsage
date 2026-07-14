@@ -212,6 +212,30 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         }
     }
 
+    /// 按 name 覆盖写入；`replacingName` 用于改名时先移除旧条目。
+    func upsertOpenAICompatibleProvider(
+        _ provider: CLIProxyOpenAICompatibleProvider,
+        replacingName: String? = nil
+    ) async throws {
+        try await mutateOpenAICompatibleProviders { providers in
+            let namesToRemove = Set(
+                [replacingName, provider.name]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .map { $0.lowercased() }
+            )
+            providers.removeAll { entry in
+                let name = ((entry["name"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return namesToRemove.contains(name.lowercased())
+            }
+            let encoded = try JSONEncoder().encode(provider)
+            guard let raw = try JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+                throw CLIProxyGatewayError.invalidResponse("could not encode the OpenAI-compatible provider")
+            }
+            providers.append(raw)
+        }
+    }
+
     func listOpenAICompatibleProviders() async throws -> [CLIProxyOpenAICompatibleProvider] {
         let response: OpenAICompatResponse = try await request(
             method: "GET",

@@ -10,11 +10,13 @@ enum ProviderListCategory: String, CaseIterable {
 struct ProvidersView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var accountStore: AccountStore
+    @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @Environment(\.colorScheme) private var colorScheme
     /// 单类目页面：由侧边栏的「订阅账号」/「API 提供商」分别承载（不再内置切换）。
     let category: ProviderListCategory
     @State private var searchText = ""
     @State private var selectedProviderFilter: String = "all"
+    @State private var statusFilter: SubscriptionAccountFilter = .all
     @State private var accountEditorTarget: ProviderEditorTarget?
     /// 顶部工具栏「新增 API 提供商」的触发信号（按钮在工具栏，编辑器在 APIProviderListView）。
     @State private var requestNewAPIProvider = false
@@ -23,18 +25,153 @@ struct ProvidersView: View {
             toolbar
 
             if category == .accounts {
-                filterBar
+                accountsChrome
                 Divider()
                 accountsBody
             } else {
                 Divider()
-                APIProviderListView(searchText: searchText, requestNew: $requestNewAPIProvider)
+                APIProviderListView(
+                    searchText: searchText,
+                    requestNew: $requestNewAPIProvider,
+                    onClearSearch: { searchText = "" }
+                )
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(AppSurface.page(colorScheme))
         .sheet(item: $accountEditorTarget) { target in
             ProviderAccountEditorView(providerId: target.providerId)
                 .environmentObject(appState)
+        }
+    }
+
+    // MARK: - Accounts Chrome (stats + status filter)
+
+    private var accountsChrome: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if attentionCount > 0 {
+                attentionBanner
+            }
+
+            HStack(alignment: .center, spacing: 10) {
+                SubscriptionAppScopeControl(
+                    options: appScopeOptions,
+                    selection: $selectedProviderFilter
+                )
+                summaryRow
+            }
+
+            GatewayCapsuleFilterBar(
+                values: SubscriptionAccountFilter.allCases,
+                selection: $statusFilter,
+                title: \.title
+            )
+        }
+        .padding(.horizontal, 18)
+        .padding(.bottom, 10)
+    }
+
+    private var appScopeOptions: [SubscriptionAppScopeOption] {
+        let total = flatEntries.count
+        var options: [SubscriptionAppScopeOption] = [.all(accountCount: total)]
+        options.append(contentsOf: availableProviderFilters.map { group in
+            SubscriptionAppScopeOption(
+                id: group.providerId,
+                title: group.title,
+                providerId: group.providerId,
+                accountCount: group.accounts.count
+            )
+        })
+        return options
+    }
+
+    private var summaryRow: some View {
+        let entries = flatEntries
+        let loading = isLoadingClosure
+        return GatewayStatCapsuleRow(items: [
+            .init(
+                id: "total",
+                value: "\(entries.count)",
+                title: L("accounts", "账号"),
+                systemImage: "person.2.fill",
+                tint: .indigo
+            ),
+            .init(
+                id: "ready",
+                value: "\(SubscriptionAccountListLogic.count(.ready, in: entries, isLoading: loading))",
+                title: L("online", "在线"),
+                systemImage: "checkmark.circle.fill",
+                tint: .green
+            ),
+            .init(
+                id: "attention",
+                value: "\(SubscriptionAccountListLogic.count(.attention, in: entries, isLoading: loading))",
+                title: L("need attention", "需处理"),
+                systemImage: "exclamationmark.triangle.fill",
+                tint: .orange
+            ),
+            .init(
+                id: "offline",
+                value: "\(SubscriptionAccountListLogic.count(.offline, in: entries, isLoading: loading))",
+                title: L("offline", "离线"),
+                systemImage: "icloud.slash",
+                tint: .secondary
+            ),
+            .init(
+                id: "needsConnection",
+                value: "\(SubscriptionAccountListLogic.count(.needsConnection, in: entries, isLoading: loading))",
+                title: L("not connected", "未连接"),
+                systemImage: "link.badge.plus",
+                tint: .blue
+            ),
+        ])
+    }
+
+    private var attentionBanner: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                statusFilter = .attention
+            }
+        } label: {
+            HStack(spacing: 11) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+                Text(L(
+                    "\(attentionCount) account(s) need attention",
+                    "\(attentionCount) 个账号需要处理"
+                ))
+                .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(L("Filter", "筛选"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.orange.opacity(0.22), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var flatEntries: [ProviderAccountEntry] {
+        SubscriptionAccountListLogic.allEntries(in: serviceGroups)
+    }
+
+    private var attentionCount: Int {
+        SubscriptionAccountListLogic.count(.attention, in: flatEntries, isLoading: isLoadingClosure)
+    }
+
+    private var isLoadingClosure: (ProviderAccountEntry) -> Bool {
+        { entry in
+            SubscriptionAccountListLogic.isAccountLoading(
+                entry,
+                hasCompletedInitialLoad: refreshCoordinator.hasCompletedInitialLoad,
+                isProviderRefreshInFlight: { refreshCoordinator.isProviderRefreshInFlight($0) }
+            )
         }
     }
 
@@ -75,46 +212,13 @@ struct ProvidersView: View {
     }
 
     private var filteredGroups: [ProviderAccountGroup] {
-        availableProviderFilters.compactMap { group -> ProviderAccountGroup? in
-            guard selectedProviderFilter == "all" || group.providerId == selectedProviderFilter else { return nil }
-
-            if group.accounts.isEmpty {
-                let matchesGroup = searchText.isEmpty || group.title.localizedCaseInsensitiveContains(searchText)
-                return matchesGroup ? group : nil
-            }
-
-            let filteredAccounts = group.accounts.filter { account in
-                searchText.isEmpty ||
-                group.title.localizedCaseInsensitiveContains(searchText) ||
-                (account.accountEmail?.localizedCaseInsensitiveContains(searchText) ?? false) ||
-                (account.accountDisplayName?.localizedCaseInsensitiveContains(searchText) ?? false) ||
-                (account.accountNote?.localizedCaseInsensitiveContains(searchText) ?? false)
-            }
-
-            if filteredAccounts.isEmpty {
-                let matchesGroup = searchText.isEmpty || group.title.localizedCaseInsensitiveContains(searchText)
-                guard matchesGroup else { return nil }
-                return ProviderAccountGroup(
-                    id: group.id,
-                    providerId: group.providerId,
-                    title: group.title,
-                    subtitle: group.subtitle,
-                    channel: group.channel,
-                    isScanningEnabled: group.isScanningEnabled,
-                    accounts: []
-                )
-            }
-
-            return ProviderAccountGroup(
-                id: group.id,
-                providerId: group.providerId,
-                title: group.title,
-                subtitle: group.subtitle,
-                channel: group.channel,
-                isScanningEnabled: group.isScanningEnabled,
-                accounts: filteredAccounts
-            )
-        }
+        SubscriptionAccountListLogic.filteredGroups(
+            groups: availableProviderFilters,
+            query: searchText,
+            providerFilter: selectedProviderFilter,
+            statusFilter: statusFilter,
+            isLoading: isLoadingClosure
+        )
     }
 
     // MARK: - Toolbar
@@ -221,61 +325,12 @@ struct ProvidersView: View {
 
     private var toolbarBackground: some View {
         Rectangle()
-            .fill(Color(nsColor: .windowBackgroundColor))
+            .fill(AppSurface.toolbar(colorScheme))
             .overlay(alignment: .bottom) {
                 Rectangle()
-                    .fill(Color(nsColor: .separatorColor).opacity(colorScheme == .dark ? 0.35 : 0.55))
+                    .fill(AppStroke.subtle(colorScheme))
                     .frame(height: 0.5)
             }
-    }
-
-    private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                providerFilterChip(id: "all", title: L("All Apps", "全部应用", key: "providers.all_apps"))
-
-                ForEach(availableProviderFilters) { group in
-                    providerFilterChip(id: group.providerId, title: group.title, providerId: group.providerId)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 12)
-        }
-    }
-
-    private func providerFilterChip(id: String, title: String, providerId: String? = nil) -> some View {
-        let isSelected = selectedProviderFilter == id
-
-        return Button {
-            selectedProviderFilter = id
-        } label: {
-            HStack(spacing: 8) {
-                if let providerId {
-                    ProviderIconView(providerId, size: 16)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .frame(width: 16, height: 16)
-                } else {
-                    Image(systemName: "square.grid.2x2.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 16, height: 16)
-                }
-
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-            }
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isSelected ? Color.clear : Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Empty State
@@ -290,8 +345,11 @@ struct ProvidersView: View {
                 .font(.title2)
                 .bold()
 
-            if !searchText.isEmpty {
-                Text(L("Try another app filter or search keyword.", "试试其他应用筛选或搜索关键词。"))
+            if !searchText.isEmpty || statusFilter != .all || selectedProviderFilter != "all" {
+                Text(L(
+                    "Try another app filter, status filter, or search keyword.",
+                    "试试其他应用筛选、状态筛选或搜索关键词。"
+                ))
                     .font(.body)
                     .foregroundColor(.secondary)
             } else {

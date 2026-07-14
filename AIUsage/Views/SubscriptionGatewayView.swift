@@ -11,12 +11,13 @@ struct SubscriptionGatewayView: View {
     @State private var settingsBase = CLIProxyGatewaySettings.default
     @State private var distributionTargets: Set<ProxyTarget> = []
     @State private var showAddAccount = false
+    @State private var pendingSection: CLIProxyGatewaySection?
+    @State private var showDiscardSectionConfirm = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             sectionNavigation
-            Divider().opacity(0.55)
             sectionContent
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -79,17 +80,37 @@ struct SubscriptionGatewayView: View {
                 "只删除 CPA 中的副本，AIUsage 原订阅账号不会被修改。"
             ))
         }
+        .confirmationDialog(
+            L("Discard unsaved changes?", "放弃未保存的更改？"),
+            isPresented: $showDiscardSectionConfirm
+        ) {
+            Button(L("Discard", "放弃"), role: .destructive) {
+                if let pendingSection {
+                    discardDirtyState(for: navigation.selectedSection)
+                    navigation.selectedSection = pendingSection
+                }
+                pendingSection = nil
+            }
+            Button(L("Stay", "留下"), role: .cancel) {
+                pendingSection = nil
+            }
+        } message: {
+            Text(L(
+                "Switching tabs will discard edits that have not been applied yet.",
+                "切换分区会丢弃尚未应用的修改。"
+            ))
+        }
     }
 
     private var header: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 18) {
+            HStack(spacing: 14) {
                 headerIdentity
-                Spacer(minLength: 18)
+                Spacer(minLength: 12)
                 headerActions
             }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 headerIdentity
                 HStack(spacing: 10) {
                     Spacer()
@@ -97,59 +118,50 @@ struct SubscriptionGatewayView: View {
                 }
             }
         }
-        .padding(.horizontal, 26)
-        .padding(.vertical, 17)
-        .background(.bar)
+        .padding(.horizontal, 22)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
     private var headerIdentity: some View {
-        HStack(spacing: 15) {
-            ProviderIconView("cliproxyapi", size: 50)
+        HStack(spacing: 10) {
+            ProviderIconView("cliproxyapi", size: 34)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 9) {
-                    Text(L("CPA Gateway", "CPA 网关"))
-                        .font(.title2.weight(.bold))
-                    Text("CLIProxyAPI")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.primary.opacity(0.055), in: Capsule())
-                }
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 7) {
-                    Image(systemName: "person.2.fill")
-                        .foregroundStyle(Color.accentColor)
-                    Image(systemName: "arrow.right").accessibilityHidden(true)
-                    Text(L(
-                        "One account pool for 4 AIUsage apps and multi-protocol local API clients",
-                        "一个账号池，连接 4 个 AIUsage 应用与多协议本地 API 客户端"
-                    ))
-                    .lineLimit(2)
+                    Text(L("CPA Gateway", "CPA 网关"))
+                        .font(.title3.weight(.bold))
+                    if let version = manager.currentVersion {
+                        Text("v\(version)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.06), in: Capsule())
+                    }
                 }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .accessibilityElement(children: .combine)
+                Text(L("Shared account pool for apps & local APIs", "应用与本地 API 共用账号池"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
         .layoutPriority(1)
     }
 
     private var headerActions: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Button {
                 navigation.showAccounts(openAddAccount: true)
                 showAddAccount = true
             } label: {
                 Label(L("Add Upstream", "添加上游"), systemImage: "plus")
+                    .font(.caption.weight(.semibold))
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
             .disabled(manager.operation.isBusy)
-            .help(L(
-                "Open the upstream guide; it can install or start CPA when needed.",
-                "打开添加上游向导；如有需要，可在向导内安装或启动 CPA。"
-            ))
 
             runtimeBadge
         }
@@ -158,30 +170,76 @@ struct SubscriptionGatewayView: View {
     private var sectionNavigation: some View {
         HStack(spacing: 4) {
             ForEach(CLIProxyGatewaySection.allCases) { section in
+                let selected = navigation.selectedSection == section
                 Button {
-                    guard navigation.selectedSection != section else { return }
-                    navigation.selectedSection = section
+                    requestSectionChange(to: section)
                 } label: {
-                    Label(section.shortTitle, systemImage: section.systemImage)
-                        .font(.subheadline.weight(navigation.selectedSection == section ? .semibold : .medium))
-                        .foregroundStyle(navigation.selectedSection == section ? Color.accentColor : Color.secondary)
-                        .frame(minWidth: 78, minHeight: 34)
-                        .padding(.horizontal, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(navigation.selectedSection == section ? Color.accentColor.opacity(0.11) : .clear)
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    HStack(spacing: 6) {
+                        Image(systemName: section.systemImage)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(section.shortTitle)
+                            .font(.system(size: 12.5, weight: selected ? .semibold : .medium))
+                        if isSectionDirty(section) {
+                            Circle()
+                                .fill(Color.orange)
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                    .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.78))
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(selected ? section.accentColor : Color.primary.opacity(0.05))
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .help(section.title)
-                .accessibilityAddTraits(navigation.selectedSection == section ? .isSelected : [])
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 9)
-        .background(.bar)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.5)
+        }
+    }
+
+    private func requestSectionChange(to section: CLIProxyGatewaySection) {
+        guard navigation.selectedSection != section else { return }
+        if isSectionDirty(navigation.selectedSection) {
+            pendingSection = section
+            showDiscardSectionConfirm = true
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.15)) {
+            navigation.selectedSection = section
+        }
+    }
+
+    private func isSectionDirty(_ section: CLIProxyGatewaySection) -> Bool {
+        switch section {
+        case .connections:
+            return distributionTargets != manager.currentDistributionTargets
+        case .settings:
+            return draftSettings.normalized != settingsBase.normalized
+        case .overview, .accounts:
+            return false
+        }
+    }
+
+    private func discardDirtyState(for section: CLIProxyGatewaySection) {
+        switch section {
+        case .connections:
+            distributionTargets = manager.currentDistributionTargets
+        case .settings:
+            draftSettings = settingsBase
+        case .overview, .accounts:
+            break
+        }
     }
 
     @ViewBuilder
@@ -217,11 +275,36 @@ struct SubscriptionGatewayView: View {
     }
 
     private var runtimeBadge: some View {
-        GatewayStatusPill(
-            text: runtimeLabel,
-            color: runtime.state.isRunning ? .green : (runtime.state.isTransitioning ? .orange : .secondary),
-            systemImage: runtime.state.isRunning ? "checkmark.circle.fill" : "circle.fill"
-        )
+        Menu {
+            if runtime.state.isRunning {
+                Button(L("Stop CPA", "停止 CPA")) {
+                    Task { await runtime.stop() }
+                }
+                Button(L("Restart CPA", "重启 CPA")) {
+                    Task { await runtime.restart() }
+                }
+            } else {
+                Button(L("Start CPA", "启动 CPA")) {
+                    Task { await runtime.start() }
+                }
+            }
+            Divider()
+            Button(L("Open Settings", "打开设置")) {
+                requestSectionChange(to: .settings)
+            }
+            Button(L("Refresh Status", "刷新状态")) {
+                Task { await manager.refresh() }
+            }
+        } label: {
+            GatewayStatusPill(
+                text: runtimeLabel,
+                color: runtime.state.isRunning ? .green : (runtime.state.isTransitioning ? .orange : .secondary),
+                systemImage: runtime.state.isRunning ? "checkmark.circle.fill" : "circle.fill"
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(runtime.state.isTransitioning || manager.operation.isBusy)
+        .help(L("CPA runtime actions", "CPA 运行操作"))
     }
 
     private var runtimeLabel: String {

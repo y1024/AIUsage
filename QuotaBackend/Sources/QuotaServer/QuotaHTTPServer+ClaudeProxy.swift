@@ -130,14 +130,23 @@ extension QuotaHTTPServer {
         }
 
         // Parse request (reuse the pre-decoded body when available)
-        guard let claudeRequest = decodedRequest
-                ?? (try? Self.requestDecoder.decode(ClaudeMessageRequest.self, from: request.body)) else {
-            return claudeErrorResponse(
-                type: "invalid_request_error",
-                message: "Failed to parse request body",
-                status: 400,
-                headers: headers
-            )
+        let claudeRequest: ClaudeMessageRequest
+        if let decodedRequest {
+            claudeRequest = decodedRequest
+        } else {
+            do {
+                claudeRequest = try Self.requestDecoder.decode(ClaudeMessageRequest.self, from: request.body)
+            } catch {
+                httpLog.error(
+                    "Failed to parse Claude request body (\(request.body.count) bytes): \(Self.describeDecodingFailure(error), privacy: .public)"
+                )
+                return claudeErrorResponse(
+                    type: "invalid_request_error",
+                    message: "Failed to parse request body",
+                    status: 400,
+                    headers: headers
+                )
+            }
         }
 
         httpLog.debug("→ POST /v1/messages (model: \(claudeRequest.model), stream: \(claudeRequest.stream ?? false))")

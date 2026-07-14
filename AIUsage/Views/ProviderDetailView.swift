@@ -39,56 +39,52 @@ struct ProviderDetailView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            detailTopBar
-            ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                // 头部
-                headerSection
-                
-                Divider()
-                
-                // Headline 信息
-                headlineSection
+            inspectorTopBar
 
-                if accountEntry != nil {
-                    Divider()
-                    accountManagementSection
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    compactHero
+
+                    if !provider.windows.isEmpty {
+                        windowsSection
+                    }
+
+                    if !provider.metrics.isEmpty {
+                        metricsSection
+                    }
+
+                    if let costSummary = provider.costSummary {
+                        costSection(costSummary)
+                    }
+
+                    if let models = provider.models, !models.isEmpty {
+                        modelsSection(models)
+                    }
+
+                    if let spotlight = provider.spotlight {
+                        spotlightSection(spotlight)
+                    }
+
+                    if provider.windows.isEmpty,
+                       provider.metrics.isEmpty,
+                       provider.costSummary == nil,
+                       (provider.models ?? []).isEmpty,
+                       provider.spotlight == nil {
+                        Text(L(
+                            "No extra detail beyond the card. Use the menu for account actions.",
+                            "卡片以外暂无更多明细。账号操作请用右上角菜单。"
+                        ))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
+                    }
                 }
-                
-                // Quota Windows
-                if !provider.windows.isEmpty {
-                    Divider()
-                    windowsSection
-                }
-                
-                // Metrics
-                if !provider.metrics.isEmpty {
-                    Divider()
-                    metricsSection
-                }
-                
-                // Cost Summary (for local-cost providers)
-                if let costSummary = provider.costSummary {
-                    Divider()
-                    costSection(costSummary)
-                }
-                
-                // Models (for cost tracking providers)
-                if let models = provider.models, !models.isEmpty {
-                    Divider()
-                    modelsSection(models)
-                }
-                
-                // Spotlight
-                if let spotlight = provider.spotlight {
-                    Divider()
-                    spotlightSection(spotlight)
-                }
-            }
-            .padding(24)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 20)
             }
         }
-        .frame(width: 600, height: 700)
+        .frame(width: 420, height: 560)
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showingNoteEditor) {
             if let accountEntry {
@@ -102,38 +98,97 @@ struct ProviderDetailView: View {
                 .environmentObject(appState)
             }
         }
-        .alert(
-            L("Remove Account", "删除账号"),
-            isPresented: $showingRemovalAlert
-        ) {
-            Button(L("Delete", "删除"), role: .destructive) {
-                if let accountEntry {
-                    appState.deleteAccount(accountEntry)
-                }
-                dismiss()
+        .subscriptionAccountDeleteConfirmation(isPresented: $showingRemovalAlert) {
+            if let accountEntry {
+                appState.deleteAccount(accountEntry)
             }
-            Button(L("Cancel", "取消"), role: .cancel) {}
-        } message: {
-            Text(
-                L(
-                    "This removes the account from your monitor list. If a credential is linked, it will also be removed from Keychain. Hidden accounts can be restored from the Providers toolbar.",
-                    "这会把该账号从监控列表中移除；如果绑定了凭证，也会一并从钥匙串删除。已隐藏账号可以在服务商顶部工具栏恢复。"
-                )
-            )
+            dismiss()
         }
     }
-    
-    // MARK: - Top Bar (close)
-    // 详情面板是无标题栏 sheet，过去只能靠 ESC 退出（见 issue #29）。这里固定一个右上角关闭按钮，
-    // 所有服务商通用；ESC 仍可用（.cancelAction）。
-    private var detailTopBar: some View {
-        HStack {
-            Spacer()
+
+    // MARK: - Inspector Chrome
+
+    private var inspectorTopBar: some View {
+        HStack(spacing: 10) {
+            ProviderIconView(provider.providerId, size: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(detailTitle)
+                    .font(.headline)
+                    .lineLimit(1)
+                if let account = detailAccountLabel {
+                    Text(account)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Menu {
+                Button {
+                    Task { await refreshCoordinator.refreshProviderCardNow(provider) }
+                } label: {
+                    Label(
+                        isRefreshing ? L("Refreshing…", "刷新中…") : L("Refresh Account", "刷新账号"),
+                        systemImage: "arrow.clockwise"
+                    )
+                }
+                .disabled(isRefreshing)
+
+                if let copyTarget = copyTargetValue {
+                    Button {
+                        copyToPasteboard(copyTarget)
+                        copiedMessage = L("Copied", "已复制")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            copiedMessage = nil
+                        }
+                    } label: {
+                        Label(L("Copy Account", "复制账号"), systemImage: "doc.on.doc")
+                    }
+                }
+
+                if accountEntry != nil {
+                    Button {
+                        showingNoteEditor = true
+                    } label: {
+                        Label(L("Edit Note", "编辑注释"), systemImage: "square.and.pencil")
+                    }
+
+                    Divider()
+
+                    Button {
+                        if let accountEntry {
+                            appState.hideAccount(accountEntry)
+                        }
+                        dismiss()
+                    } label: {
+                        Label(SubscriptionAccountActionCopy.hideTitle, systemImage: "eye.slash")
+                    }
+
+                    Button(role: .destructive) {
+                        showingRemovalAlert = true
+                    } label: {
+                        Label(SubscriptionAccountActionCopy.deleteTitle, systemImage: "trash")
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .help(L("Account actions", "账号操作"))
+
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.title2)
+                    .font(.title3)
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.secondary)
             }
@@ -144,185 +199,62 @@ struct ProviderDetailView: View {
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
-        .padding(.bottom, 2)
+        .padding(.bottom, 8)
     }
 
-    // MARK: - Header Section
-    
-    private var headerSection: some View {
-        HStack(spacing: 16) {
-            ProviderIconView(provider.providerId, size: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .frame(width: 64, height: 64)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(detailTitle)
-                    .font(.title)
-                    .bold()
-                
-                if let subtitle = detailSubtitle {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+    private var compactHero: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if let membership = provider.membershipLabel {
+                    badge(text: membership, tint: membershipBadgeTint(for: membership))
                 }
-                
-                if let account = detailAccountLabel {
-                    Label(account, systemImage: accountIdentityIcon(for: account))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                if shouldShowStatusBadge {
+                    badge(text: localizedStatusLabel(provider.statusLabel), tint: statusColor)
                 }
-            }
-            
-            Spacer()
-            
-            VStack(alignment: .trailing, spacing: 8) {
-                HStack(spacing: 8) {
-                    if let membership = provider.membershipLabel {
-                        badge(text: membership, tint: membershipBadgeTint(for: membership))
-                    }
-
-                    if shouldShowStatusBadge {
-                        badge(text: localizedStatusLabel(provider.statusLabel), tint: statusColor)
-                    }
-                }
-
+                Spacer(minLength: 0)
                 if let refreshTimestamp {
-                    HStack(spacing: 4) {
-                        Text(L("Updated", "更新于"))
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        RefreshableTimeView(
-                            date: refreshTimestamp,
-                            language: appState.language,
-                            font: .caption2,
-                            foregroundStyle: .secondary
-                        )
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    Button {
-                        Task {
-                            await refreshCoordinator.refreshProviderCardNow(provider)
-                        }
-                    } label: {
-                        Label(
-                            isRefreshing ? L("Refreshing Account", "刷新账号中") : L("Refresh Account", "刷新账号"),
-                            systemImage: "arrow.clockwise"
-                        )
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isRefreshing)
-
-                    if let copyTarget = copyTargetValue {
-                        Button {
-                            copyToPasteboard(copyTarget)
-                            copiedMessage = L("Copied", "已复制")
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                copiedMessage = nil
-                            }
-                        } label: {
-                            Label(L("Copy", "复制"), systemImage: "doc.on.doc")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-
-                if let copiedMessage {
-                    Text(copiedMessage)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    RefreshableTimeView(
+                        date: refreshTimestamp,
+                        language: appState.language,
+                        font: .caption2,
+                        foregroundStyle: .secondary
+                    )
                 }
             }
-        }
-    }
-    
-    // MARK: - Headline Section
-    
-    private var headlineSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(provider.headline.eyebrow)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
-            
+
             Text(provider.headline.primary)
-                .font(.system(size: 36, weight: .bold))
-            
+                .font(.title2.weight(.bold))
+                .lineLimit(2)
+
             Text(provider.headline.secondary)
-                .font(.title3)
-                .foregroundColor(.secondary)
-            
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
             if let supporting = provider.headline.supporting {
                 Text(supporting)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(12)
-    }
-
-    private var accountManagementSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(L("Account Management", "账号管理"))
-                .font(.title2)
-                .bold()
-
-            if let accountEntry {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(accountEntry.cardTitle)
-                        .font(.headline)
-
-                    if let accountLabel = detailAccountLabel {
-                        Label(accountLabel, systemImage: accountIdentityIcon(for: accountLabel))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Text(
-                        accountEntry.accountNote?.nilIfBlank
-                            ?? L("No note yet. Add one to make this account easier to recognize later.", "当前还没有注释。你可以补一条，后面就更容易区分这个账号。")
-                    )
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
+            }
 
-                HStack(spacing: 10) {
-                    Button {
-                        showingNoteEditor = true
-                    } label: {
-                        Label(L("Edit Note", "编辑注释"), systemImage: "square.and.pencil")
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button(role: .destructive) {
-                        showingRemovalAlert = true
-                    } label: {
-                        Label(L("Remove from Monitor", "移出监控"), systemImage: "trash")
-                    }
-                    .buttonStyle(.bordered)
-                }
+            if let copiedMessage {
+                Text(copiedMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(12)
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
-    
+
     // MARK: - Windows Section
     
     private var windowsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(L("Quota Windows", "配额窗口"))
-                .font(.title2)
-                .bold()
+                .font(.headline)
             
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 ForEach(provider.windows) { window in
                     QuotaWindowRow(window: window)
                 }
@@ -333,12 +265,11 @@ struct ProviderDetailView: View {
     // MARK: - Metrics Section
     
     private var metricsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(L("Metrics", "指标"))
-                .font(.title2)
-                .bold()
+                .font(.headline)
             
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
                 ForEach(provider.metrics) { metric in
                     MetricCard(metric: metric)
                 }
@@ -349,12 +280,11 @@ struct ProviderDetailView: View {
     // MARK: - Cost Section
     
     private func costSection(_ costSummary: CostSummary) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(L("Token Stats", "Token 统计"))
-                .font(.title2)
-                .bold()
+                .font(.headline)
             
-            HStack(spacing: 16) {
+            HStack(spacing: 10) {
                 if let today = costSummary.today {
                     CostPeriodCard(label: L("Today", "今天"), period: today)
                 }
@@ -371,23 +301,21 @@ struct ProviderDetailView: View {
     // MARK: - Models Section
     
     private func modelsSection(_ models: [ModelInfo]) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(L("Models", "模型"))
-                .font(.title2)
-                .bold()
+                .font(.headline)
             
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 ForEach(models) { model in
                     HStack {
                         Text(model.label)
-                            .font(.body)
+                            .font(.callout)
                         
                         Spacer()
                         
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(model.value)
-                                .font(.callout)
-                                .bold()
+                                .font(.caption.weight(.semibold))
                             
                             if let note = model.note {
                                 Text(note)
@@ -396,8 +324,8 @@ struct ProviderDetailView: View {
                             }
                         }
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .padding(.horizontal, 10)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
                 }
@@ -408,26 +336,26 @@ struct ProviderDetailView: View {
     // MARK: - Spotlight Section
     
     private func spotlightSection(_ spotlight: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             Label(
                 provider.category == ProviderCategory.localCost
                     ? L("About This Tracker", "关于此追踪源")
                     : L("About This Provider", "关于此服务商"),
                 systemImage: "lightbulb.fill"
             )
-                .font(.headline)
+                .font(.subheadline.weight(.semibold))
                 .foregroundColor(.orange)
             
             Text(spotlight)
-                .font(.body)
+                .font(.callout)
                 .foregroundColor(.secondary)
-                .lineSpacing(4)
+                .lineSpacing(3)
         }
-        .padding()
+        .padding(12)
         .background(Color.orange.opacity(0.05))
-        .cornerRadius(12)
+        .cornerRadius(10)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.orange.opacity(0.2), lineWidth: 1)
         )
     }

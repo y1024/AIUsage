@@ -39,29 +39,50 @@ class GlobalTimeManager: ObservableObject {
 // MARK: - Refreshable Time Views
 
 struct RefreshableTimeView: View {
+    enum Style {
+        /// 「几分钟前 · 18:52:43」
+        case relativeWithClock
+        /// 仅「几分钟前」——卡片底栏用，避免信息重复
+        case relativeOnly
+    }
+
     let date: Date
     let language: String
     let font: Font
     let foregroundStyle: Color
+    var style: Style = .relativeWithClock
 
     @ObservedObject private var timeManager = GlobalTimeManager.shared
 
-    init(date: Date, language: String, font: Font = .caption2, foregroundStyle: Color = .secondary) {
+    init(
+        date: Date,
+        language: String,
+        font: Font = .caption2,
+        foregroundStyle: Color = .secondary,
+        style: Style = .relativeWithClock
+    ) {
         self.date = date
         self.language = language
         self.font = font
         self.foregroundStyle = foregroundStyle
+        self.style = style
     }
 
     private var formattedTime: String {
         _ = timeManager.currentTime
-        return formatRefreshTimestamp(date, language: language)
+        switch style {
+        case .relativeWithClock:
+            return formatRefreshTimestamp(date, language: language)
+        case .relativeOnly:
+            return formatRelativeRefreshTime(date, language: language)
+        }
     }
 
     var body: some View {
         Text(formattedTime)
             .font(font)
             .foregroundStyle(foregroundStyle)
+            .help(formatRefreshTimestamp(date, language: language))
             .onAppear {
                 timeManager.startIfNeeded()
             }

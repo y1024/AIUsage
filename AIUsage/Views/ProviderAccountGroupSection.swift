@@ -9,6 +9,7 @@ struct ProviderAccountGroupSection: View {
     @State private var isBatchManaging = false
     @State private var selectedForDeletion: Set<String> = []
     @State private var showBatchDeleteConfirm = false
+    @State private var showBatchHideConfirm = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -66,7 +67,7 @@ struct ProviderAccountGroupSection: View {
                         }
                         .buttonStyle(.borderless)
 
-                        if group.accounts.count > 1 {
+                        if !group.accounts.isEmpty {
                             Button {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     isBatchManaging.toggle()
@@ -126,17 +127,28 @@ struct ProviderAccountGroupSection: View {
             }
         }
         .alert(
-            L("Remove Selected Accounts", "移除选中的账号"),
+            L("Delete Selected Accounts", "删除选中的账号"),
             isPresented: $showBatchDeleteConfirm
         ) {
-            Button(L("Remove", "移除"), role: .destructive) {
+            Button(L("Delete", "删除"), role: .destructive) {
                 performBatchDelete()
             }
             Button(L("Cancel", "取消"), role: .cancel) {}
         } message: {
+            Text(SubscriptionAccountActionCopy.batchDeleteMessage(count: selectedForDeletion.count))
+        }
+        .alert(
+            L("Hide Selected Accounts", "隐藏选中的账号"),
+            isPresented: $showBatchHideConfirm
+        ) {
+            Button(L("Hide", "隐藏"), role: .destructive) {
+                performBatchHide()
+            }
+            Button(L("Cancel", "取消"), role: .cancel) {}
+        } message: {
             Text(L(
-                "Remove \(selectedForDeletion.count) account(s) from monitoring? Credentials will be deleted from Keychain.",
-                "确认从监控中移除 \(selectedForDeletion.count) 个账号？凭据将从钥匙串中删除。"
+                "Hide \(selectedForDeletion.count) account(s) from monitoring? You can restore them from Hidden Accounts.",
+                "将隐藏 \(selectedForDeletion.count) 个账号；可在「已隐藏账号」中恢复。"
             ))
         }
     }
@@ -153,7 +165,8 @@ struct ProviderAccountGroupSection: View {
                     providerId: account.providerId,
                     title: account.cardTitle,
                     accountLabel: account.footerAccountLabel,
-                    onConnect: onAddAccount
+                    onConnect: onAddAccount,
+                    account: account
                 )
             } else {
                 ManagedProviderAccountCard(account: account, provider: liveProvider)
@@ -164,7 +177,8 @@ struct ProviderAccountGroupSection: View {
             LoadingAccountCard(
                 providerId: account.providerId,
                 title: account.cardTitle,
-                accountLabel: account.footerAccountLabel
+                accountLabel: account.footerAccountLabel,
+                account: account
             )
         } else {
             SavedAccountCard(account: account, onReconnect: { onAddAccount() })
@@ -200,14 +214,7 @@ struct ProviderAccountGroupSection: View {
             .buttonStyle(.plain)
 
             Group {
-                if let liveProvider = account.liveProvider {
-                    ManagedProviderAccountCard(account: account, provider: liveProvider)
-                        .environmentObject(appState)
-                        .environmentObject(refreshCoordinator)
-                } else {
-                    SavedAccountCard(account: account, onReconnect: { onAddAccount() })
-                        .environmentObject(appState)
-                }
+                accountCard(for: account)
             }
             .allowsHitTesting(false)
             .opacity(isSelected ? 0.7 : 1.0)
@@ -244,11 +251,23 @@ struct ProviderAccountGroupSection: View {
 
             Spacer()
 
+            Button {
+                showBatchHideConfirm = true
+            } label: {
+                Label(
+                    L("Hide Selected (\(selectedForDeletion.count))", "隐藏选中 (\(selectedForDeletion.count))"),
+                    systemImage: "eye.slash"
+                )
+                .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .disabled(selectedForDeletion.isEmpty)
+
             Button(role: .destructive) {
                 showBatchDeleteConfirm = true
             } label: {
                 Label(
-                    L("Remove Selected (\(selectedForDeletion.count))", "移除选中 (\(selectedForDeletion.count))"),
+                    L("Delete Selected (\(selectedForDeletion.count))", "删除选中 (\(selectedForDeletion.count))"),
                     systemImage: "trash"
                 )
                 .font(.caption.weight(.semibold))
@@ -272,6 +291,16 @@ struct ProviderAccountGroupSection: View {
         let entriesToDelete = group.accounts.filter { selectedForDeletion.contains($0.id) }
         guard !entriesToDelete.isEmpty else { return }
         appState.deleteAccounts(entriesToDelete)
+        selectedForDeletion.removeAll()
+        isBatchManaging = false
+    }
+
+    private func performBatchHide() {
+        let entriesToHide = group.accounts.filter { selectedForDeletion.contains($0.id) }
+        guard !entriesToHide.isEmpty else { return }
+        for entry in entriesToHide {
+            appState.hideAccount(entry)
+        }
         selectedForDeletion.removeAll()
         isBatchManaging = false
     }

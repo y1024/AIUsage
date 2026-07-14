@@ -11,6 +11,7 @@ struct SavedAccountCard: View {
     @State private var showingDetail = false
     @State private var showingNoteEditor = false
     @State private var isRefreshing = false
+    @State private var pendingAccountDeletion = false
     private var hasSecureCredential: Bool {
         account.storedAccount?.credentialId != nil
     }
@@ -123,7 +124,7 @@ struct SavedAccountCard: View {
                 }
             }
         }
-        .frame(minHeight: 180)
+        .frame(minHeight: 148)
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16)
@@ -154,6 +155,14 @@ struct SavedAccountCard: View {
                     Label(L("Copy Account", "复制账号"), systemImage: "doc.on.doc")
                 }
             }
+
+            SubscriptionAccountDestructiveMenuItems(
+                onHide: { appState.hideAccount(account) },
+                onRequestDelete: { pendingAccountDeletion = true }
+            )
+        }
+        .subscriptionAccountDeleteConfirmation(isPresented: $pendingAccountDeletion) {
+            appState.deleteAccount(account)
         }
         .sheet(isPresented: $showingDetail) {
             SavedAccountDetailView(account: account, onReconnect: onReconnect)
@@ -192,135 +201,139 @@ struct SavedAccountDetailView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 16) {
-                ProviderIconView(account.providerId, size: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .frame(width: 56, height: 56)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                ProviderIconView(account.providerId, size: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .frame(width: 28, height: 28)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(account.cardTitle)
-                        .font(.title2)
-                        .bold()
-
+                        .font(.headline)
+                        .lineLimit(1)
                     if let accountLabel = account.footerAccountLabel {
-                        Label(accountLabel, systemImage: accountIdentityIcon(for: accountLabel))
-                            .font(.caption)
+                        Text(accountLabel)
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 0)
 
-                HStack(spacing: 6) {
-                    if hasSecureCredential {
-                        Text(L("Offline", "离线"))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.orange.opacity(0.10))
-                            .clipShape(Capsule())
-                    } else {
-                        Text(L("Saved", "已保存"))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.blue)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.blue.opacity(0.10))
-                            .clipShape(Capsule())
-                    }
+                Text(hasSecureCredential ? L("Offline", "离线") : L("Saved", "已保存"))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(hasSecureCredential ? .orange : .blue)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background((hasSecureCredential ? Color.orange : Color.blue).opacity(0.12), in: Capsule())
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
             }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text(L("Account Note", "账号注释"))
-                    .font(.headline)
-
-                Text(
-                    account.accountNote?.nilIfBlank
-                        ?? L("No note yet.", "当前还没有注释。")
-                )
-                .font(.body)
-                .foregroundStyle(.secondary)
-            }
-            .padding()
-            .background(Color(nsColor: .controlBackgroundColor))
-            .cornerRadius(12)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L("Storage", "存储"))
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("Account Note", "账号注释"))
+                        .font(.subheadline.weight(.semibold))
+                    Text(account.accountNote?.nilIfBlank ?? L("No note yet.", "当前还没有注释。"))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 Label(
-                    hasSecureCredential ? L("Credential stored in Keychain", "凭证已存入钥匙串") : L("Account record stored locally", "账号记录已保存到本地"),
+                    hasSecureCredential
+                        ? L("Credential stored in Keychain", "凭证已存入钥匙串")
+                        : L("Account record stored locally", "账号记录已保存到本地"),
                     systemImage: hasSecureCredential ? "lock.shield" : "tray.full"
                 )
-                .font(.subheadline)
+                .font(.caption)
                 .foregroundStyle(.secondary)
 
                 if let lastSeen = account.storedAccount?.lastSeenAt,
                    let date = parseISO8601(lastSeen) {
                     Text(formatRelativeTimeFromDate(date, language: appState.language))
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-            }
 
-            Spacer()
+                Spacer(minLength: 0)
 
-            HStack(spacing: 10) {
-                if hasSecureCredential {
-                    Button {
-                        guard !isRefreshing, let credentialId = account.storedAccount?.credentialId else { return }
-                        isRefreshing = true
-                        refreshCoordinator.refreshAccount(credentialId: credentialId, providerId: account.providerId)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { isRefreshing = false }
-                    } label: {
-                        if isRefreshing {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label(L("Retry Fetch", "重试拉取"), systemImage: "arrow.clockwise")
+                HStack(spacing: 8) {
+                    if hasSecureCredential {
+                        Button {
+                            guard !isRefreshing, let credentialId = account.storedAccount?.credentialId else { return }
+                            isRefreshing = true
+                            refreshCoordinator.refreshAccount(credentialId: credentialId, providerId: account.providerId)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { isRefreshing = false }
+                        } label: {
+                            if isRefreshing {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label(L("Retry", "重试"), systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isRefreshing)
+
+                        if let onReconnect {
+                            Button {
+                                onReconnect()
+                                dismiss()
+                            } label: {
+                                Label(L("Reconnect", "重新连接"), systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            .buttonStyle(.borderedProminent)
                         }
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(isRefreshing)
 
-                    if let onReconnect {
+                    Menu {
                         Button {
-                            onReconnect()
+                            showingNoteEditor = true
+                        } label: {
+                            Label(L("Edit Note", "编辑注释"), systemImage: "square.and.pencil")
+                        }
+                        Button {
+                            appState.hideAccount(account)
                             dismiss()
                         } label: {
-                            Label(L("Reconnect", "重新连接"), systemImage: "arrow.triangle.2.circlepath")
+                            Label(SubscriptionAccountActionCopy.hideTitle, systemImage: "eye.slash")
                         }
-                        .buttonStyle(.borderedProminent)
+                        Button(role: .destructive) {
+                            showingRemovalAlert = true
+                        } label: {
+                            Label(SubscriptionAccountActionCopy.deleteTitle, systemImage: "trash")
+                        }
+                    } label: {
+                        Label(L("More", "更多"), systemImage: "ellipsis.circle")
                     }
-                }
+                    .menuStyle(.borderlessButton)
 
-                Button {
-                    showingNoteEditor = true
-                } label: {
-                    Label(L("Edit Note", "编辑注释"), systemImage: "square.and.pencil")
-                }
-                .buttonStyle(.bordered)
+                    Spacer()
 
-                Button(role: .destructive) {
-                    showingRemovalAlert = true
-                } label: {
-                    Label(L("Remove from Monitor", "移出监控"), systemImage: "trash")
+                    Button(L("Done", "完成")) { dismiss() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                 }
-                .buttonStyle(.bordered)
-
-                Spacer()
-
-                Button(L("Done", "完成")) {
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
             }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
         }
-        .padding(24)
-        .frame(width: 560, height: 440)
+        .frame(width: 400, height: 320)
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showingNoteEditor) {
             AccountNoteEditorView(
@@ -332,21 +345,9 @@ struct SavedAccountDetailView: View {
             }
             .environmentObject(appState)
         }
-        .alert(
-            L("Remove Account", "删除账号"),
-            isPresented: $showingRemovalAlert
-        ) {
-            Button(L("Delete", "删除"), role: .destructive) {
-                appState.deleteAccount(account)
-                dismiss()
-            }
-            Button(L("Cancel", "取消"), role: .cancel) {}
-        } message: {
-            Text(
-                hasSecureCredential
-                    ? L("This removes the account and its Keychain credential.", "这会移除账号及其钥匙串凭证。")
-                    : L("This removes the account from the monitor list.", "这会从监控列表中移除该账号。")
-            )
+        .subscriptionAccountDeleteConfirmation(isPresented: $showingRemovalAlert) {
+            appState.deleteAccount(account)
+            dismiss()
         }
     }
 }

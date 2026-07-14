@@ -1,36 +1,59 @@
 import SwiftUI
 
+// MARK: - CPA Settings Categories
+
+private enum GatewaySettingsCategory: String, CaseIterable, Identifiable {
+    case runtime
+    case updates
+    case versions
+    case diagnostics
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .runtime: return L("Runtime", "运行")
+        case .updates: return L("Updates", "更新")
+        case .versions: return L("Versions", "版本")
+        case .diagnostics: return L("Diagnostics", "诊断")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .runtime: return "gearshape"
+        case .updates: return "arrow.down.circle"
+        case .versions: return "shippingbox"
+        case .diagnostics: return "stethoscope"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .runtime: return .gray
+        case .updates: return .blue
+        case .versions: return .orange
+        case .diagnostics: return .teal
+        }
+    }
+}
+
+// MARK: - Settings View
+
 struct SubscriptionGatewaySettingsView: View {
     @ObservedObject var manager: CLIProxyGatewayManager
     @ObservedObject var runtime: CLIProxyRuntimeController
     @Binding var draftSettings: CLIProxyGatewaySettings
     @Binding var pendingVersionDeletion: CLIProxyInstalledVersion?
 
-    @State private var showAdvanced = false
-    @State private var showLogs = false
+    @State private var selectedCategory: GatewaySettingsCategory = .runtime
     @State private var showLANConfirmation = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                errorBanners
-                GatewaySectionTitle(
-                    title: L("Settings & maintenance", "设置与维护"),
-                    subtitle: L(
-                        "Runtime, updates, rollback, and diagnostics.",
-                        "运行、更新、回退与诊断。"
-                    )
-                )
-                runtimeSettingsCard
-                updateCard
-                if manager.installedVersions.contains(where: { !$0.isCurrent }) {
-                    installedVersionsCard
-                }
-                diagnosticsCard
-            }
-            .frame(maxWidth: 980, alignment: .leading)
-            .padding(.horizontal, 24)
-                .padding(.vertical, 22)
+        HStack(spacing: 0) {
+            settingsSidebar
+            Divider()
+            settingsDetail
         }
         .alert(L("Enable Local Network Access?", "开启局域网访问？"), isPresented: $showLANConfirmation) {
             Button(L("Enable and Apply", "开启并应用"), role: .destructive) {
@@ -41,9 +64,84 @@ struct SubscriptionGatewaySettingsView: View {
             }
         } message: {
             Text(L(
-                "CPA will listen on every IPv4 interface over unencrypted HTTP. Inference APIs still require the client key; management keeps a separate high-entropy key and the remote-access policy remains off. Only enable this on a trusted network; macOS may ask for firewall permission.",
-                "CPA 将通过未加密 HTTP 监听所有 IPv4 接口。推理 API 仍必须使用客户端密钥；管理接口继续使用独立高强度密钥，并保持关闭远程访问策略。请只在可信网络中开启；macOS 可能会请求防火墙权限。"
+                "CPA will listen on all IPv4 interfaces over HTTP. Keep keys private; use only on trusted networks.",
+                "CPA 将通过 HTTP 监听所有 IPv4 接口。请妥善保管密钥，仅在可信网络中开启。"
             ))
+        }
+    }
+
+    // MARK: - Sidebar
+
+    private var settingsSidebar: some View {
+        ScrollView {
+            VStack(spacing: 2) {
+                ForEach(GatewaySettingsCategory.allCases) { category in
+                    categoryRow(category)
+                }
+            }
+            .padding(10)
+        }
+        .frame(width: 168)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.28))
+    }
+
+    private func categoryRow(_ category: GatewaySettingsCategory) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                selectedCategory = category
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: category.icon)
+                    .font(.system(size: 13))
+                    .foregroundStyle(selectedCategory == category ? .white : category.color)
+                    .frame(width: 20)
+                Text(category.title)
+                    .font(.system(size: 13, weight: selectedCategory == category ? .semibold : .regular))
+                    .foregroundStyle(selectedCategory == category ? .white : .primary)
+                Spacer(minLength: 0)
+                if category == .runtime, hasUnappliedChanges {
+                    Circle()
+                        .fill(selectedCategory == category ? Color.white.opacity(0.9) : Color.orange)
+                        .frame(width: 6, height: 6)
+                } else if category == .updates, manager.hasUpdate {
+                    Circle()
+                        .fill(selectedCategory == category ? Color.white.opacity(0.9) : Color.orange)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(selectedCategory == category ? Color.accentColor : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Detail
+
+    private var settingsDetail: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                errorBanners
+                switch selectedCategory {
+                case .runtime:
+                    runtimeSection
+                case .updates:
+                    updatesSection
+                case .versions:
+                    versionsSection
+                case .diagnostics:
+                    diagnosticsSection
+                }
+            }
+            .padding(22)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -53,278 +151,269 @@ struct SubscriptionGatewaySettingsView: View {
         if case .failed(let error) = runtime.state { GatewayErrorBanner(message: error) }
     }
 
-    private var runtimeSettingsCard: some View {
-        GatewayCard {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L("Runtime", "运行设置")).font(.headline)
-                        Text(L(
-                            "Basic settings are visible by default. Changes restart CPA only when it is already running.",
-                            "默认只显示常用设置；CPA 正在运行时，应用修改会自动重启服务。"
-                        ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+    // MARK: - Runtime
+
+    private var runtimeSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader(title: L("Runtime", "运行")) {
+                if hasUnappliedChanges {
+                    GatewayQuietBadge(text: L("Not applied", "未应用"), tint: .orange)
+                }
+            }
+
+            GatewayCard(padding: 14) {
+                VStack(spacing: 0) {
+                    settingsRow(
+                        title: L("Start with AIUsage", "随 AIUsage 启动"),
+                        detail: L("Launch verified CPA after app start.", "应用启动后自动运行已校验的 CPA。")
+                    ) {
+                        Toggle("", isOn: $draftSettings.autoStart)
+                            .labelsHidden()
+                            .accessibilityLabel(L("Start with AIUsage", "随 AIUsage 启动"))
                     }
-                    Spacer()
-                    if hasUnappliedChanges {
-                        GatewayStatusPill(
-                            text: L("Not applied", "尚未应用"),
-                            color: .orange,
-                            systemImage: "circle.fill"
+
+                    Divider().padding(.vertical, 10)
+
+                    settingsRow(
+                        title: L("Service port", "服务端口"),
+                        detail: L("Default 127.0.0.1; all interfaces when LAN is on.", "默认本机；开启局域网后监听所有接口。")
+                    ) {
+                        TextField(
+                            "14420",
+                            value: $draftSettings.port,
+                            format: IntegerFormatStyle<Int>.number.grouping(.never)
+                        )
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 96)
+                        .accessibilityLabel(L("Service port", "服务端口"))
+                    }
+
+                    Divider().padding(.vertical, 10)
+
+                    settingsRow(
+                        title: L("LAN access", "局域网访问"),
+                        detail: L("Expose inference APIs on the local network.", "向同一网络开放推理 API。")
+                    ) {
+                        Toggle("", isOn: $draftSettings.allowLANAccess)
+                            .labelsHidden()
+                            .accessibilityLabel(L("LAN access", "局域网访问"))
+                    }
+
+                    if draftSettings.allowLANAccess {
+                        lanAddressesBlock
+                            .padding(.top, 10)
+                    }
+
+                    Divider().padding(.vertical, 10)
+
+                    settingsRow(
+                        title: L("Account routing", "账号路由"),
+                        detail: L("How CPA picks among ready accounts.", "在可用账号间的选择方式。")
+                    ) {
+                        Picker("", selection: $draftSettings.routingStrategy) {
+                            Text(L("Round robin", "轮询")).tag(CLIProxyRoutingStrategy.roundRobin)
+                            Text(L("Fill first", "优先用满")).tag(CLIProxyRoutingStrategy.fillFirst)
+                        }
+                        .labelsHidden()
+                        .frame(width: 140)
+                    }
+
+                    Divider().padding(.vertical, 10)
+
+                    settingsRow(
+                        title: L("Request retries", "请求重试"),
+                        detail: L("Retry on other accounts after failure.", "失败后在其它账号上重试。")
+                    ) {
+                        Stepper(value: $draftSettings.requestRetry, in: 0...10) {
+                            Text("\(draftSettings.requestRetry)")
+                                .monospacedDigit()
+                                .frame(minWidth: 18, alignment: .trailing)
+                        }
+                    }
+
+                    Divider().padding(.vertical, 10)
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(L("Network proxy URL", "网络代理 URL"))
+                            .font(.subheadline.weight(.semibold))
+                        TextField("http://127.0.0.1:7890", text: $draftSettings.proxyURL)
+                            .textFieldStyle(.roundedBorder)
+                        Text(L(
+                            "HTTP/SOCKS for CPA upstream calls. Empty = direct. Not an AIUsage proxy node.",
+                            "CPA 访问上游时使用的 HTTP/SOCKS；留空直连。不是 AIUsage 代理节点。"
+                        ))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Divider().padding(.vertical, 10)
+
+                    settingsRow(
+                        title: L("Official plugins", "官方插件"),
+                        detail: L("Allow installed CPA provider plugins.", "允许已安装的 CPA 提供商插件。")
+                    ) {
+                        Toggle("", isOn: $draftSettings.enablePlugins)
+                            .labelsHidden()
+                            .accessibilityLabel(L("Official plugins", "官方插件"))
+                    }
+                }
+            }
+
+            HStack {
+                if hasUnappliedChanges {
+                    Button(L("Reset", "还原")) { draftSettings = runtime.settings }
+                        .buttonStyle(.borderless)
+                }
+                Spacer()
+                Button {
+                    requestApplySettings()
+                } label: {
+                    Label(L("Apply", "应用"), systemImage: "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!hasUnappliedChanges || runtime.state.isTransitioning)
+            }
+        }
+    }
+
+    private var lanAddressesBlock: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L("Trusted networks only", "仅可信网络"))
+                    .font(.caption.weight(.semibold))
+                let addresses = runtime.detectedLANBaseURLs(port: draftSettings.normalized.port)
+                if addresses.isEmpty {
+                    Text(L("No private IPv4 detected.", "未检测到私有 IPv4。"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(addresses, id: \.absoluteString) { address in
+                        Text(address.absoluteString)
+                            .font(.caption2.monospaced())
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // MARK: - Updates
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader(title: L("Updates", "更新")) {
+                updateStatusPill
+            }
+
+            GatewayCard(padding: 14) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 10) {
+                        versionChip(
+                            title: L("Installed", "已装"),
+                            value: manager.currentVersion.map { "v\($0)" } ?? "—"
+                        )
+                        versionChip(
+                            title: L("Latest", "最新"),
+                            value: manager.latestRelease.map { "v\($0.version)" } ?? "—"
                         )
                     }
-                }
 
-                settingToggle(
-                    title: L("Start CPA with AIUsage", "随 AIUsage 自动启动 CPA"),
-                    detail: L("Starts the verified managed runtime after AIUsage launches.", "AIUsage 启动后自动运行已校验的托管版本。"),
-                    isOn: $draftSettings.autoStart
-                )
-
-                Divider()
-
-                HStack(spacing: 18) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L("Service port", "服务端口")).font(.subheadline.weight(.semibold))
-                        Text(L("Uses 127.0.0.1 unless LAN access is enabled.", "默认绑定 127.0.0.1；开启局域网访问后监听所有接口。"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    if manager.operation.isBusy {
+                        ProgressView(operationLabel)
                     }
-                    Spacer()
-                    TextField(
-                        "14420",
-                        value: $draftSettings.port,
-                        format: IntegerFormatStyle<Int>.number.grouping(.never)
-                    )
-                    .multilineTextAlignment(.trailing)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 110)
-                    .accessibilityLabel(L("Service port", "服务端口"))
-                }
 
-                Divider()
-
-                settingToggle(
-                    title: L("Allow local network clients", "允许局域网客户端访问"),
-                    detail: L(
-                        "Expose inference APIs over HTTP. Client and management keys stay separate; the remote-management policy remains off.",
-                        "通过 HTTP 向同一网络开放推理 API；客户端与管理密钥保持分离，远程管理策略仍关闭。"
-                    ),
-                    isOn: $draftSettings.allowLANAccess
-                )
-
-                if draftSettings.allowLANAccess {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "exclamationmark.shield.fill")
-                            .foregroundStyle(.orange)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(L("Trusted networks only", "仅在可信网络中使用"))
-                                .font(.caption.weight(.semibold))
-                            let addresses = runtime.detectedLANBaseURLs(port: draftSettings.normalized.port)
-                            if !addresses.isEmpty {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    ForEach(addresses, id: \.absoluteString) { address in
-                                        Text(address.absoluteString)
-                                            .font(.caption.monospaced())
-                                            .textSelection(.enabled)
-                                    }
-                                }
-                            } else {
-                                Text(L("No active private or shared IPv4 address detected.", "当前未检测到可用的私有或共享 IPv4 地址。"))
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                    .padding(11)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.orange.opacity(0.075), in: RoundedRectangle(cornerRadius: 11))
-                }
-
-                HStack(spacing: 18) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L("Account routing", "账号路由")).font(.subheadline.weight(.semibold))
-                        Text(L("How CPA chooses among ready accounts.", "CPA 如何在可用账号之间进行选择。"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Picker("", selection: $draftSettings.routingStrategy) {
-                        Text(L("Round robin", "轮询")).tag(CLIProxyRoutingStrategy.roundRobin)
-                        Text(L("Fill first", "优先用满")).tag(CLIProxyRoutingStrategy.fillFirst)
-                    }
-                    .labelsHidden()
-                    .frame(width: 170)
-                }
-
-                DisclosureGroup(isExpanded: $showAdvanced) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(L("Request retries", "请求重试")).font(.subheadline.weight(.semibold))
-                                Text(L("Retries across eligible accounts after a request failure.", "请求失败后在可用账号间重试。"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Stepper(value: $draftSettings.requestRetry, in: 0...10) {
-                                Text("\(draftSettings.requestRetry)").monospacedDigit()
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text(L("Upstream proxy URL", "上游代理 URL")).font(.subheadline.weight(.semibold))
-                            TextField("http://127.0.0.1:7890", text: $draftSettings.proxyURL)
-                                .textFieldStyle(.roundedBorder)
-                            Text(L("Optional. Leave empty for a direct connection.", "可选；留空表示直接连接。"))
+                    HStack {
+                        if let checkedAt = manager.lastCheckedAt {
+                            Text(checkedAt.formatted(date: .abbreviated, time: .shortened))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-
-                        settingToggle(
-                            title: L("Enable CPA official plugins", "启用 CPA 官方插件"),
-                            detail: L(
-                                "Allows installed provider plugins. Plugin availability is controlled separately by CPA.",
-                                "允许已安装的提供商插件；具体插件是否可用仍由 CPA 单独控制。"
-                            ),
-                            isOn: $draftSettings.enablePlugins
-                        )
-                    }
-                    .padding(.top, 14)
-                } label: {
-                    Label(L("Advanced runtime settings", "高级运行设置"), systemImage: "slider.horizontal.3")
-                        .font(.subheadline.weight(.semibold))
-                }
-
-                HStack {
-                    if hasUnappliedChanges {
-                        Button(L("Reset", "还原")) { draftSettings = runtime.settings }
-                            .buttonStyle(.borderless)
-                    }
-                    Spacer()
-                    Button {
-                        requestApplySettings()
-                    } label: {
-                        Label(L("Apply Settings", "应用设置"), systemImage: "checkmark")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!hasUnappliedChanges || runtime.state.isTransitioning)
-                }
-            }
-        }
-    }
-
-    private var updateCard: some View {
-        GatewayCard {
-            VStack(alignment: .leading, spacing: 17) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L("Independent CPA updates", "CPA 独立更新")).font(.headline)
-                        Text(L(
-                            "CPA can update inside AIUsage without waiting for a new AIUsage release.",
-                            "CPA 可直接在 AIUsage 内更新，无需等待 AIUsage 发布新版本。"
-                        ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if manager.hasUpdate {
-                        GatewayStatusPill(
-                            text: L("Update available", "有可用更新"),
-                            color: .orange,
-                            systemImage: "arrow.down.circle.fill"
-                        )
-                    } else if manager.isInstalled, manager.latestRelease != nil {
-                        GatewayStatusPill(
-                            text: L("Up to date", "已是最新"),
-                            color: .green,
-                            systemImage: "checkmark.circle.fill"
-                        )
-                    } else if manager.isInstalled {
-                        GatewayStatusPill(
-                            text: L("Not checked", "尚未检查"),
-                            color: .secondary,
-                            systemImage: "clock"
-                        )
-                    }
-                }
-
-                HStack(spacing: 12) {
-                    versionValue(title: L("Installed", "当前版本"), value: manager.currentVersion.map { "v\($0)" } ?? L("Not installed", "尚未安装"))
-                    versionValue(title: L("Latest official", "最新官方版本"), value: manager.latestRelease.map { "v\($0.version)" } ?? "—")
-                }
-
-                if manager.operation.isBusy {
-                    ProgressView(operationLabel)
-                }
-
-                HStack {
-                    if let checkedAt = manager.lastCheckedAt {
-                        Text(L("Checked \(checkedAt.formatted(date: .abbreviated, time: .shortened))",
-                               "检查于 \(checkedAt.formatted(date: .abbreviated, time: .shortened))"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button(L("Check", "检查更新")) { Task { await manager.checkForUpdates() } }
+                        Spacer()
+                        Button(L("Check", "检查")) {
+                            Task { await manager.checkForUpdates() }
+                        }
                         .disabled(manager.operation.isBusy)
-                    Button(primaryUpdateActionTitle) { Task { await manager.installOrUpdateLatest() } }
+                        Button(primaryUpdateActionTitle) {
+                            Task { await manager.installOrUpdateLatest() }
+                        }
                         .buttonStyle(.borderedProminent)
                         .disabled(
-                            manager.operation.isBusy ||
-                            (manager.latestRelease != nil && !manager.hasUpdate && manager.isInstalled)
+                            manager.operation.isBusy
+                                || (manager.latestRelease != nil && !manager.hasUpdate && manager.isInstalled)
                         )
+                    }
                 }
             }
         }
     }
 
-    private var installedVersionsCard: some View {
-        GatewayCard {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L("Installed versions & rollback", "已安装版本与回退")).font(.headline)
-                    Text(L(
-                        "Activating a rollback copy safely stops and restarts the managed runtime.",
-                        "切换回退版本时会安全停止并重新启动托管运行时。"
-                    ))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
+    @ViewBuilder
+    private var updateStatusPill: some View {
+        if manager.hasUpdate {
+            GatewayQuietBadge(text: L("Update available", "有更新"), tint: .orange)
+        } else if manager.isInstalled, manager.latestRelease != nil {
+            GatewayQuietBadge(text: L("Up to date", "已最新"), tint: .green)
+        } else if manager.isInstalled {
+            GatewayQuietBadge(text: L("Not checked", "未检查"), tint: .secondary)
+        }
+    }
+
+    // MARK: - Versions
+
+    private var versionsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader(title: L("Versions & rollback", "版本与回退"))
+
+            GatewayCard(padding: 4) {
                 if manager.installedVersions.isEmpty {
-                    Text(L("No CPA versions are installed yet.", "尚未安装任何 CPA 版本。"))
+                    Text(L("No CPA versions installed.", "尚未安装 CPA。"))
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .frame(maxWidth: .infinity, minHeight: 72)
                 } else {
                     VStack(spacing: 0) {
                         ForEach(manager.installedVersions) { version in
-                            HStack(spacing: 11) {
+                            HStack(spacing: 10) {
                                 Image(systemName: version.isCurrent ? "checkmark.seal.fill" : "shippingbox")
                                     .foregroundStyle(version.isCurrent ? .green : .secondary)
-                                    .frame(width: 22)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("v\(version.version)").font(.subheadline.weight(.semibold).monospacedDigit())
+                                    .frame(width: 20)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("v\(version.version)")
+                                        .font(.subheadline.weight(.semibold).monospacedDigit())
                                     Text(version.installedAt.formatted(date: .abbreviated, time: .shortened))
-                                        .font(.caption)
+                                        .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
                                 if version.isCurrent {
-                                    GatewayStatusPill(text: L("Active", "当前"), color: .green, systemImage: nil)
+                                    GatewayQuietBadge(text: L("Active", "当前"), tint: .green)
                                 }
-                                Spacer()
+                                Spacer(minLength: 8)
                                 if !version.isCurrent {
-                                    Button(L("Activate", "切换")) { Task { await manager.activate(version) } }
-                                    Button(role: .destructive) { pendingVersionDeletion = version } label: {
+                                    Button(L("Activate", "切换")) {
+                                        Task { await manager.activate(version) }
+                                    }
+                                    Button(role: .destructive) {
+                                        pendingVersionDeletion = version
+                                    } label: {
                                         Image(systemName: "trash")
                                     }
                                     .buttonStyle(.borderless)
-                                    .help(L("Delete rollback copy", "删除回退副本"))
-                                    .accessibilityLabel(L("Delete CPA version \(version.version)", "删除 CPA 版本 \(version.version)"))
+                                    .help(L("Delete", "删除"))
                                 }
                             }
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 10)
-                            if version.id != manager.installedVersions.last?.id { Divider() }
+                            if version.id != manager.installedVersions.last?.id {
+                                Divider().padding(.leading, 42)
+                            }
                         }
                     }
                 }
@@ -332,74 +421,100 @@ struct SubscriptionGatewaySettingsView: View {
         }
     }
 
-    private var diagnosticsCard: some View {
-        GatewayCard {
-            DisclosureGroup(isExpanded: $showLogs) {
+    // MARK: - Diagnostics
+
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader(title: L("Diagnostics", "诊断"))
+
+            GatewayCard(padding: 14) {
                 VStack(alignment: .leading, spacing: 12) {
                     ScrollView {
                         Text(runtime.recentLogs.isEmpty
-                             ? L("No runtime logs yet.", "暂无运行日志。")
+                             ? L("No logs yet.", "暂无日志。")
                              : runtime.recentLogs.joined(separator: "\n"))
                             .font(.system(.caption, design: .monospaced))
                             .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
-                            .padding(12)
+                            .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
+                            .padding(10)
                     }
-                    .frame(maxHeight: 260)
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                    .frame(maxHeight: 280)
+                    .background(
+                        Color(nsColor: .textBackgroundColor),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+
                     HStack {
-                        Text(L("Secret values are redacted before display.", "密钥会在显示前完成脱敏。"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button { manager.revealStorage() } label: {
-                            Label(L("Show Managed Files", "显示托管文件"), systemImage: "folder")
+                        Button {
+                            manager.revealStorage()
+                        } label: {
+                            Label(L("Managed files", "托管文件"), systemImage: "folder")
                         }
-                    }
-                    HStack(spacing: 14) {
-                        Link(L("Official repository", "官方仓库"),
-                             destination: URL(string: "https://github.com/router-for-me/CLIProxyAPI")!)
-                        Button(L("Third-party notices", "第三方许可")) { manager.openThirdPartyNotices() }
-                            .buttonStyle(.link)
-                    }
-                    .font(.caption)
-                }
-                .padding(.top, 14)
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L("Diagnostics", "诊断")).font(.headline)
-                    Text(L("Recent redacted runtime logs and managed storage.", "最近的脱敏运行日志与托管存储。"))
+                        Spacer()
+                        Link(
+                            L("Repository", "仓库"),
+                            destination: URL(string: "https://github.com/router-for-me/CLIProxyAPI")!
+                        )
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        Button(L("Notices", "许可")) {
+                            manager.openThirdPartyNotices()
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
                 }
             }
         }
     }
 
-    private func settingToggle(title: String, detail: String, isOn: Binding<Bool>) -> some View {
-        HStack(spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
+    // MARK: - Shared chrome
+
+    private func sectionHeader<Trailing: View>(
+        title: String,
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+    ) -> some View {
+        HStack {
+            Text(title)
+                .font(.title3.weight(.semibold))
             Spacer()
-            Toggle(title, isOn: isOn)
-                .labelsHidden()
-                .accessibilityLabel(title)
+            trailing()
         }
     }
 
-    private func versionValue(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Text(value).font(.title3.weight(.bold).monospacedDigit())
+    private func settingsRow<Trailing: View>(
+        title: String,
+        detail: String,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            trailing()
         }
-        .padding(14)
+    }
+
+    private func versionChip(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.bold).monospacedDigit())
+        }
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 
-    private var hasUnappliedChanges: Bool { draftSettings.normalized != runtime.settings.normalized }
+    private var hasUnappliedChanges: Bool {
+        draftSettings.normalized != runtime.settings.normalized
+    }
 
     private func requestApplySettings() {
         if draftSettings.allowLANAccess, !runtime.settings.allowLANAccess {
@@ -418,20 +533,20 @@ struct SubscriptionGatewaySettingsView: View {
     }
 
     private var primaryUpdateActionTitle: String {
-        if !manager.isInstalled { return L("Install Latest CPA", "安装最新 CPA") }
+        if !manager.isInstalled { return L("Install", "安装") }
         if manager.latestRelease == nil { return L("Check & Update", "检查并更新") }
-        if manager.hasUpdate { return L("Update CPA", "更新 CPA") }
-        return L("CPA Is Up to Date", "CPA 已是最新")
+        if manager.hasUpdate { return L("Update", "更新") }
+        return L("Up to date", "已最新")
     }
 
     private var operationLabel: String {
         switch manager.operation {
         case .idle: ""
-        case .checking: L("Checking official release…", "正在检查官方版本…")
-        case .downloading(let version): L("Downloading v\(version)…", "正在下载 v\(version)…")
-        case .verifying(let version): L("Verifying v\(version)…", "正在校验 v\(version)…")
-        case .installing(let version): L("Installing v\(version)…", "正在安装 v\(version)…")
-        case .activating(let version): L("Activating v\(version)…", "正在切换到 v\(version)…")
+        case .checking: L("Checking…", "检查中…")
+        case .downloading(let version): L("Downloading v\(version)…", "下载 v\(version)…")
+        case .verifying(let version): L("Verifying v\(version)…", "校验 v\(version)…")
+        case .installing(let version): L("Installing v\(version)…", "安装 v\(version)…")
+        case .activating(let version): L("Activating v\(version)…", "切换到 v\(version)…")
         }
     }
 }

@@ -12,45 +12,47 @@ struct SubscriptionGatewayConnectionsView: View {
     @State private var endpointScope: GatewayEndpointScope = .thisMac
     @State private var selectedLANAddress: String?
     @State private var selectedProtocol: GatewayProtocolEndpoint?
+    /// 接入页草稿：仅点「应用」后才写入 Manager / 分发到 OpenCode 节点。
+    @State private var draftOpenCodeProtocol: OpenCodeProtocol = .openAIResponses
+    /// Claude 系列（Code + Science）共用草稿。
+    @State private var draftClaudeProtocol: ManagedClaudeProtocol = .anthropicPassthrough
 
-    private let columns = [GridItem(.adaptive(minimum: 185), spacing: 10)]
+    private let columns = [GridItem(.adaptive(minimum: 168), spacing: 8)]
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 errorBanners
 
-                GatewayCard(padding: 18) {
-                    VStack(alignment: .leading, spacing: 14) {
+                GatewayCard(padding: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(L("AIUsage managed connections", "AIUsage 托管接入"))
-                                    .font(.headline)
+                                    .font(.subheadline.weight(.semibold))
                                 Text(L(
-                                    "Choose which AIUsage apps should use the CPA account pool.",
-                                    "选择要使用 CPA 账号池的 AIUsage 应用。"
+                                    "Pick apps that should use the CPA pool.",
+                                    "选择要使用 CPA 账号池的应用。"
                                 ))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             }
                             Spacer()
                             if hasPendingChanges {
-                                GatewayStatusPill(
-                                    text: L("Unsaved changes", "有待应用的修改"),
-                                    color: .orange,
-                                    systemImage: "circle.fill"
-                                )
+                                GatewayQuietBadge(text: L("Unsaved", "未保存"), tint: .orange)
                             } else {
-                                GatewayStatusPill(
-                                    text: L("3 targets · 4 apps", "3 个配置目标 · 4 个应用"),
-                                    color: .blue,
-                                    systemImage: "square.stack.3d.up.fill"
+                                GatewayQuietBadge(
+                                    text: L(
+                                        "\(actualTargets.count) connected",
+                                        "已接 \(actualTargets.count)"
+                                    ),
+                                    tint: .blue
                                 )
                             }
                         }
 
-                        LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-                            ForEach(ProxyTarget.allCases) { target in
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                            ForEach(ProxyTarget.localProxyTargets) { target in
                                 targetCard(target)
                             }
                         }
@@ -63,12 +65,14 @@ struct SubscriptionGatewayConnectionsView: View {
             }
             .frame(maxWidth: 1080, alignment: .leading)
             .padding(.horizontal, 24)
-            .padding(.vertical, 22)
+            .padding(.vertical, 20)
         }
         .onAppear {
-            if selectedTargets != actualTargets {
-                selectedTargets = actualTargets
-            }
+            // 有未应用改动时保留草稿，避免切 Tab 回来被静默重置。
+            guard !hasPendingChanges else { return }
+            selectedTargets = actualTargets
+            draftOpenCodeProtocol = manager.managedOpenCodeProtocol
+            draftClaudeProtocol = manager.managedClaudeProtocol
         }
         .sheet(item: $selectedProtocol) { endpoint in
             GatewayEndpointDetailSheet(
@@ -116,48 +120,108 @@ struct SubscriptionGatewayConnectionsView: View {
             if selected { selectedTargets.remove(target) }
             else { selectedTargets.insert(target) }
         } label: {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(alignment: .top, spacing: 9) {
-                    targetIcons(target)
-                    VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 8) {
+                    GatewayProviderIcon(providerID: target.gatewayProviderID, size: 28)
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(target.gatewayTitle)
-                            .font(.headline)
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.primary)
-                        Text(target.gatewayDetail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(2)
+                        Text(targetSubtitle(target, selected: selected))
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
                     }
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 4)
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                        .font(.body)
+                        .foregroundStyle(selected ? Color.accentColor : Color.secondary.opacity(0.55))
                 }
-                HStack(spacing: 7) {
-                    connectionPill(selected: selected, connected: connected)
-                    Spacer()
-                }
+                connectionPill(selected: selected, connected: connected)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 98, alignment: .leading)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .fill(selected ? Color.accentColor.opacity(0.065) : Color.primary.opacity(0.03))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selected ? Color.accentColor.opacity(0.07) : Color.primary.opacity(0.035))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .strokeBorder(selected ? Color.accentColor.opacity(0.26) : Color.primary.opacity(0.06), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(selected ? Color.accentColor.opacity(0.22) : Color.clear, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if target == .openCode {
+                openCodeProtocolContextMenu
+            } else if target == .claude {
+                claudeProtocolContextMenu
+            }
+        }
         .accessibilityLabel(target.gatewayTitle)
         .accessibilityValue(selected ? L("Selected", "已选择") : L("Not selected", "未选择"))
+        .accessibilityHint(protocolHint(for: target))
+    }
+
+    private func protocolHint(for target: ProxyTarget) -> String {
+        switch target {
+        case .openCode:
+            return L("Right-click to choose OpenCode protocol", "右键可选择 OpenCode 协议")
+        case .claude:
+            return L("Right-click to choose Claude / Science mode", "右键可选择 Claude / Science 形态")
+        case .codex, .cpa:
+            return ""
+        }
+    }
+
+    private func targetSubtitle(_ target: ProxyTarget, selected: Bool) -> String {
+        if target == .openCode, selected {
+            return draftOpenCodeProtocol.badgeName
+        }
+        if target == .claude, selected {
+            return "\(target.gatewayDetail) · \(draftClaudeProtocol.badgeName)"
+        }
+        return target.gatewayDetail
     }
 
     @ViewBuilder
-    private func targetIcons(_ target: ProxyTarget) -> some View {
-        GatewayProviderIcon(providerID: target.gatewayProviderID, size: 36)
+    private var openCodeProtocolContextMenu: some View {
+        Section(L("OpenCode protocol", "OpenCode 协议")) {
+            ForEach(OpenCodeProtocol.allCases, id: \.self) { proto in
+                Button {
+                    draftOpenCodeProtocol = proto
+                    if !selectedTargets.contains(.openCode) {
+                        selectedTargets.insert(.openCode)
+                    }
+                } label: {
+                    if draftOpenCodeProtocol == proto {
+                        Label(proto.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(proto.displayName)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var claudeProtocolContextMenu: some View {
+        Section(L("Claude / Science mode", "Claude / Science 形态")) {
+            ForEach(ManagedClaudeProtocol.allCases) { proto in
+                Button {
+                    draftClaudeProtocol = proto
+                    if !selectedTargets.contains(.claude) {
+                        selectedTargets.insert(.claude)
+                    }
+                } label: {
+                    if draftClaudeProtocol == proto {
+                        Label(proto.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(proto.displayName)
+                    }
+                }
+            }
+        }
     }
 
     private func connectionPill(selected: Bool, connected: Bool) -> some View {
@@ -181,15 +245,21 @@ struct SubscriptionGatewayConnectionsView: View {
     }
 
     private var localAPIClientsCard: some View {
-        GatewayCard(padding: 18) {
-            VStack(alignment: .leading, spacing: 15) {
-                GatewaySectionTitle(
-                    title: L("Client API endpoints", "客户端 API 接口"),
-                    subtitle: L(
-                        "Choose a protocol, then copy the server, Base URL, or full request endpoint.",
-                        "选择协议后，可按服务器地址、Base URL 或完整请求端点复制。"
-                    )
-                )
+        GatewayCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Client API endpoints", "客户端 API 接口"))
+                            .font(.subheadline.weight(.semibold))
+                        Text(L(
+                            "Copy origin, Base URL, or full endpoint for each protocol.",
+                            "按协议复制 Origin、Base URL 或完整端点。"
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                }
 
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) {
@@ -204,9 +274,9 @@ struct SubscriptionGatewayConnectionsView: View {
                 }
 
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 360), spacing: 10)],
+                    columns: [GridItem(.adaptive(minimum: 240), spacing: 8)],
                     alignment: .leading,
-                    spacing: 10
+                    spacing: 8
                 ) {
                     ForEach(protocolEndpoints) { endpoint in
                         protocolEndpointRow(endpoint)
@@ -336,40 +406,36 @@ struct SubscriptionGatewayConnectionsView: View {
         Button {
             selectedProtocol = endpoint
         } label: {
-            HStack(alignment: .center, spacing: 10) {
-                GatewayProviderIcon(providerID: endpoint.providerID, size: 34)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
+            HStack(spacing: 8) {
+                GatewayProviderIcon(providerID: endpoint.providerID, size: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
                         Text(endpoint.title)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
                         Text(endpoint.method)
                             .font(.caption2.weight(.bold).monospaced())
                             .foregroundStyle(.blue)
                     }
                     Text(endpoint.shortPurpose)
-                        .font(.caption)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    Text(endpoint.basePath.isEmpty ? "/" : endpoint.basePath)
+                        .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 5) {
-                        Text(endpoint.requiresModel ? "REST API Root" : "Base URL")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(endpoint.basePath.isEmpty ? "/" : endpoint.basePath)
-                            .font(.caption.monospaced())
-                    }
+                        .lineLimit(1)
                 }
-                Spacer(minLength: 5)
+                Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.quaternary)
             }
-            .padding(11)
-            .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
-            .background(Color.primary.opacity(0.028), in: RoundedRectangle(cornerRadius: 11))
-            .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(Color.primary.opacity(0.055)))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
         .help(L(
@@ -504,14 +570,19 @@ struct SubscriptionGatewayConnectionsView: View {
         manager.currentDistributionTargets
     }
 
-    private var hasPendingChanges: Bool { selectedTargets != actualTargets }
-    private var removedTargets: Set<ProxyTarget> { actualTargets.subtracting(selectedTargets) }
-
-    private func applicationCount(_ targets: Set<ProxyTarget>) -> Int {
-        targets.reduce(into: 0) { count, target in
-            count += target == .claude ? 2 : 1
-        }
+    private var hasProtocolPending: Bool {
+        let openCodePending = (selectedTargets.contains(.openCode) || actualTargets.contains(.openCode))
+            && draftOpenCodeProtocol != manager.managedOpenCodeProtocol
+        let claudePending = (selectedTargets.contains(.claude) || actualTargets.contains(.claude))
+            && draftClaudeProtocol != manager.managedClaudeProtocol
+        return openCodePending || claudePending
     }
+
+    private var hasPendingChanges: Bool {
+        selectedTargets != actualTargets || hasProtocolPending
+    }
+
+    private var removedTargets: Set<ProxyTarget> { actualTargets.subtracting(selectedTargets) }
 
     private var connectionFooter: some View {
         ViewThatFits(in: .horizontal) {
@@ -533,8 +604,8 @@ struct SubscriptionGatewayConnectionsView: View {
     private var connectionSummary: some View {
         HStack(spacing: 6) {
             Text(L(
-                "\(applicationCount(selectedTargets)) apps selected across \(selectedTargets.count) targets · \(applicationCount(actualTargets)) currently connected",
-                "已通过 \(selectedTargets.count) 个配置目标选择 \(applicationCount(selectedTargets)) 个应用 · 当前连接 \(applicationCount(actualTargets)) 个"
+                "\(selectedTargets.count) selected · \(actualTargets.count) connected",
+                "已选 \(selectedTargets.count) · 已接 \(actualTargets.count)"
             ))
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -550,6 +621,8 @@ struct SubscriptionGatewayConnectionsView: View {
         HStack(spacing: 9) {
             Button(L("Discard", "放弃修改")) {
                 selectedTargets = actualTargets
+                draftOpenCodeProtocol = manager.managedOpenCodeProtocol
+                draftClaudeProtocol = manager.managedClaudeProtocol
             }
             .buttonStyle(.borderless)
             .disabled(!hasPendingChanges || manager.isApplyingDistribution)
@@ -579,16 +652,26 @@ struct SubscriptionGatewayConnectionsView: View {
 
     private func applyConnections() {
         let requested = selectedTargets
+        let requestedOpenCode = draftOpenCodeProtocol
+        let requestedClaude = draftClaudeProtocol
         Task {
+            if requested.contains(.openCode) {
+                manager.managedOpenCodeProtocol = requestedOpenCode
+            }
+            if requested.contains(.claude) {
+                manager.managedClaudeProtocol = requestedClaude
+            }
             await manager.upsertManagedProvider(targets: requested)
             let refreshed = manager.currentDistributionTargets
             selectedTargets = refreshed
+            draftOpenCodeProtocol = manager.managedOpenCodeProtocol
+            draftClaudeProtocol = manager.managedClaudeProtocol
             if refreshed == requested, manager.lastError == nil { lastAppliedAt = Date() }
         }
     }
 
     private func targetNames(_ targets: Set<ProxyTarget>) -> String {
-        ProxyTarget.allCases
+        ProxyTarget.localProxyTargets
             .filter { targets.contains($0) }
             .map(\.gatewayTitle)
             .joined(separator: L(", ", "、"))

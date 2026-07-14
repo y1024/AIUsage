@@ -1220,7 +1220,8 @@
 "dashboard.overview" = "Overview";
 
 /* Views/DashboardView.swift */
-"dashboard.providers" = "Providers";
+"dashboard.providers" = "Subscription Quota";
+"dashboard.quota_attention" = "Needs attention";
 
 /* Views/DashboardView.swift */
 "dashboard.summary.cost_tracking" = "Usage Stats";

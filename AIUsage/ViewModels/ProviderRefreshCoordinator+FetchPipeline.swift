@@ -63,7 +63,11 @@ extension ProviderRefreshCoordinator {
 
                 do {
                     let (credential, usage) = try await ProviderAuthManager.authenticateCandidate(candidate)
-                    if shouldSuppressAutoManagedAccount(providerId: providerId, usage: usage) {
+                    if shouldSuppressAutoManagedAccount(
+                        providerId: providerId,
+                        usage: usage,
+                        credential: credential
+                    ) {
                         discoveryFailureBackoff[backoffKey] = Date().addingTimeInterval(discoveryFailureCooldown)
                         continue
                     }
@@ -95,7 +99,11 @@ extension ProviderRefreshCoordinator {
         value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().nilIfBlank
     }
 
-    func shouldSuppressAutoManagedAccount(providerId: String, usage: ProviderUsage) -> Bool {
+    func shouldSuppressAutoManagedAccount(
+        providerId: String,
+        usage: ProviderUsage,
+        credential: AccountCredential? = nil
+    ) -> Bool {
         let normalizedEmail = normalizedAccountLookupValue(
             usage.accountEmail?.nilIfBlank
                 ?? usage.accountLogin?.nilIfBlank
@@ -105,11 +113,13 @@ extension ProviderRefreshCoordinator {
             usage.usageAccountId?.nilIfBlank
                 ?? usage.accountLogin?.nilIfBlank
         )
+        let sourceFilePath = credential.flatMap(AccountIdentityPolicy.credentialAuthFilePath)
 
         return accountStore.hasHiddenRegistryMatch(
             providerId: providerId,
             normalizedEmail: normalizedEmail,
-            normalizedAccountId: normalizedAccountId
+            normalizedAccountId: normalizedAccountId,
+            sourceFilePath: sourceFilePath
         )
     }
 
@@ -442,6 +452,20 @@ extension ProviderRefreshCoordinator {
         let unmatchedIncoming = Dictionary(grouping: remainingIncoming, by: liveProviderIdentity(_:))
             .values
             .compactMap { preferredLiveProvider(among: Array($0), storedAccount: nil) }
+            .filter { candidate in
+                // Drop generic "not connected" placeholders once a healthy live exists for this provider.
+                guard candidate.needsCredentialConnection else { return true }
+                let hasHealthyLive = selected.contains {
+                    $0.status != .error && !$0.needsCredentialConnection
+                }
+                if hasHealthyLive { return false }
+                // Path-less auto placeholders (e.g. codex:auto:default) are not real accounts.
+                if candidate.sourceFilePath == nil,
+                   candidate.id.localizedCaseInsensitiveContains(":auto:") {
+                    return false
+                }
+                return true
+            }
 
         selected.append(contentsOf: unmatchedIncoming)
         return deduplicatedProvidersByID(selected)
@@ -530,6 +554,12 @@ extension ProviderRefreshCoordinator {
     func liveProviderIdentity(_ provider: ProviderData) -> String {
         let pid = provider.baseProviderId
         if AccountIdentityPolicy.isMultiWorkspace(pid) {
+            // Codex: same workspace (accountId) collapses AuthImports vs ~/.codex;
+            // different workspaces keep different accountIds → separate cards.
+            if pid.lowercased() == "codex",
+               let accountId = normalizedLiveAccountID(for: provider) {
+                return "\(pid):account:\(accountId)"
+            }
             if let path = provider.sourceFilePath?.nilIfBlank {
                 return "\(pid):path:\(AccountCredentialStore.normalizedAuthFilePath(path))"
             }

@@ -1035,6 +1035,11 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
     let accountIdentity: String?
     let sourceFingerprint: String
     let lastCopiedFingerprint: String
+    /// AIUsage 源侧语义指纹（基于「即将上传的转换副本」；忽略易变 token 字段）。
+    let lastSourceSemanticFingerprint: String?
+    /// CPA 落盘内容的语义指纹（忽略 access_token / last_refresh 等易变字段）。
+    /// 用于判定「CPA 副本是否被有意义地改过」；旧 manifest 可能缺失。
+    let lastCopiedSemanticFingerprint: String?
     let lastSyncedAt: Date
     var mode: CLIProxyAccountSyncMode
 
@@ -1047,6 +1052,8 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
         accountIdentity: String? = nil,
         sourceFingerprint: String,
         lastCopiedFingerprint: String,
+        lastSourceSemanticFingerprint: String? = nil,
+        lastCopiedSemanticFingerprint: String? = nil,
         lastSyncedAt: Date,
         mode: CLIProxyAccountSyncMode
     ) {
@@ -1056,6 +1063,8 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
         self.accountIdentity = accountIdentity
         self.sourceFingerprint = sourceFingerprint
         self.lastCopiedFingerprint = lastCopiedFingerprint
+        self.lastSourceSemanticFingerprint = lastSourceSemanticFingerprint
+        self.lastCopiedSemanticFingerprint = lastCopiedSemanticFingerprint
         self.lastSyncedAt = lastSyncedAt
         self.mode = mode
     }
@@ -1067,6 +1076,8 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
         case accountIdentity
         case sourceFingerprint
         case lastCopiedFingerprint
+        case lastSourceSemanticFingerprint
+        case lastCopiedSemanticFingerprint
         case lastSyncedAt
         case mode
     }
@@ -1079,6 +1090,14 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
         accountIdentity = try container.decodeIfPresent(String.self, forKey: .accountIdentity)
         sourceFingerprint = try container.decode(String.self, forKey: .sourceFingerprint)
         lastCopiedFingerprint = try container.decode(String.self, forKey: .lastCopiedFingerprint)
+        lastSourceSemanticFingerprint = try container.decodeIfPresent(
+            String.self,
+            forKey: .lastSourceSemanticFingerprint
+        )
+        lastCopiedSemanticFingerprint = try container.decodeIfPresent(
+            String.self,
+            forKey: .lastCopiedSemanticFingerprint
+        )
         lastSyncedAt = try container.decode(Date.self, forKey: .lastSyncedAt)
         mode = try container.decode(CLIProxyAccountSyncMode.self, forKey: .mode)
     }
@@ -1091,6 +1110,14 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
         try container.encodeIfPresent(accountIdentity, forKey: .accountIdentity)
         try container.encode(sourceFingerprint, forKey: .sourceFingerprint)
         try container.encode(lastCopiedFingerprint, forKey: .lastCopiedFingerprint)
+        try container.encodeIfPresent(
+            lastSourceSemanticFingerprint,
+            forKey: .lastSourceSemanticFingerprint
+        )
+        try container.encodeIfPresent(
+            lastCopiedSemanticFingerprint,
+            forKey: .lastCopiedSemanticFingerprint
+        )
         try container.encode(lastSyncedAt, forKey: .lastSyncedAt)
         try container.encode(mode, forKey: .mode)
     }
@@ -1118,6 +1145,8 @@ nonisolated enum CLIProxyAccountSyncManifestValidator {
             guard seenRecordIDs.insert(record.id.lowercased()).inserted,
                   isValidFingerprint(record.sourceFingerprint),
                   isValidFingerprint(record.lastCopiedFingerprint),
+                  record.lastSourceSemanticFingerprint.map(isValidFingerprint) ?? true,
+                  record.lastCopiedSemanticFingerprint.map(isValidFingerprint) ?? true,
                   isSafeAuthFileName(record.authFileName),
                   record.accountIdentity.map({
                       isSafeAccountIdentity($0, providerID: record.providerId)
@@ -1171,10 +1200,13 @@ nonisolated struct CLIProxyAccountIdentity: Equatable, Sendable {
 
     var planDisplayName: String? {
         guard let planType else { return nil }
-        switch planType {
+        switch planType.lowercased() {
         case "free": return "Free"
+        case "go": return "Go"
         case "plus": return "Plus"
         case "pro": return "Pro"
+        // OpenAI 产品侧原 Team 已更名为 Business；JWT/CPA 仍可能下发 team。
+        case "team" where providerID.lowercased() == "codex": return "Business"
         case "team": return "Team"
         case "business": return "Business"
         case "enterprise": return "Enterprise"

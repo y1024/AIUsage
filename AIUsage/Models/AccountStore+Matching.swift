@@ -90,7 +90,8 @@ extension AccountStore {
         from entry: ProviderAccountEntry,
         note: String?,
         isHidden: Bool,
-        lastSeenAt: String?
+        lastSeenAt: String?,
+        isPermanentlyRemoved: Bool = false
     ) -> StoredProviderAccount? {
         let now = SharedFormatters.iso8601String(from: Date())
         let label = entry.accountEmail?.nilIfBlank
@@ -109,10 +110,11 @@ extension AccountStore {
             note: note,
             accountId: entry.liveProvider?.accountId?.nilIfBlank ?? entry.storedAccount?.accountId,
             providerResultId: entry.liveProvider?.id ?? entry.storedAccount?.providerResultId,
-            credentialId: entry.storedAccount?.credentialId,
+            credentialId: isPermanentlyRemoved ? nil : entry.storedAccount?.credentialId,
             createdAt: entry.storedAccount?.createdAt ?? now,
             lastSeenAt: lastSeenAt ?? entry.storedAccount?.lastSeenAt,
-            isHidden: isHidden,
+            isHidden: isHidden || isPermanentlyRemoved,
+            isPermanentlyRemoved: isPermanentlyRemoved,
             sourceFilePath: entry.liveProvider?.sourceFilePath ?? entry.storedAccount?.sourceFilePath
         )
     }
@@ -126,9 +128,45 @@ extension AccountStore {
             return [directMatch]
         }
 
+        // Live multi-account rows are often `provider:cred:<id>` without a stored credentialId yet.
+        if let liveId = entry.liveProvider?.id,
+           let credentialId = AccountIdentityPolicy.extractCredentialId(from: liveId),
+           let directMatch = AccountCredentialStore.shared.loadCredential(
+            providerId: entry.providerId,
+            credentialId: credentialId
+           ) {
+            return [directMatch]
+        }
+
         let credentials = AccountCredentialStore.shared.loadCredentials(for: entry.providerId)
 
+        // Codex / Antigravity: never match by email alone (same inbox, different workspaces).
+        // Prefer auth-file path, then Codex accountId metadata.
         if AccountIdentityPolicy.isMultiWorkspace(entry.providerId) {
+            let livePath = entry.liveProvider?.sourceFilePath ?? entry.storedAccount?.sourceFilePath
+            if let livePath {
+                let pathMatches = credentials.filter { credential in
+                    AccountIdentityPolicy.sourceFilePathsMatch(
+                        AccountIdentityPolicy.credentialAuthFilePath(credential),
+                        livePath
+                    )
+                }
+                if !pathMatches.isEmpty {
+                    return pathMatches
+                }
+            }
+
+            if entry.providerId.lowercased() == "codex",
+               let accountId = (
+                entry.liveProvider?.accountId ?? entry.storedAccount?.accountId
+               )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().nilIfBlank {
+                return credentials.filter { credential in
+                    credential.metadata["accountId"]?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased() == accountId
+                }
+            }
+
             return []
         }
 
