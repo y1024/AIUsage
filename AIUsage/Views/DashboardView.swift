@@ -136,30 +136,18 @@ struct DashboardView: View {
         )
     }
 
-    /// 仪表盘热力图：半年口径，有数据的工具按每行两列排布。
-    /// 末行落单时用透明占位补齐右半列，保证每块热力图等宽（避免单块占满整行显得比上排大）；
-    /// 仅有一块数据源时才占满整行。
-    @ViewBuilder
+    /// 仪表盘热力图采用自适应卡片网格：
+    /// 窄窗口单列保证格子可读，中等窗口双列，超宽窗口三列，避免固定双列在两端尺寸下
+    /// 分别出现「格子过小」或「末行空半屏」。300pt 是半年热力图仍能保持完整月份标尺的下限。
     private var heatmapSection: some View {
-        let specs = heatmapSpecs
-        VStack(spacing: 16) {
-            ForEach(Array(stride(from: 0, to: specs.count, by: 2)), id: \.self) { start in
-                let row = Array(specs[start..<min(start + 2, specs.count)])
-                if row.count == 2 {
-                    HStack(alignment: .top, spacing: 16) {
-                        heatmap(for: row[0]).frame(maxWidth: .infinity)
-                        heatmap(for: row[1]).frame(maxWidth: .infinity)
-                    }
-                } else if specs.count == 1 {
-                    heatmap(for: row[0])
-                } else {
-                    HStack(alignment: .top, spacing: 16) {
-                        heatmap(for: row[0]).frame(maxWidth: .infinity)
-                        Color.clear
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 0)
-                    }
-                }
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 300, maximum: 560), spacing: 16, alignment: .top)],
+            alignment: .leading,
+            spacing: 16
+        ) {
+            ForEach(heatmapSpecs) { spec in
+                heatmap(for: spec)
+                    .frame(maxWidth: .infinity)
             }
         }
         .zIndex(1)

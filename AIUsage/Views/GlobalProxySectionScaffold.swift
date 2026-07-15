@@ -2,9 +2,9 @@ import SwiftUI
 
 // MARK: - Global Proxy Section Scaffold
 // 三轨（Codex / Claude / OpenCode）「全局统一代理」配置卡片的统一外壳，保证视觉与交互完全一致：
-//   头部：图标 + 标题/副标题 + 「激活节点」胶囊下拉（紧邻开关，运行时热切换）+ 主开关；
-//   状态行：运行/停用 + 端口；
-//   配置区：停用态显示紧凑可编辑字段（端口 / 接口 / 模型）；运行态折叠为一行只读 chip 摘要。
+//   头部：图标 + 标题/状态 + 「激活节点」胶囊下拉 + 按需配置按钮 + 主开关；
+//   摘要行：始终展示端口 / 接口 / 模型等高频信息；
+//   配置区：默认收起，仅停用态由用户显式展开编辑，避免低频参数长期占据首屏。
 //   错误行：操作失败提示。
 // 各轨通过 nodeControl / config / runningSummary 三个 @ViewBuilder 注入差异内容；通用控件样式见下方
 // GlobalProxyChipMenu / GlobalProxySummaryChip / GlobalProxyField / GlobalProxyInlineLabel / GlobalProxyTip。
@@ -13,6 +13,7 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
     let brand: Color
     let subtitle: String
     let isEnabled: Bool
+    let isRunning: Bool
     let isBusy: Bool
     let port: Int
     let bindHost: String
@@ -25,31 +26,31 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
     @ViewBuilder let config: () -> Config
     @ViewBuilder let runningSummary: () -> Summary
 
+    @State private var isConfigurationExpanded = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             header
-            statusLine
-            if isEnabled {
-                runningSummaryBlock
-            } else {
-                // 停用态始终显示配置区（含接口选择器）：即使当前接口下没有节点，也必须能切换接口，
-                // 否则会卡死在「无节点接口」上再也切不回去。无节点时在配置区上方给出提示。
-                if !hasNodes {
-                    Text(emptyHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                configBlock
+            summaryLine
+
+            if !hasNodes {
+                emptyStateHint
             }
+
+            if isConfigurationExpanded, !isEnabled {
+                Divider()
+                    .opacity(0.55)
+                    .padding(.top, 12)
+                configBlock
+                    .padding(.top, 12)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             if let errorText {
-                Text(errorText)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+                errorLine(errorText)
             }
         }
-        .padding(16)
+        .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 14)
                 .fill(Color(nsColor: .controlBackgroundColor))
@@ -59,18 +60,31 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
                 .stroke(isEnabled ? brand.opacity(0.45) : Color.primary.opacity(0.06), lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.2), value: isEnabled)
+        .animation(.easeInOut(duration: 0.18), value: isConfigurationExpanded)
+        .onChange(of: isEnabled) { _, enabled in
+            if enabled { isConfigurationExpanded = false }
+        }
     }
 
     // MARK: - Header (title + active node + master toggle)
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
-                .font(.system(size: 14))
-                .foregroundStyle(brand)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L("Global Proxy", "全局代理"))
-                    .font(.headline.weight(.bold))
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(brand.opacity(0.14))
+                    .frame(width: 30, height: 30)
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(brand)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
+                    Text(L("Global Proxy", "全局代理"))
+                        .font(.headline.weight(.bold))
+                    statusBadge
+                }
                 Text(subtitle)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -85,78 +99,174 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
             if isBusy {
                 ProgressView().controlSize(.small)
             }
+            configurationButton
             Toggle("", isOn: toggle)
                 .labelsHidden()
                 .toggleStyle(ProxyActivationToggleStyle(brandColor: brand, isBusy: isBusy))
                 // 仅在「无节点且当前未启用」时禁止开启；已启用时永远允许关闭，避免卡死无法停用。
                 .disabled((!hasNodes && !isEnabled) || isBusy)
+                .help(isEnabled
+                      ? L("Turn off the global proxy", "停用全局代理")
+                      : L("Turn on the global proxy", "启用全局代理"))
+                .accessibilityLabel(isEnabled
+                                    ? L("Turn off global proxy", "停用全局代理")
+                                    : L("Turn on global proxy", "启用全局代理"))
         }
     }
 
-    private var statusLine: some View {
-        HStack(spacing: 6) {
+    private var statusBadge: some View {
+        HStack(spacing: 5) {
             Circle()
-                .fill(isEnabled ? Color.green : Color.secondary.opacity(0.5))
-                .frame(width: 7, height: 7)
-            Text(isEnabled
-                 ? L("Running on \(bindHost):\(port)", "运行中 · \(bindHost):\(port)")
-                 : L("Stopped", "已停用"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+            Text(statusText)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(statusColor)
         }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(statusColor.opacity(0.11)))
     }
 
-    // MARK: - Running summary (read-only chips) / editable config block
+    private var statusColor: Color {
+        if isBusy { return .orange }
+        if isEnabled, isRunning { return .green }
+        if isEnabled { return .orange }
+        return .secondary
+    }
 
-    private var runningSummaryBlock: some View {
-        GlobalProxyFlowLayout(spacing: 6) {
-            if allowLAN.wrappedValue {
-                GlobalProxySummaryChip(
-                    label: L("LAN Access", "局域网访问"),
-                    value: L("Enabled", "已启用")
-                )
+    private var statusText: String {
+        if isBusy { return L("Working", "处理中") }
+        if isEnabled, isRunning { return L("Running", "运行中") }
+        if isEnabled { return L("Waiting", "等待启动") }
+        return L("Off", "未启用")
+    }
+
+    private var configurationButton: some View {
+        Button {
+            isConfigurationExpanded.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: isEnabled ? "lock.fill" : "slider.horizontal.3")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(isConfigurationExpanded ? L("Done", "完成") : L("Configure", "配置"))
+                    .font(.system(size: 11, weight: .semibold))
+                if !isEnabled {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .rotationEffect(.degrees(isConfigurationExpanded ? 180 : 0))
+                }
             }
-            runningSummary()
+            .foregroundStyle(isEnabled ? Color.secondary : brand)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color.primary.opacity(0.045)))
+            .overlay(Capsule().stroke(Color.primary.opacity(0.07), lineWidth: 1))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .buttonStyle(.plain)
+        .disabled(isEnabled || isBusy)
+        .help(isEnabled
+              ? L("Turn off the proxy to edit its connection settings", "请先停用代理，再修改连接设置")
+              : L("Edit connection settings", "编辑连接设置"))
+        .accessibilityLabel(isConfigurationExpanded
+                            ? L("Collapse global proxy settings", "收起全局代理设置")
+                            : L("Configure global proxy", "配置全局代理"))
+    }
+
+    // MARK: - Always-visible summary / on-demand editor
+
+    private var summaryLine: some View {
+        HStack(alignment: .center, spacing: 8) {
+            GlobalProxyFlowLayout(spacing: 6) {
+                GlobalProxySummaryChip(
+                    label: L("Endpoint", "入口"),
+                    value: "\(bindHost):\(port)"
+                )
+                if allowLAN.wrappedValue {
+                    GlobalProxySummaryChip(
+                        label: L("LAN", "局域网"),
+                        value: L("On", "已开放")
+                    )
+                }
+                runningSummary()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.top, 10)
     }
 
     private var configBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(L("Configuration", "配置"))
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .textCase(.uppercase)
-            lanAccessToggle
+            HStack(spacing: 10) {
+                Label(L("Connection Settings", "连接设置"), systemImage: "network")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle(L("LAN Access", "局域网访问"), isOn: allowLAN)
+                    .font(.system(size: 11, weight: .medium))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .help(L(
+                        "Off keeps the proxy available only on this Mac. Turn it on only when another device on your local network must connect.",
+                        "关闭时仅本机可用；只有同一局域网中的其它设备需要连接时才开启。"
+                    ))
+            }
+            lanWarning
             config()
         }
-        .padding(12)
+        .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.primary.opacity(0.035))
+                .fill(brand.opacity(0.045))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(brand.opacity(0.10), lineWidth: 1)
         )
     }
 
-    private var lanAccessToggle: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle(L("Allow LAN Access (0.0.0.0)", "允许局域网访问 (0.0.0.0)"), isOn: allowLAN)
-                .font(.caption.weight(.medium))
-            if allowLAN.wrappedValue {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text(L(
-                        "Warning: This will expose the proxy to your local network",
-                        "警告：这将把代理暴露到你的局域网"
-                    ))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                }
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
+    @ViewBuilder private var lanWarning: some View {
+        if allowLAN.wrappedValue {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(L(
+                    "Other devices on your local network can now reach this proxy.",
+                    "同一局域网中的其它设备现在可以访问此代理。"
+                ))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.orange.opacity(0.1)))
         }
+    }
+
+    private var emptyStateHint: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.orange)
+            Text(emptyHint)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 10)
+    }
+
+    private func errorLine(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            Text(text)
+                .font(.caption2)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 10)
     }
 }
 
@@ -213,7 +323,6 @@ struct GlobalProxyChipMenu: View {
             }
         }
         .buttonStyle(GlobalProxyChipButtonStyle(brand: brand, isDisabled: isDisabled))
-        .fixedSize()
         .disabled(isDisabled)
         .popover(isPresented: $isOpen, arrowEdge: .bottom) {
             panel
@@ -469,9 +578,15 @@ struct GlobalProxyTip: View {
     let text: String
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 10))
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: 5) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 10, weight: .medium))
+            Text(text)
+                .font(.system(size: 10))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .foregroundStyle(.tertiary)
+        .help(text)
     }
 }

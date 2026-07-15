@@ -11,9 +11,9 @@ import QuotaBackend
 
 struct OpenCodeGlobalProxySection: View {
     @ObservedObject private var manager = GlobalProxyManager.opencode
+    @ObservedObject private var runtime = GlobalProxyRuntime.opencode
     @ObservedObject private var store = OpenCodeNodeStore.shared
 
-    @State private var portText: String = ""
     @State private var modelText: String = ""
     @State private var selectedNodeId: String = ""
 
@@ -26,8 +26,9 @@ struct OpenCodeGlobalProxySection: View {
     var body: some View {
         GlobalProxySectionScaffold(
             brand: Self.brand,
-            subtitle: L("Fixed endpoint; switch active node within one interface, zero restart.", "固定入口，同接口内切换激活节点零重启、CLI 无感。"),
+            subtitle: L("One stable endpoint; switch nodes within the selected interface.", "一个固定入口，可在同接口节点间切换。"),
             isEnabled: isEnabled,
+            isRunning: runtime.isRunning,
             isBusy: manager.isBusy,
             port: manager.config.port,
             bindHost: manager.config.displayBindHost,
@@ -71,7 +72,6 @@ struct OpenCodeGlobalProxySection: View {
 
     @ViewBuilder private var runningSummary: some View {
         GlobalProxySummaryChip(label: L("Interface", "接口"), value: interface.displayName)
-        GlobalProxySummaryChip(label: L("Port", "端口"), value: "\(manager.config.port)")
         GlobalProxySummaryChip(label: L("Model", "模型"), value: manager.config.virtualModel)
     }
 
@@ -79,15 +79,8 @@ struct OpenCodeGlobalProxySection: View {
     // 接口决定 npm 包 / 后端透传轨道 / 可切换的节点集合；启用后锁定（换接口需先停用），故归入折叠配置区。
 
     private var configContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
-                GlobalProxyField(label: L("Port", "端口")) {
-                    TextField("14401", text: $portText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 90)
-                        .disabled(isEnabled)
-                        .onChange(of: portText) { _, _ in commitSettings() }
-                }
                 GlobalProxyField(label: L("Interface", "接口")) {
                     GlobalProxyChipMenu(
                         brand: Self.brand,
@@ -105,14 +98,22 @@ struct OpenCodeGlobalProxySection: View {
                         }
                     )
                 }
-                Spacer()
-            }
-            GlobalProxyField(label: L("Model", "模型")) {
-                TextField(GlobalProxyConfig.defaultOpenCodeModel, text: $modelText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 160)
-                    .disabled(isEnabled)
-                    .onChange(of: modelText) { _, _ in commitSettings() }
+                GlobalProxyField(label: L("Port", "端口")) {
+                    TextField(
+                        "14401",
+                        value: portBinding,
+                        format: IntegerFormatStyle<Int>.number.grouping(.never)
+                    )
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90)
+                }
+                GlobalProxyField(label: L("Model", "模型")) {
+                    TextField(GlobalProxyConfig.defaultOpenCodeModel, text: $modelText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                        .onChange(of: modelText) { _, _ in commitSettings() }
+                }
+                Spacer(minLength: 0)
             }
             GlobalProxyTip(text: L(
                 "Just the fixed entry name the CLI sends — name it anything. Each request is rewritten to the active node's real upstream model.",
@@ -125,6 +126,19 @@ struct OpenCodeGlobalProxySection: View {
         Binding(
             get: { manager.config.effectiveAllowLAN },
             set: { manager.updateAllowLAN($0) }
+        )
+    }
+
+    private var portBinding: Binding<Int> {
+        Binding(
+            get: { manager.config.port },
+            set: {
+                manager.updateSettings(
+                    port: $0,
+                    virtualModel: modelText,
+                    clientKey: manager.config.clientKey
+                )
+            }
         )
     }
 
@@ -181,14 +195,16 @@ struct OpenCodeGlobalProxySection: View {
     }
 
     private func syncFromConfig() {
-        portText = "\(manager.config.port)"
         modelText = manager.config.virtualModel
         selectedNodeId = resolvedSelection
     }
 
     private func commitSettings() {
         guard !isEnabled else { return }
-        let port = Int(portText.trimmingCharacters(in: .whitespaces)) ?? manager.config.port
-        manager.updateSettings(port: port, virtualModel: modelText, clientKey: manager.config.clientKey)
+        manager.updateSettings(
+            port: manager.config.port,
+            virtualModel: modelText,
+            clientKey: manager.config.clientKey
+        )
     }
 }

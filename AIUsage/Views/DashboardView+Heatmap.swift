@@ -21,6 +21,8 @@ struct LocalTokenUsageHeatmap: View {
     @State private var hoveredCell: HeatmapCellID?
     /// tooltip 卡片实测高度，用于「靠底行向上翻转」时精确定位（避免被页面底部遮挡）。
     @State private var tooltipHeight: CGFloat = 0
+    /// GeometryReader 本身没有内容固有高度；由实际格子尺寸回传精确高度，避免小格子仍占用最大网格高度。
+    @State private var gridContentHeight: CGFloat = 108
 
     private static let tooltipWidth: CGFloat = 280
 
@@ -191,14 +193,17 @@ struct LocalTokenUsageHeatmap: View {
 
     var body: some View {
         let snap = snapshot
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
             header
             if snap.tokens.isEmpty {
                 emptyState
+                    .padding(.top, 8)
             } else {
                 gridSection(snap: snap)
+                    .padding(.top, 8)
                     .zIndex(1)
                 footerView(snap: snap)
+                    .padding(.top, 10)
             }
         }
         .padding(16)
@@ -222,23 +227,23 @@ struct LocalTokenUsageHeatmap: View {
 
     // MARK: - Grid
 
-    /// 格子边长上下限：窄窗口优先压缩到 `minCellSide`；连最小格子都放不下时再减少显示周数。
-    private static let minCellSide: CGFloat = 6
+    /// 格子边长上下限：7pt 以下难以稳定辨识强度与 hover；放不下时宁可少显示最早几周。
+    private static let minCellSide: CGFloat = 7
     private static let maxCellSide: CGFloat = 16
-    private static let gridSpacing: CGFloat = 3
+    private static let compactGridSpacing: CGFloat = 2
+    private static let regularGridSpacing: CGFloat = 3
     private static let weekdayLabelWidth: CGFloat = 28
     private static let monthLabelHeight: CGFloat = 14
-    /// 网格区固定高度：贴合最大格子（16pt）时 月份行 14 + 间距 4 + 7 行格子 130 ≈ 148。
-    private static let gridSectionHeight: CGFloat = 148
+    private static let monthToGridSpacing: CGFloat = 4
 
     /// 用 GeometryReader 实测可用宽度，自适应推导格子边长与显示周数：
     /// 宽窗口铺满整年（16pt 格子），窄窗口先压缩格子、连最小格子都放不下时再从最近周向前裁剪，永不溢出卡片。
     private func gridSection(snap: HeatmapSnapshot) -> some View {
         GeometryReader { proxy in
-            let spacing = Self.gridSpacing
             let weekdayLabelWidth = Self.weekdayLabelWidth
             let monthLabelHeight = Self.monthLabelHeight
             let availableWidth = max(0, proxy.size.width - weekdayLabelWidth)
+            let spacing = proxy.size.width < 340 ? Self.compactGridSpacing : Self.regularGridSpacing
 
             // 先按「最小格子」算出最多能放下多少周，再据此反推真实格子边长。
             let fitWeeks = max(1, Int((availableWidth + spacing) / (Self.minCellSide + spacing)))
@@ -250,8 +255,9 @@ struct LocalTokenUsageHeatmap: View {
             )
             let columnPitch = cellSide + spacing
             let gridHeight = cellSide * 7 + spacing * 6
+            let contentHeight = monthLabelHeight + Self.monthToGridSpacing + gridHeight
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Self.monthToGridSpacing) {
                 monthLabelsRow(
                     cellSide: cellSide,
                     columnPitch: columnPitch,
@@ -268,7 +274,8 @@ struct LocalTokenUsageHeatmap: View {
                     gridColumns(cellSide: cellSide, spacing: spacing, snap: snap, visibleWeeks: visibleWeeks, weekOffset: weekOffset)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: contentHeight, maxHeight: contentHeight, alignment: .topLeading)
+            .preference(key: HeatmapGridHeightKey.self, value: contentHeight)
             .overlay {
                 if let hovered = hoveredCell, hovered.week < visibleWeeks {
                     heatmapTooltipOverlay(
@@ -285,7 +292,11 @@ struct LocalTokenUsageHeatmap: View {
                 }
             }
         }
-        .frame(height: Self.gridSectionHeight)
+        .frame(height: gridContentHeight)
+        .onPreferenceChange(HeatmapGridHeightKey.self) { height in
+            guard height > 0, abs(height - gridContentHeight) > 0.5 else { return }
+            gridContentHeight = height
+        }
     }
 
     private static let monthFormatterZh: DateFormatter = {
@@ -303,7 +314,7 @@ struct LocalTokenUsageHeatmap: View {
     }()
 
     private func monthLabelsRow(cellSide: CGFloat, columnPitch: CGFloat, height: CGFloat, visibleWeeks: Int, weekOffset: Int) -> some View {
-        let weekdayLabelWidth: CGFloat = 28
+        let weekdayLabelWidth = Self.weekdayLabelWidth
         let formatter = appState.language == "zh" ? Self.monthFormatterZh : Self.monthFormatterEn
 
         let calendar = Calendar.current
@@ -318,11 +329,26 @@ struct LocalTokenUsageHeatmap: View {
             }
         }
 
+        // 可见区若从月底开始，首月标签可能与下个月只差一两列；优先保留区间起始月份，
+        // 跳过距离过近的下一个标签，避免碰撞又不让半年范围看起来被截短。
+        let minimumLabelDistance: CGFloat = appState.language == "zh" ? 18 : 24
+        var visibleLabels: [(column: Int, text: String)] = []
+        for entry in labels {
+            guard let previous = visibleLabels.last else {
+                visibleLabels.append(entry)
+                continue
+            }
+            let distance = CGFloat(entry.column - previous.column) * columnPitch
+            if distance >= minimumLabelDistance {
+                visibleLabels.append(entry)
+            }
+        }
+
         return ZStack(alignment: .topLeading) {
             Color.clear
-            ForEach(labels, id: \.column) { entry in
+            ForEach(visibleLabels, id: \.column) { entry in
                 Text(entry.text)
-                    .font(.caption2)
+                    .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.secondary)
                     .fixedSize()
                     .offset(x: weekdayLabelWidth + CGFloat(entry.column) * columnPitch, y: 0)
@@ -348,7 +374,7 @@ struct LocalTokenUsageHeatmap: View {
                     Color.clear.frame(height: cellSide)
                     if visibleRows.contains(row) {
                         Text(names[row])
-                            .font(.system(size: 9))
+                            .font(.system(size: cellSide < 9 ? 8 : 9, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -371,12 +397,13 @@ struct LocalTokenUsageHeatmap: View {
                         let binIndex = bin(for: count, thresholds: computedThresholds)
                         let isToday = isActive && cellDate == today
                         let isHovered = hoveredCell?.week == week && hoveredCell?.day == day
+                        let cornerRadius = max(2, min(4, cellSide * 0.24))
 
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .fill(color(for: binIndex, active: isActive))
                             .frame(width: cellSide, height: cellSide)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                                     .stroke(
                                         isHovered ? accent : (isToday ? accent.opacity(0.9) : Color.clear),
                                         lineWidth: isHovered ? 1.5 : (isToday ? 1 : 0)
@@ -418,7 +445,7 @@ struct LocalTokenUsageHeatmap: View {
         let models = (isActive && tokens > 0) ? modelBreakdown(for: cellDate) : []
 
         let cellCenterX = weekdayLabelWidth + CGFloat(cell.week) * columnPitch + cellSide / 2
-        let gridTopY = monthLabelHeight + 4
+        let gridTopY = monthLabelHeight + Self.monthToGridSpacing
         let cellTopY = gridTopY + CGFloat(cell.day) * (cellSide + spacing)
         let cellBottomY = cellTopY + cellSide
 
@@ -590,19 +617,38 @@ struct LocalTokenUsageHeatmap: View {
     // MARK: - Footer
 
     private func footerView(snap: HeatmapSnapshot) -> some View {
-        HStack(alignment: .center, spacing: 6) {
-            Text(L("Total \(formatCompactNumber(Double(snap.totalTokens))) tokens",
-                   "合计 \(formatCompactNumber(Double(snap.totalTokens))) tokens"))
-                .font(.caption.weight(.semibold))
-            if let peak = snap.maxDayTokens {
-                Text("·")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                Text(peakSummaryText(for: peak, activeDays: snap.activeDayCount))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        let totalText = L("Total \(formatCompactNumber(Double(snap.totalTokens))) tokens",
+                          "合计 \(formatCompactNumber(Double(snap.totalTokens))) tokens")
+        let peakText = snap.maxDayTokens.map { peakSummaryText(for: $0, activeDays: snap.activeDayCount) }
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 6) {
+                Text(totalText)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                if let peakText {
+                    Text("·")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Text(peakText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer()
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(totalText)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                if let peakText {
+                    Text(peakText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
         }
     }
 
@@ -665,5 +711,12 @@ private struct TooltipHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private struct HeatmapGridHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

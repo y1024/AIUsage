@@ -8,9 +8,9 @@ import SwiftUI
 
 struct ClaudeGlobalProxySection: View {
     @ObservedObject private var manager = GlobalProxyManager.claude
+    @ObservedObject private var runtime = GlobalProxyRuntime.claude
     @ObservedObject private var proxyVM = ProxyViewModel.shared
 
-    @State private var portText: String = ""
     @State private var opusModel: String = ""
     @State private var sonnetModel: String = ""
     @State private var haikuModel: String = ""
@@ -24,8 +24,9 @@ struct ClaudeGlobalProxySection: View {
     var body: some View {
         GlobalProxySectionScaffold(
             brand: Self.claudeBrand,
-            subtitle: L("Fixed endpoint; switch active node with zero restart.", "固定入口，切换激活节点零重启、CLI 无感。"),
+            subtitle: L("One stable endpoint with three model tiers.", "一个固定入口，自动映射三档模型。"),
             isEnabled: isEnabled,
+            isRunning: runtime.isRunning,
             isBusy: manager.isBusy,
             port: manager.config.port,
             bindHost: manager.config.displayBindHost,
@@ -66,7 +67,6 @@ struct ClaudeGlobalProxySection: View {
     // MARK: - Running Summary (read-only chips when enabled)
 
     @ViewBuilder private var runningSummary: some View {
-        GlobalProxySummaryChip(label: L("Port", "端口"), value: "\(manager.config.port)")
         GlobalProxySummaryChip(label: L("Opus", "Opus"), value: manager.config.claudeOpus)
         GlobalProxySummaryChip(label: L("Sonnet", "Sonnet"), value: manager.config.claudeSonnet)
         GlobalProxySummaryChip(label: L("Haiku", "Haiku"), value: manager.config.claudeHaiku)
@@ -76,18 +76,17 @@ struct ClaudeGlobalProxySection: View {
     // 三层模型并排一行，省纵向空间；端口/三模型仅停用态可改。
 
     private var configContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
                 GlobalProxyField(label: L("Port", "端口")) {
-                    TextField("14400", text: $portText)
+                    TextField(
+                        "14400",
+                        value: portBinding,
+                        format: IntegerFormatStyle<Int>.number.grouping(.never)
+                    )
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 90)
-                        .disabled(isEnabled)
-                        .onChange(of: portText) { _, _ in commitSettings() }
                 }
-                Spacer()
-            }
-            HStack(alignment: .top, spacing: 12) {
                 modelColumn(L("Opus", "Opus"), placeholder: GlobalProxyConfig.defaultClaudeOpus, text: $opusModel)
                 modelColumn(L("Sonnet", "Sonnet"), placeholder: GlobalProxyConfig.defaultClaudeSonnet, text: $sonnetModel)
                 modelColumn(L("Haiku", "Haiku"), placeholder: GlobalProxyConfig.defaultClaudeHaiku, text: $haikuModel)
@@ -105,8 +104,7 @@ struct ClaudeGlobalProxySection: View {
         GlobalProxyField(label: L("\(tier) Model", "\(tier) 模型")) {
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 160)
-                .disabled(isEnabled)
+                .frame(minWidth: 120, idealWidth: 150, maxWidth: 160)
                 .onChange(of: text.wrappedValue) { _, _ in commitSettings() }
         }
     }
@@ -115,6 +113,20 @@ struct ClaudeGlobalProxySection: View {
         Binding(
             get: { manager.config.effectiveAllowLAN },
             set: { manager.updateAllowLAN($0) }
+        )
+    }
+
+    private var portBinding: Binding<Int> {
+        Binding(
+            get: { manager.config.port },
+            set: {
+                manager.updateClaudeModels(
+                    port: $0,
+                    opus: opusModel,
+                    sonnet: sonnetModel,
+                    haiku: haikuModel
+                )
+            }
         )
     }
 
@@ -156,7 +168,6 @@ struct ClaudeGlobalProxySection: View {
     }
 
     private func syncFromConfig() {
-        portText = "\(manager.config.port)"
         opusModel = manager.config.claudeOpus
         sonnetModel = manager.config.claudeSonnet
         haikuModel = manager.config.claudeHaiku
@@ -165,7 +176,11 @@ struct ClaudeGlobalProxySection: View {
 
     private func commitSettings() {
         guard !isEnabled else { return }
-        let port = Int(portText.trimmingCharacters(in: .whitespaces)) ?? manager.config.port
-        manager.updateClaudeModels(port: port, opus: opusModel, sonnet: sonnetModel, haiku: haikuModel)
+        manager.updateClaudeModels(
+            port: manager.config.port,
+            opus: opusModel,
+            sonnet: sonnetModel,
+            haiku: haikuModel
+        )
     }
 }

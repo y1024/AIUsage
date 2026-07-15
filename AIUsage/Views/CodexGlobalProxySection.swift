@@ -7,9 +7,9 @@ import SwiftUI
 
 struct CodexGlobalProxySection: View {
     @ObservedObject private var manager = GlobalProxyManager.shared
+    @ObservedObject private var runtime = GlobalProxyRuntime.codex
     @ObservedObject private var proxyVM = ProxyViewModel.shared
 
-    @State private var portText: String = ""
     @State private var virtualModel: String = ""
     @State private var selectedNodeId: String = ""
 
@@ -21,8 +21,9 @@ struct CodexGlobalProxySection: View {
     var body: some View {
         GlobalProxySectionScaffold(
             brand: Self.codexBrand,
-            subtitle: L("Fixed endpoint; switch active node with zero restart.", "固定入口，切换激活节点零重启、CLI 无感。"),
+            subtitle: L("One stable endpoint; choose a node and start.", "一个固定入口，选择节点即可启动。"),
             isEnabled: isEnabled,
+            isRunning: runtime.isRunning,
             isBusy: manager.isBusy,
             port: manager.config.port,
             bindHost: manager.config.displayBindHost,
@@ -63,30 +64,30 @@ struct CodexGlobalProxySection: View {
     // MARK: - Running Summary (read-only chips when enabled)
 
     @ViewBuilder private var runningSummary: some View {
-        GlobalProxySummaryChip(label: L("Port", "端口"), value: "\(manager.config.port)")
         GlobalProxySummaryChip(label: L("Model", "模型"), value: manager.config.virtualModel)
     }
 
     // MARK: - Configuration (port / virtual model; editable only while disabled)
 
     private var configContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
                 GlobalProxyField(label: L("Port", "端口")) {
-                    TextField("14399", text: $portText)
+                    TextField(
+                        "14399",
+                        value: portBinding,
+                        format: IntegerFormatStyle<Int>.number.grouping(.never)
+                    )
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 90)
-                        .disabled(isEnabled)
-                        .onChange(of: portText) { _, _ in commitSettings() }
                 }
-                Spacer()
-            }
-            GlobalProxyField(label: L("Model", "模型")) {
-                TextField(GlobalProxyConfig.defaultVirtualModel, text: $virtualModel)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 160)
-                    .disabled(isEnabled)
-                    .onChange(of: virtualModel) { _, _ in commitSettings() }
+                GlobalProxyField(label: L("Model", "模型")) {
+                    TextField(GlobalProxyConfig.defaultVirtualModel, text: $virtualModel)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 190)
+                        .onChange(of: virtualModel) { _, _ in commitSettings() }
+                }
+                Spacer(minLength: 0)
             }
             GlobalProxyTip(text: L(
                 "Model is just the fixed entry name Codex sends — name it anything. Each request is rewritten to the active node's real upstream model.",
@@ -99,6 +100,19 @@ struct CodexGlobalProxySection: View {
         Binding(
             get: { manager.config.effectiveAllowLAN },
             set: { manager.updateAllowLAN($0) }
+        )
+    }
+
+    private var portBinding: Binding<Int> {
+        Binding(
+            get: { manager.config.port },
+            set: {
+                manager.updateSettings(
+                    port: $0,
+                    virtualModel: virtualModel,
+                    clientKey: manager.config.clientKey
+                )
+            }
         )
     }
 
@@ -140,14 +154,16 @@ struct CodexGlobalProxySection: View {
     }
 
     private func syncFromConfig() {
-        portText = "\(manager.config.port)"
         virtualModel = manager.config.virtualModel
         selectedNodeId = resolvedSelection
     }
 
     private func commitSettings() {
         guard !isEnabled else { return }
-        let port = Int(portText.trimmingCharacters(in: .whitespaces)) ?? manager.config.port
-        manager.updateSettings(port: port, virtualModel: virtualModel, clientKey: manager.config.clientKey)
+        manager.updateSettings(
+            port: manager.config.port,
+            virtualModel: virtualModel,
+            clientKey: manager.config.clientKey
+        )
     }
 }
