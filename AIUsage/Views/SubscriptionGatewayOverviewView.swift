@@ -218,7 +218,7 @@ struct SubscriptionGatewayOverviewView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(L("CPA available models", "CPA 可用模型")).font(.headline)
+                        Text(L("Available models", "可用模型")).font(.headline)
                         Text(modelCatalogDetail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -245,7 +245,7 @@ struct SubscriptionGatewayOverviewView: View {
                 if manager.modelCatalog.count > 8 || !normalizedModelQuery.isEmpty {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField(L("Search model name or any API ID", "搜索模型名称或任一 API ID"), text: $modelQuery)
+                        TextField(L("Search models", "搜索模型"), text: $modelQuery)
                             .textFieldStyle(.plain)
                     }
                     .padding(.horizontal, 10)

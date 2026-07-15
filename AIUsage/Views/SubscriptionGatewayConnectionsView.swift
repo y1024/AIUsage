@@ -121,6 +121,52 @@ struct SubscriptionGatewayConnectionsView: View {
     private var errorBanners: some View {
         if let error = manager.lastError { GatewayErrorBanner(message: error) }
         if case .failed(let error) = runtime.state { GatewayErrorBanner(message: error) }
+        if runtime.clientKeyNeedsRecopy {
+            clientKeyRotationBanner
+        }
+    }
+
+    private var clientKeyRotationBanner: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(
+                L("CPA client key changed", "CPA 客户端密钥已变更"),
+                systemImage: "key.horizontal.fill"
+            )
+            .font(.subheadline.weight(.semibold))
+            Text(L(
+                "The gateway client key does not rotate on every restart. It only changes if Keychain was cleared or the app regenerated secrets. External clients (for example Hermes OPENAI_API_KEY) still holding the old key get HTTP 401 before any account retry. Copy the current key and update those clients.",
+                "客户端密钥不会每次重启都变；只有钥匙串被清空或密钥被重建时才会更换。外部客户端（如 Hermes 的 OPENAI_API_KEY）若仍用旧钥，会在进账号池之前就收到 401，根本不会换号。请复制当前密钥并更新客户端。"
+            ))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                if let key = runtime.clientAPIKey {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(key, forType: .string)
+                        runtime.acknowledgeClientKeyCopied()
+                    } label: {
+                        Label(
+                            L(
+                                "Copy current key (…\(runtime.clientAPIKeyFingerprint ?? "????"))",
+                                "复制当前密钥（…\(runtime.clientAPIKeyFingerprint ?? "????")）"
+                            ),
+                            systemImage: "doc.on.doc"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                Button(L("Dismiss", "知道了")) {
+                    runtime.acknowledgeClientKeyCopied()
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.orange.opacity(0.18)))
     }
 
     private func targetCard(_ target: ProxyTarget) -> some View {
@@ -296,14 +342,28 @@ struct SubscriptionGatewayConnectionsView: View {
                     }
                 }
 
-                if runtime.clientAPIKey == nil {
-                    HStack(spacing: 8) {
-                        Image(systemName: "info.circle")
-                        Text(L("Start CPA to load the client key.", "启动 CPA 后即可读取客户端密钥。"))
+                HStack(spacing: 10) {
+                    Image(systemName: "key.fill")
+                        .foregroundStyle(.indigo)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Client keys", "客户端密钥"))
+                            .font(.subheadline.weight(.semibold))
+                        Text(
+                            runtime.clientAPIKeyFingerprint.map {
+                                L("Default …\($0) · manage in Settings", "默认 …\($0) · 在设置中管理")
+                            } ?? L("Manage keys in Settings → API Keys", "在 设置 → 密钥 中管理")
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(L("Manage", "管理")) {
+                        CLIProxyGatewayNavigation.shared.showSettings(destination: .keys)
+                    }
+                    .buttonStyle(.bordered)
                 }
+                .padding(10)
+                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 DisclosureGroup(isExpanded: $showAdditionalRoutes) {
                     VStack(alignment: .leading, spacing: 7) {
@@ -855,7 +915,8 @@ private struct GatewayEndpointDetailSheet: View {
                             GatewayCopyField(
                                 label: L("CPA client key", "CPA 客户端密钥"),
                                 value: clientAPIKey,
-                                masked: true
+                                masked: true,
+                                onCopied: { CLIProxyRuntimeController.shared.acknowledgeClientKeyCopied() }
                             )
                         } else {
                             Label(

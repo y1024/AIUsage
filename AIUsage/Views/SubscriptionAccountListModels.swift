@@ -49,9 +49,10 @@ enum SubscriptionAccountListLogic {
                 return .needsConnection
             }
             switch live.status {
-            case .error, .critical, .watch:
+            case .error:
+                // 仅凭据/抓取失败需要用户动手；额度 watch/critical 仍算在线。
                 return .attention
-            case .healthy, .idle, .tracking:
+            case .critical, .watch, .healthy, .idle, .tracking:
                 return .ready
             }
         }
@@ -59,6 +60,15 @@ enum SubscriptionAccountListLogic {
             return .loading
         }
         return .offline
+    }
+
+    /// 额度告警（少/用尽）：卡片上已展示，不算「需处理」。
+    static func hasQuotaAlert(_ entry: ProviderAccountEntry) -> Bool {
+        guard let live = entry.liveProvider, !live.needsCredentialConnection else { return false }
+        switch live.status {
+        case .watch, .critical: return true
+        case .healthy, .idle, .tracking, .error: return false
+        }
     }
 
     static func matches(

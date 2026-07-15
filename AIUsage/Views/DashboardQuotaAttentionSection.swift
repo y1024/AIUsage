@@ -15,6 +15,8 @@ struct DashboardQuotaAttentionSection: View {
     private var attentionEntries: [ProviderAccountEntry] {
         entries
             .filter { entry in
+                // 首页仍汇总额度告警；订阅页「需处理」不含额度（见 SubscriptionAccountListLogic）。
+                if SubscriptionAccountListLogic.hasQuotaAlert(entry) { return true }
                 let bucket = SubscriptionAccountListLogic.bucket(for: entry, isLoading: isLoading(entry))
                 switch bucket {
                 case .attention, .needsConnection, .offline:
@@ -110,15 +112,17 @@ struct DashboardQuotaAttentionSection: View {
     }
 
     private func attentionSortScore(_ entry: ProviderAccountEntry) -> Int {
-        let bucket = SubscriptionAccountListLogic.bucket(for: entry, isLoading: isLoading(entry))
-        switch bucket {
-        case .attention:
-            switch entry.liveProvider?.status {
+        if let status = entry.liveProvider?.status {
+            switch status {
             case .critical: return 5
             case .watch: return 4
             case .error: return 3
-            default: return 3
+            case .healthy, .idle, .tracking: break
             }
+        }
+        let bucket = SubscriptionAccountListLogic.bucket(for: entry, isLoading: isLoading(entry))
+        switch bucket {
+        case .attention: return 3
         case .needsConnection: return 2
         case .offline: return 1
         case .ready, .loading: return 0
@@ -138,6 +142,10 @@ struct DashboardQuotaAttentionRow: View {
     }
 
     private var statusText: String {
+        if SubscriptionAccountListLogic.hasQuotaAlert(entry),
+           let label = entry.liveProvider?.statusLabel.nilIfBlank {
+            return localizedDashboardStatus(label)
+        }
         switch bucket {
         case .needsConnection:
             return L("Not connected", "未连接")

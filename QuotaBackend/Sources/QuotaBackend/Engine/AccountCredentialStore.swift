@@ -47,7 +47,11 @@ public final class AccountCredentialStore: @unchecked Sendable {
         return "\(bundleID).providerCredentials"
     }()
     private static let credentialVaultAccount = "__credential_vault_v2__"
-    private static let managedAuthImportsPathComponent = "/Library/Application Support/AIUsage/AuthImports/"
+    /// 正式版与 Debug 隔离目录均视为托管导入路径（用于凭据评分，不参与删除）。
+    private static let managedAuthImportsPathMarkers = [
+        "/Library/Application Support/AIUsage/AuthImports/",
+        "/Library/Application Support/AIUsage/AuthImports-"
+    ]
     private static let keychainAccessibility = kSecAttrAccessibleAfterFirstUnlock
     private let lock = NSLock()
     private var cachedCredentialsByStorageKey: [String: AccountCredential]?
@@ -55,6 +59,10 @@ public final class AccountCredentialStore: @unchecked Sendable {
     /// (e.g. the account registry from SecureAccountVault), so the whole app keeps
     /// exactly one keychain item and at most one "Always Allow" prompt.
     private var cachedAuxiliary: [String: Data] = [:]
+    /// `true` only after a definitive Keychain read (`errSecSuccess` or
+    /// `errSecItemNotFound`). Permission / decode failures must stay `false`
+    /// so we never persist an empty stand-in vault over real credentials.
+    private var vaultIsAuthoritative = false
 
     private init() {}
 
@@ -63,6 +71,12 @@ public final class AccountCredentialStore: @unchecked Sendable {
         /// Auxiliary blobs co-located in the same keychain item (key → opaque Data).
         /// Optional so older vault JSON (credentials only) still decodes unchanged.
         var auxiliary: [String: Data]?
+    }
+
+    private enum KeychainVaultRead {
+        case found(CredentialVault)
+        case notFound
+        case failed(CredentialStoreError)
     }
 
     // MARK: - CRUD
@@ -276,14 +290,34 @@ public final class AccountCredentialStore: @unchecked Sendable {
     }
 
     private func loadCredentialVaultUnsafe() -> [String: AccountCredential] {
-        if let cachedCredentialsByStorageKey {
+        if vaultIsAuthoritative, let cachedCredentialsByStorageKey {
             return cachedCredentialsByStorageKey
         }
 
-        // Normal path: read only the single canonical vault item.
-        let vault = loadVaultUnsafe() ?? CredentialVault(credentials: [], auxiliary: nil)
-        let dict = applyLoadedVaultUnsafe(vault)
+        switch readVaultFromKeychainUnsafe() {
+        case .found(let vault):
+            vaultIsAuthoritative = true
+            let dict = applyLoadedVaultUnsafe(vault)
+            return finishVaultLoadUnsafe(dict)
+        case .notFound:
+            // First launch / wiped item: empty vault is legitimate and writable.
+            vaultIsAuthoritative = true
+            let dict = applyLoadedVaultUnsafe(CredentialVault(credentials: [], auxiliary: nil))
+            return finishVaultLoadUnsafe(dict)
+        case .failed(let error):
+            // Fail closed: do not cache an empty stand-in. Reads look empty for
+            // this attempt; writes must refuse until a definitive load succeeds.
+            vaultIsAuthoritative = false
+            cachedCredentialsByStorageKey = nil
+            cachedAuxiliary = [:]
+            credentialLog.error(
+                "Keychain vault read failed; refusing to treat vault as empty: \(error.localizedDescription, privacy: .public)"
+            )
+            return [:]
+        }
+    }
 
+    private func finishVaultLoadUnsafe(_ dict: [String: AccountCredential]) -> [String: AccountCredential] {
         // One-time cutover from every historical Keychain layout. Gated by a
         // sentinel stored in the vault's auxiliary, so after the first successful
         // run no legacy item is ever read again.
@@ -298,6 +332,14 @@ public final class AccountCredentialStore: @unchecked Sendable {
             markLegacyCutoverSkippedForNonProductionUnsafe()
         }
         return dict
+    }
+
+    private func requireAuthoritativeVaultForWriteUnsafe() throws {
+        if vaultIsAuthoritative { return }
+        _ = loadCredentialVaultUnsafe()
+        guard vaultIsAuthoritative else {
+            throw CredentialStoreError.vaultUnavailable
+        }
     }
 
     /// Debug / 非生产宿主：只在本进程自己的 vault 里记 sentinel，绝不 collect/purge 正式 Keychain。
@@ -370,10 +412,15 @@ public final class AccountCredentialStore: @unchecked Sendable {
     /// Read an opaque blob co-located in the credential vault item.
     /// Used by app-side stores (e.g. SecureAccountVault) so the whole app keeps
     /// a single keychain item and at most one access prompt.
+    ///
+    /// When Keychain is temporarily unreadable, returns `nil` without poisoning
+    /// the in-memory vault. Callers that must mutate storage should use
+    /// `saveAuxiliaryData`, which fail-closes instead of writing an empty vault.
     public func loadAuxiliaryData(forKey key: String) -> Data? {
         lock.lock()
         defer { lock.unlock() }
         _ = loadCredentialVaultUnsafe()
+        guard vaultIsAuthoritative else { return nil }
         return cachedAuxiliary[key]
     }
 
@@ -384,15 +431,26 @@ public final class AccountCredentialStore: @unchecked Sendable {
         defer { lock.unlock() }
 
         let vault = loadCredentialVaultUnsafe()
+        try requireAuthoritativeVaultForWriteUnsafe()
+        let previous = cachedAuxiliary[key]
         if let data {
             cachedAuxiliary[key] = data
         } else {
             cachedAuxiliary.removeValue(forKey: key)
         }
-        try saveCredentialVaultUnsafe(vault)
+        do {
+            try saveCredentialVaultUnsafe(vault)
+        } catch {
+            if let previous {
+                cachedAuxiliary[key] = previous
+            } else {
+                cachedAuxiliary.removeValue(forKey: key)
+            }
+            throw error
+        }
     }
 
-    private func loadVaultUnsafe() -> CredentialVault? {
+    private func readVaultFromKeychainUnsafe() -> KeychainVaultRead {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.service,
@@ -403,13 +461,25 @@ public final class AccountCredentialStore: @unchecked Sendable {
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else {
-            return nil
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data else {
+                return .failed(.keychainReadFailed(status))
+            }
+            do {
+                return .found(try JSONDecoder().decode(CredentialVault.self, from: data))
+            } catch {
+                return .failed(.vaultDecodeFailed)
+            }
+        case errSecItemNotFound:
+            return .notFound
+        default:
+            return .failed(.keychainReadFailed(status))
         }
-        return try? JSONDecoder().decode(CredentialVault.self, from: data)
     }
 
     private func saveCredentialVaultUnsafe(_ credentialsByStorageKey: [String: AccountCredential]) throws {
+        try requireAuthoritativeVaultForWriteUnsafe()
         let orderedCredentials = credentialsByStorageKey.values.sorted(by: credentialSort)
         let data = try JSONEncoder().encode(
             CredentialVault(credentials: orderedCredentials, auxiliary: cachedAuxiliary.isEmpty ? nil : cachedAuxiliary)
@@ -801,7 +871,7 @@ public final class AccountCredentialStore: @unchecked Sendable {
             } else {
                 score -= 120
             }
-            if path.contains(Self.managedAuthImportsPathComponent) {
+            if Self.managedAuthImportsPathMarkers.contains(where: { path.contains($0) }) {
                 score += 25
             }
             if normalizedLookup(credential.metadata["sourcePath"]) == normalizedLookup(path) {
@@ -874,6 +944,10 @@ public final class AccountCredentialStore: @unchecked Sendable {
 public enum CredentialStoreError: LocalizedError {
     case keychainWriteFailed(OSStatus)
     case keychainReadFailed(OSStatus)
+    case vaultDecodeFailed
+    /// Keychain vault could not be loaded authoritatively; refusing to write
+    /// so a transient read failure cannot overwrite real credentials with `[]`.
+    case vaultUnavailable
 
     public var errorDescription: String? {
         switch self {
@@ -881,6 +955,10 @@ public enum CredentialStoreError: LocalizedError {
             return "Keychain write failed (OSStatus: \(status))"
         case .keychainReadFailed(let status):
             return "Keychain read failed (OSStatus: \(status))"
+        case .vaultDecodeFailed:
+            return "Keychain credential vault is corrupt and could not be decoded"
+        case .vaultUnavailable:
+            return "Keychain credential vault is temporarily unavailable; write refused"
         }
     }
 }

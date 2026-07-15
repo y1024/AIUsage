@@ -18,6 +18,8 @@ struct ProviderAccountEditorView: View {
     @State var kimiAPIKey: String = ""
     @State var droidAPIKey: String = ""
     @State var miniMaxAPIKey: String = ""
+    @State var kimiAPIRegion: ProviderAPIRegion = .auto
+    @State var miniMaxAPIRegion: ProviderAPIRegion = .auto
     @State var showWebLogin = false
     @State var showCodexBrowser = false
     @State var candidates: [ProviderAuthCandidate] = []
@@ -75,13 +77,13 @@ struct ProviderAccountEditorView: View {
         let visibleCandidateCount = candidates.count
         let detectedSessionExtra = CGFloat(min(visibleCandidateCount, 3)) * 86
         if providerId == "kimi" {
-            return min(620, 400 + detectedSessionExtra)
+            return min(660, 440 + detectedSessionExtra)
         }
         if providerId == "droid" {
             return min(660, 440 + detectedSessionExtra)
         }
         if providerId == "minimax" {
-            return min(620, 420 + detectedSessionExtra)
+            return min(660, 460 + detectedSessionExtra)
         }
         let batchImportExtra: CGFloat = supportsBatchImport ? 44 : 0
         let baseHeight: CGFloat = (visibleCandidateCount == 0 ? 300 : 360) + batchImportExtra

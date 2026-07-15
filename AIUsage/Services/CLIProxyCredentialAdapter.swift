@@ -37,7 +37,13 @@ nonisolated enum CLIProxyCredentialAdapter {
             )
         }
         object["email"] = object["email"] ?? metadata["accountEmail"] ?? accountLabel
-        object["note"] = "Synced from AIUsage"
+        // 不写入系统备注；备注留给用户在账号详情里自行填写。
+        if let note = object["note"] as? String {
+            let normalized = note.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if normalized == "synced from aiusage" || normalized == "来自 aiusage 的同步副本" {
+                object.removeValue(forKey: "note")
+            }
+        }
         object["aiusage_credential_id"] = credentialId
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
     }

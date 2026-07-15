@@ -32,14 +32,33 @@ nonisolated struct CLIProxyConfigStore {
         }
     }
 
-    func writeRuntimeConfig(settings: CLIProxyGatewaySettings, secrets: CLIProxySecrets) throws {
+    func writeRuntimeConfig(
+        settings: CLIProxyGatewaySettings,
+        secrets: CLIProxySecrets,
+        clientAPIKeys: [String]? = nil
+    ) throws {
         let value = settings.normalized
         guard (1_024...65_535).contains(value.port) else {
             throw CLIProxyGatewayError.invalidPort(value.port)
         }
         let managementKey = secrets.managementKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let clientKey = secrets.clientAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !managementKey.isEmpty, !clientKey.isEmpty, managementKey != clientKey else {
+        let defaultClientKey = secrets.clientAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedClientKeys: [String] = {
+            let raw = (clientAPIKeys ?? [defaultClientKey])
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            var unique: [String] = []
+            for key in raw where !unique.contains(key) {
+                unique.append(key)
+            }
+            if !unique.contains(defaultClientKey), !defaultClientKey.isEmpty {
+                unique.insert(defaultClientKey, at: 0)
+            }
+            return unique
+        }()
+        guard !managementKey.isEmpty,
+              !resolvedClientKeys.isEmpty,
+              resolvedClientKeys.allSatisfy({ $0 != managementKey }) else {
             throw CLIProxyGatewayError.configuration("CPA management and client keys must be non-empty and distinct")
         }
         do {
@@ -53,11 +72,10 @@ nonisolated struct CLIProxyConfigStore {
             document.setTopLevelScalar("host", value: yamlQuoted(value.bindHost))
             document.setTopLevelScalar("port", value: "\(value.port)")
             document.setTopLevelScalar("auth-dir", value: yamlQuoted(paths.authDirectory.path))
-            try document.upsertTopLevelStringSequence(
+            try document.syncManagedStringSequence(
                 "api-keys",
-                value: clientKey,
-                quotedValue: yamlQuoted(clientKey),
-                replacingValuesWithPrefix: "cpa-client-"
+                ensuredValues: resolvedClientKeys.map(yamlQuoted),
+                managedPrefixes: CLIProxyManagedAPIKeyNamespace.prefixes
             )
             // CPA's /v1/ws route bypasses the normal AuthMiddleware when this is false.
             // Keep it authenticated for loopback and LAN operation alike.
@@ -78,7 +96,28 @@ nonisolated struct CLIProxyConfigStore {
                 key: "strategy",
                 value: yamlQuoted(value.routingStrategy.rawValue)
             )
+            // 以下不是「额外补丁策略」，而是 CPA 自己的故障转移旋钮。
+            // fill-first/round-robin 只决定「先挑谁」；429 后能否换号还依赖：
+            // 1) MarkResult 把失败号冷却；2) request-retry + max-retry-interval 允许再挑。
+            // Go bool 缺省 false，YAML 不写就等于关——所以必须显式托管。
             document.setTopLevelScalar("request-retry", value: "\(value.requestRetry)")
+            document.setTopLevelScalar("max-retry-interval", value: "\(value.maxRetryInterval)")
+            document.setTopLevelScalar("max-retry-credentials", value: "\(value.maxRetryCredentials)")
+            try document.setNestedScalar(
+                section: "quota-exceeded",
+                key: "switch-project",
+                value: "true"
+            )
+            try document.setNestedScalar(
+                section: "quota-exceeded",
+                key: "switch-preview-model",
+                value: "true"
+            )
+            try document.setNestedScalar(
+                section: "quota-exceeded",
+                key: "antigravity-credits",
+                value: "true"
+            )
             try document.setNestedScalar(
                 section: "plugins",
                 key: "enabled",
@@ -164,24 +203,30 @@ nonisolated private struct RuntimeYAMLDocument {
         }
     }
 
-    mutating func upsertTopLevelStringSequence(
+    /// 同步受管字符串序列：删掉匹配托管前缀的旧项，再确保 `ensuredValues` 全部存在；其它项保留。
+    mutating func syncManagedStringSequence(
         _ key: String,
-        value: String,
-        quotedValue: String,
-        replacingValuesWithPrefix managedPrefix: String? = nil
+        ensuredValues: [String],
+        managedPrefixes: [String]
     ) throws {
-        guard let range = topLevelRange(key) else {
-            appendBlock(["\(key):", "  - \(quotedValue)"])
+        guard !ensuredValues.isEmpty else {
+            throw CLIProxyGatewayError.configuration("CPA config requires at least one '\(key)' entry")
+        }
+        if topLevelRange(key) == nil {
+            var block = ["\(key):"]
+            block.append(contentsOf: ensuredValues.map { "  - \($0)" })
+            appendBlock(block)
             return
         }
+        guard let range = topLevelRange(key) else { return }
         guard !hasInlineValue(at: range.lowerBound) else {
             throw CLIProxyGatewayError.configuration(
                 "CPA config uses an unsupported inline sequence for '\(key)'; it was left unchanged"
             )
         }
 
-        var currentValueFound = false
-        var obsoleteManagedIndices: [Int] = []
+        var kept: [String] = []
+        var seenEnsured = Set<String>()
         for index in lines.indices where range.contains(index) && index > range.lowerBound {
             let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
@@ -194,29 +239,35 @@ nonisolated private struct RuntimeYAMLDocument {
             }
             let item = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
             let existingValue = try parseSimpleStringScalar(item, context: key)
-            if existingValue == value {
-                if currentValueFound {
-                    obsoleteManagedIndices.append(index)
-                } else {
-                    currentValueFound = true
+            if ensuredValues.contains(where: { (try? parseSimpleStringScalar($0, context: key)) == existingValue }) {
+                if !seenEnsured.contains(existingValue) {
+                    kept.append("  - \(item.contains("\"") || item.contains("'") ? item : yamlQuoteIfNeeded(existingValue))")
+                    seenEnsured.insert(existingValue)
                 }
-            } else if let managedPrefix, existingValue.hasPrefix(managedPrefix) {
-                obsoleteManagedIndices.append(index)
+                continue
             }
+            if managedPrefixes.contains(where: { existingValue.hasPrefix($0) }) {
+                continue
+            }
+            kept.append(lines[index])
         }
 
-        // Old AIUsage client keys must be revoked on Keychain loss/rotation while
-        // unrelated user-managed CPA keys remain byte-for-byte intact.
-        for index in obsoleteManagedIndices.reversed() {
-            lines.remove(at: index)
+        for ensured in ensuredValues {
+            let plain = try parseSimpleStringScalar(ensured, context: key)
+            if seenEnsured.contains(plain) { continue }
+            kept.append("  - \(ensured)")
+            seenEnsured.insert(plain)
         }
-        guard !currentValueFound else { return }
-        guard let updatedRange = topLevelRange(key) else {
-            throw CLIProxyGatewayError.configuration(
-                "CPA config changed unexpectedly while updating '\(key)'"
-            )
-        }
-        lines.insert("  - \(quotedValue)", at: contentRange(updatedRange).upperBound)
+
+        let replacement = ["\(key):"] + kept
+        lines.replaceSubrange(contentRange(range), with: replacement)
+    }
+
+    private func yamlQuoteIfNeeded(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
     }
 
     func nestedStringScalar(section: String, key: String) throws -> String? {

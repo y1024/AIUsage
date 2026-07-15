@@ -41,7 +41,11 @@ public struct KimiProvider: ProviderFetcher, CredentialAcceptingProvider {
                 "No Kimi Code API key found. Connect a Kimi Code account in Settings, or run `kimi` to sign in."
             )
         }
-        return try await fetchUsage(apiKey: local.apiKey, source: SourceInfo(mode: "auto", type: "kimi-config"))
+        return try await fetchUsage(
+            apiKey: local.apiKey,
+            source: SourceInfo(mode: "auto", type: "kimi-config"),
+            region: .auto
+        )
     }
 
     public func fetchUsage(with credential: AccountCredential) async throws -> ProviderUsage {
@@ -53,13 +57,22 @@ public struct KimiProvider: ProviderFetcher, CredentialAcceptingProvider {
             throw ProviderError("missing_token", "Kimi Code API key is empty.")
         }
         let sourceType = credential.authMethod == .apiKey ? "manual-api-key" : "stored-credential"
-        return try await fetchUsage(apiKey: key, source: SourceInfo(mode: "manual", type: sourceType))
+        let region = ProviderAPIRegion(metadataValue: credential.metadata[ProviderAPIRegion.metadataKey])
+        return try await fetchUsage(
+            apiKey: key,
+            source: SourceInfo(mode: "manual", type: sourceType),
+            region: region
+        )
     }
 
     // MARK: - Core
 
-    private func fetchUsage(apiKey: String, source: SourceInfo) async throws -> ProviderUsage {
-        let root = try await fetchUsageRoot(apiKey: apiKey)
+    private func fetchUsage(
+        apiKey: String,
+        source: SourceInfo,
+        region: ProviderAPIRegion
+    ) async throws -> ProviderUsage {
+        let (root, resolvedRegion) = try await fetchUsageRoot(apiKey: apiKey, region: region)
         let now = Date()
 
         var usage = ProviderUsage(provider: id, label: displayName)
@@ -104,6 +117,7 @@ public struct KimiProvider: ProviderFetcher, CredentialAcceptingProvider {
         }
 
         if let model = Self.resolveModelEntitlement(root) { extra["modelEntitlement"] = AnyCodable(model) }
+        extra[ProviderAPIRegion.metadataKey] = AnyCodable(resolvedRegion.rawValue)
         usage.extra = extra
 
         guard usage.primary != nil else {
@@ -112,11 +126,20 @@ public struct KimiProvider: ProviderFetcher, CredentialAcceptingProvider {
         return usage
     }
 
-    private func fetchUsageRoot(apiKey: String) async throws -> [String: Any] {
+    private func fetchUsageRoot(
+        apiKey: String,
+        region: ProviderAPIRegion
+    ) async throws -> (root: [String: Any], resolved: ProviderAPIRegion) {
         var sawAuthFailure = false
         var lastError: Error?
+        let endpoints = region.orderedEndpoints(
+            Self.usageEndpoints,
+            chinaContains: ["api.kimi.com"],
+            internationalContains: ["moonshot.ai"]
+        )
+        let candidates = region.allowsCrossRegionFallback ? endpoints : Array(endpoints.prefix(1))
 
-        for endpoint in Self.usageEndpoints {
+        for endpoint in candidates {
             guard let url = URL(string: endpoint) else { continue }
             var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -144,7 +167,8 @@ public struct KimiProvider: ProviderFetcher, CredentialAcceptingProvider {
 
                 let root = Self.dict(json["data"]) ?? json
                 if root["usage"] != nil || root["limits"] != nil {
-                    return root
+                    let resolved: ProviderAPIRegion = endpoint.contains("api.kimi.com") ? .china : .international
+                    return (root, resolved)
                 }
                 lastError = ProviderError("empty_usage", "Kimi Code usage response did not include any quota windows.")
             } catch {
@@ -153,9 +177,20 @@ public struct KimiProvider: ProviderFetcher, CredentialAcceptingProvider {
         }
 
         if sawAuthFailure {
-            throw ProviderError("invalid_credentials", "Kimi Code API key is invalid or unauthorized for both the China and global endpoints.")
+            throw ProviderError("invalid_credentials", regionAuthFailureMessage(region))
         }
         throw lastError ?? ProviderError("unknown_error", "Kimi Code usage request failed.")
+    }
+
+    private func regionAuthFailureMessage(_ region: ProviderAPIRegion) -> String {
+        switch region {
+        case .china:
+            return "Kimi Code API key was rejected by the China endpoint (api.kimi.com). Check the key, or switch to International."
+        case .international:
+            return "Kimi Code API key was rejected by the International endpoint (api.moonshot.ai). Check the key, or switch to China."
+        case .auto:
+            return "Kimi Code API key is invalid or unauthorized for both the China and global endpoints."
+        }
     }
 
     // MARK: - Parsing

@@ -361,6 +361,7 @@ extension ProviderAccountEditorView {
             errorMessage = L("Enter your Kimi Code API key first.", "请先填写 Kimi Code API Key。")
             return
         }
+        let region = kimiAPIRegion
         sessionMonitorTask?.cancel()
         Task {
             await withWorkingState {
@@ -368,7 +369,8 @@ extension ProviderAccountEditorView {
                     providerId: "kimi",
                     authMethod: .apiKey,
                     value: key,
-                    suggestedLabel: nil
+                    suggestedLabel: nil,
+                    apiRegion: region
                 )
                 try await MainActor.run {
                     try appState.registerAuthenticatedCredential(credential, usage: usage, note: nil)
@@ -388,6 +390,7 @@ extension ProviderAccountEditorView {
             errorMessage = L("Enter your MiniMax Subscription Key first.", "请先填写 MiniMax 订阅 Key。")
             return
         }
+        let region = miniMaxAPIRegion
         sessionMonitorTask?.cancel()
         Task {
             await withWorkingState {
@@ -395,7 +398,8 @@ extension ProviderAccountEditorView {
                     providerId: "minimax",
                     authMethod: .apiKey,
                     value: key,
-                    suggestedLabel: nil
+                    suggestedLabel: nil,
+                    apiRegion: region
                 )
                 try await MainActor.run {
                     try appState.registerAuthenticatedCredential(credential, usage: usage, note: nil)

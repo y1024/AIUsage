@@ -66,13 +66,18 @@ public struct MiniMaxProvider: ProviderFetcher, CredentialAcceptingProvider {
         guard !key.isEmpty else {
             throw ProviderError("missing_token", "MiniMax Token Plan API key is empty.")
         }
-        return try await fetchUsage(apiKey: key, source: SourceInfo(mode: "manual", type: "manual-api-key"))
+        let region = ProviderAPIRegion(metadataValue: credential.metadata[ProviderAPIRegion.metadataKey])
+        return try await fetchUsage(
+            apiKey: key,
+            source: SourceInfo(mode: "manual", type: "manual-api-key"),
+            region: region
+        )
     }
 
     // MARK: - Core
 
-    private func fetchUsage(apiKey: String, source: SourceInfo) async throws -> ProviderUsage {
-        let root = try await fetchUsageRoot(apiKey: apiKey)
+    private func fetchUsage(apiKey: String, source: SourceInfo, region: ProviderAPIRegion) async throws -> ProviderUsage {
+        let (root, resolvedRegion) = try await fetchUsageRoot(apiKey: apiKey, region: region)
         let now = Date()
 
         var usage = ProviderUsage(provider: id, label: displayName)
@@ -108,15 +113,25 @@ public struct MiniMaxProvider: ProviderFetcher, CredentialAcceptingProvider {
             throw ProviderError("empty_usage", "MiniMax Token Plan response did not include a usable quota window.")
         }
 
+        extra[ProviderAPIRegion.metadataKey] = AnyCodable(resolvedRegion.rawValue)
         usage.extra = extra
         return usage
     }
 
-    private func fetchUsageRoot(apiKey: String) async throws -> [String: Any] {
+    private func fetchUsageRoot(
+        apiKey: String,
+        region: ProviderAPIRegion
+    ) async throws -> (root: [String: Any], resolved: ProviderAPIRegion) {
         var sawAuthFailure = false
         var lastError: Error?
+        let endpoints = region.orderedEndpoints(
+            Self.usageEndpoints,
+            chinaContains: ["minimaxi.com"],
+            internationalContains: ["minimax.io"]
+        )
+        let candidates = region.allowsCrossRegionFallback ? endpoints : Array(endpoints.prefix(1))
 
-        for endpoint in Self.usageEndpoints {
+        for endpoint in candidates {
             guard let url = URL(string: endpoint) else { continue }
             var request = URLRequest(url: url, timeoutInterval: timeoutSeconds)
             request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -149,7 +164,8 @@ public struct MiniMaxProvider: ProviderFetcher, CredentialAcceptingProvider {
                 }
 
                 if json["model_remains"] != nil {
-                    return json
+                    let resolved: ProviderAPIRegion = endpoint.contains("minimaxi.com") ? .china : .international
+                    return (json, resolved)
                 }
                 lastError = ProviderError("empty_usage", "MiniMax Token Plan response did not include `model_remains`.")
             } catch {
@@ -160,10 +176,21 @@ public struct MiniMaxProvider: ProviderFetcher, CredentialAcceptingProvider {
         if sawAuthFailure {
             throw ProviderError(
                 "invalid_credentials",
-                "MiniMax Token Plan key is invalid or for a different region (China / International)."
+                regionAuthFailureMessage(region)
             )
         }
         throw lastError ?? ProviderError("unknown_error", "MiniMax Token Plan request failed.")
+    }
+
+    private func regionAuthFailureMessage(_ region: ProviderAPIRegion) -> String {
+        switch region {
+        case .china:
+            return "MiniMax Token Plan key was rejected by the China endpoint (api.minimaxi.com). Check the key, or switch to International."
+        case .international:
+            return "MiniMax Token Plan key was rejected by the International endpoint (api.minimax.io). Check the key, or switch to China."
+        case .auto:
+            return "MiniMax Token Plan key is invalid or for a different region (China / International)."
+        }
     }
 
     // MARK: - Parsing

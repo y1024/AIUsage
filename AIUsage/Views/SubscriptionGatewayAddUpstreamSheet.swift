@@ -63,6 +63,7 @@ struct CLIProxyAddUpstreamSheet: View {
 
     @State private var showCustomProvider = false
     @State private var importEntry: GatewayImportEntry?
+    @State private var pendingForceSync: CLIProxyAccountSyncCandidate?
 
     private let providerColumns = [GridItem(.adaptive(minimum: 175), spacing: 11)]
 
@@ -110,6 +111,25 @@ struct CLIProxyAddUpstreamSheet: View {
                 runtime: runtime,
                 mode: entry.mode
             )
+        }
+        .alert(
+            L("Update CPA login from Subscription?", "用订阅账号更新 CPA 登录材料？"),
+            isPresented: Binding(
+                get: { pendingForceSync != nil },
+                set: { if !$0 { pendingForceSync = nil } }
+            ),
+            presenting: pendingForceSync
+        ) { candidate in
+            Button(L("Update", "更新"), role: .destructive) {
+                Task { await manager.syncAccount(candidate, forceOverwriteCPA: true) }
+                pendingForceSync = nil
+            }
+            Button(L("Cancel", "取消"), role: .cancel) { pendingForceSync = nil }
+        } message: { candidate in
+            Text(L(
+                "This overwrites the CPA login material for \(candidate.label) with the current Subscription account. The Subscription credential itself is unchanged.",
+                "会用当前订阅账号覆盖 \(candidate.label) 在 CPA 中的登录材料；订阅侧凭据本身不变。"
+            ))
         }
     }
 
@@ -377,8 +397,8 @@ struct CLIProxyAddUpstreamSheet: View {
             addSection(
                 title: L("Connect an existing AIUsage account", "接入现有 AIUsage 账号"),
                 subtitle: L(
-                    "Only accounts with a verified conversion adapter appear here (currently Codex and Antigravity). AIUsage sends a one-way credential copy; the original account and its monitoring remain unchanged.",
-                    "此处只显示有已验证转换适配器的账号（当前为 Codex 与 Antigravity）。AIUsage 发送单向凭据副本；原账号及其监控不会改变。"
+                    "Only accounts with a verified conversion adapter appear here (currently Codex and Antigravity). Login material is written into CPA; the Subscription account itself is unchanged.",
+                    "此处只显示有已验证转换适配器的账号（当前为 Codex 与 Antigravity）。会把登录材料写入 CPA；订阅账号本身不变。"
                 )
             ) {
                 if manager.syncCandidates.isEmpty {
@@ -492,72 +512,16 @@ struct CLIProxyAddUpstreamSheet: View {
 
     @ViewBuilder
     private func syncedCandidateControls(_ candidate: CLIProxyAccountSyncCandidate) -> some View {
-        syncStatePill(manager.syncStatus(for: candidate))
-        switch manager.syncStatus(for: candidate) {
-        case .cpaChanged, .conflict:
-            Button(L("Review", "查看处理")) { dismiss() }
-                .buttonStyle(.borderless)
-        default:
-            Button(manager.syncStatus(for: candidate) == .sourceChanged
-                   ? L("Update Copy", "更新副本")
-                   : L("Resync", "重新同步")) {
-                Task { await manager.syncAccount(candidate) }
-            }
-            .buttonStyle(.borderless)
-            .disabled(!runtime.state.isRunning || manager.isManagingAccounts)
+        GatewayStatusPill(
+            text: L("In CPA", "已在 CPA"),
+            color: .green,
+            systemImage: "checkmark.circle.fill"
+        )
+        Button(L("Update from Subscription", "从订阅更新")) {
+            pendingForceSync = candidate
         }
-        Menu {
-            Button {
-                Task { await manager.setSyncMode(candidate, mode: .manualCopy) }
-            } label: {
-                HStack {
-                    Text(L("Manual copy", "手动同步"))
-                    Spacer(minLength: 12)
-                    if manager.syncMode(for: candidate) != .keepUpdated {
-                        Image(systemName: "checkmark")
-                    }
-                }
-            }
-            Button {
-                Task { await manager.setSyncMode(candidate, mode: .keepUpdated) }
-            } label: {
-                HStack {
-                    Text(L("Keep updated", "保持单向同步"))
-                    Spacer(minLength: 12)
-                    if manager.syncMode(for: candidate) == .keepUpdated {
-                        Image(systemName: "checkmark")
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.secondary)
-                .frame(width: 22, height: 22)
-                .contentShape(Circle())
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
+        .buttonStyle(.borderless)
         .disabled(!runtime.state.isRunning || manager.isManagingAccounts)
-        .help(L("More actions", "更多操作"))
-    }
-
-    private func syncStatePill(_ state: CLIProxyAccountSyncState) -> GatewayStatusPill {
-        switch state {
-        case .current:
-            GatewayStatusPill(text: L("Up to date", "副本最新"), color: .green, systemImage: "checkmark.circle.fill")
-        case .sourceChanged:
-            GatewayStatusPill(text: L("Source changed", "源凭据已更新"), color: .orange, systemImage: "arrow.up.circle.fill")
-        case .cpaChanged:
-            GatewayStatusPill(text: L("CPA changed", "CPA 副本已修改"), color: .orange, systemImage: "pencil.circle.fill")
-        case .conflict:
-            GatewayStatusPill(text: L("Conflict", "同步冲突"), color: .red, systemImage: "exclamationmark.triangle.fill")
-        case .missing:
-            GatewayStatusPill(text: L("Missing", "副本缺失"), color: .orange, systemImage: "questionmark.circle.fill")
-        case .notSynced:
-            GatewayStatusPill(text: L("Not connected", "未接入"), color: .secondary, systemImage: "circle")
-        }
     }
 
     private func upstreamHintRow(_ hint: CLIProxyUpstreamAuthHint) -> some View {

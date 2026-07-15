@@ -47,15 +47,31 @@ enum CLIProxyGatewaySection: String, CaseIterable, Identifiable {
     }
 }
 
+/// Settings 内部分类跳转目标（与 Settings 侧栏 rawValue 对齐）。
+enum CLIProxyGatewaySettingsDestination: String, Sendable {
+    case runtime
+    case keys
+    case updates
+    case versions
+    case diagnostics
+}
+
 @MainActor
 final class CLIProxyGatewayNavigation: ObservableObject {
     static let shared = CLIProxyGatewayNavigation()
     @Published var selectedSection: CLIProxyGatewaySection = .overview
     @Published var addAccountRequest = 0
+    /// 进入 Settings 时希望选中的分类；Settings 消费后清空。
+    @Published var settingsDestination: CLIProxyGatewaySettingsDestination?
 
     func showAccounts(openAddAccount: Bool = false) {
         selectedSection = .accounts
         if openAddAccount { addAccountRequest += 1 }
+    }
+
+    func showSettings(destination: CLIProxyGatewaySettingsDestination = .runtime) {
+        settingsDestination = destination
+        selectedSection = .settings
     }
 }
 
@@ -83,15 +99,32 @@ struct GatewayCard<Content: View>: View {
     }
 }
 
-struct GatewaySectionTitle: View {
+struct GatewaySectionTitle<Trailing: View>: View {
     let title: String
     let subtitle: String
     var actionTitle: String?
     var actionSystemImage: String = "plus"
     var action: (() -> Void)?
+    var trailing: Trailing
+
+    init(
+        title: String,
+        subtitle: String,
+        actionTitle: String? = nil,
+        actionSystemImage: String = "plus",
+        action: (() -> Void)? = nil,
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.actionTitle = actionTitle
+        self.actionSystemImage = actionSystemImage
+        self.action = action
+        self.trailing = trailing()
+    }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.title3.weight(.bold))
@@ -102,15 +135,54 @@ struct GatewaySectionTitle: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
-            if let actionTitle, let action {
-                Button(action: action) {
-                    Label(actionTitle, systemImage: actionSystemImage)
-                        .font(.caption.weight(.semibold))
+            HStack(spacing: 8) {
+                trailing
+                if let actionTitle, let action {
+                    Button(action: action) {
+                        Label(actionTitle, systemImage: actionSystemImage)
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
             }
         }
+    }
+}
+
+/// 页眉次要操作：图标按钮，不抢主 CTA。
+struct GatewayHeaderIconButton: View {
+    let systemImage: String
+    let help: String
+    var isBusy: Bool = false
+    var isDisabled: Bool = false
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                if isBusy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isDisabled ? .tertiary : (isHovered ? .primary : .secondary))
+                }
+            }
+            .frame(width: 30, height: 30)
+            .background(
+                Circle()
+                    .fill(Color.primary.opacity(isHovered && !isDisabled ? 0.08 : 0.04))
+            )
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled || isBusy)
+        .help(help)
+        .accessibilityLabel(help)
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -230,6 +302,7 @@ struct GatewayCopyField: View {
     let value: String
     var masked = false
     var wraps = false
+    var onCopied: (() -> Void)? = nil
     @State private var copied = false
 
     var body: some View {
@@ -253,6 +326,7 @@ struct GatewayCopyField: View {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(value, forType: .string)
                     copied = true
+                    onCopied?()
                     Task {
                         try? await Task.sleep(for: .seconds(1.5))
                         copied = false
@@ -323,8 +397,12 @@ extension CLIProxyAuthFile {
     }
 
     var gatewaySourceTitle: String {
-        if name.hasPrefix("aiusage-") { return L("Synced from AIUsage", "来自 AIUsage 的同步副本") }
-        if runtimeOnly { return L("Runtime provider", "运行时提供商") }
+        if name.hasPrefix("aiusage-") { return L("From Subscription", "来自订阅") }
+        if runtimeOnly {
+            return isOpenAICompatibleRuntime
+                ? L("API configuration", "API 配置")
+                : L("Managed by the CPA plugin", "由 CPA 插件自动管理")
+        }
         if source?.lowercased().contains("plugin") == true { return L("CPA plugin", "CPA 插件") }
         if source?.lowercased().contains("config") == true { return L("API key configuration", "API Key 配置") }
         return L("CPA OAuth or imported file", "CPA OAuth 或导入文件")
@@ -333,7 +411,11 @@ extension CLIProxyAuthFile {
     /// 列表副行用的短来源词，避免把完整句子塞进紧凑行。
     var gatewaySourceShortTitle: String {
         if name.hasPrefix("aiusage-") { return "AIUsage" }
-        if runtimeOnly { return L("Runtime", "运行时") }
+        if runtimeOnly {
+            return isOpenAICompatibleRuntime
+                ? L("API config", "API 配置")
+                : L("Plugin project", "插件项目")
+        }
         if source?.lowercased().contains("plugin") == true { return L("Plugin", "插件") }
         if source?.lowercased().contains("config") == true { return "API Key" }
         return "OAuth"
@@ -357,6 +439,7 @@ func gatewayProviderDisplayName(_ providerID: String) -> String {
     case "xai": "xAI"
     case "gemini", "gemini-cli": "Gemini CLI"
     case "vertex": "Vertex AI"
+    case "openai-compatibility": "OpenAI Compatibility"
     case "github-copilot", "copilot": "GitHub Copilot"
     case "qwen": "Qwen"
     case "iflow": "iFlow"

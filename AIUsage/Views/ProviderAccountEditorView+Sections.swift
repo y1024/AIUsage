@@ -111,14 +111,16 @@ extension ProviderAccountEditorView {
             Text(L("Kimi Code API Key", "Kimi Code API Key"))
                 .font(.subheadline.weight(.semibold))
 
+            apiRegionPicker(selection: $kimiAPIRegion)
+
             SecureField("sk-…", text: $kimiAPIKey)
                 .textFieldStyle(.roundedBorder)
                 .disabled(isWorking)
                 .onSubmit { connectKimiAPIKey() }
 
             Text(L(
-                "Create an API key in the Kimi Code Console and paste it here. AIUsage uses it to read your weekly usage and rate-limit windows. The key is stored in Keychain.",
-                "在 Kimi Code 控制台创建一个 API Key 粘贴到这里。AIUsage 用它读取本周用量与频控窗口。Key 会存入钥匙串。"
+                "Create an API key in the matching Kimi console and paste it here. China and International keys are not interchangeable. The key is stored in Keychain.",
+                "在对应区域的 Kimi 控制台创建 API Key 后粘贴到这里。国内与海外 Key 不能混用。Key 会存入钥匙串。"
             ))
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -136,7 +138,7 @@ extension ProviderAccountEditorView {
                 .disabled(isWorking || kimiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button {
-                    if let url = URL(string: "https://www.kimi.com/code/console") {
+                    if let url = URL(string: kimiConsoleURL(for: kimiAPIRegion)) {
                         NSWorkspace.shared.open(url)
                     }
                 } label: {
@@ -156,14 +158,16 @@ extension ProviderAccountEditorView {
             Text(L("MiniMax Subscription Key", "MiniMax 订阅 Key"))
                 .font(.subheadline.weight(.semibold))
 
+            apiRegionPicker(selection: $miniMaxAPIRegion)
+
             SecureField("sk-cp-…", text: $miniMaxAPIKey)
                 .textFieldStyle(.roundedBorder)
                 .disabled(isWorking)
                 .onSubmit { connectMiniMaxAPIKey() }
 
             Text(L(
-                "How to get a key: click “Get Subscription Key” → sign in to MiniMax → Subscription / Token Plan → copy the key starting with sk-cp-… → paste it above. Pay-as-you-go sk-… keys don’t work for Token Plan usage; only sk-cp-… is accepted. The key is stored in Keychain.",
-                "如何获取：点击「获取订阅 Key」→ 登录 MiniMax → 订阅管理 / Token Plan → 复制 sk-cp- 开头的 Key → 粘贴到上方。按量付费的 sk- Key 在 Token Plan 接口里不可用，只有 sk-cp- 才行。Key 会存入钥匙串。"
+                "Use a Token Plan key starting with sk-cp-… from the matching MiniMax platform. Pay-as-you-go sk-… keys and cross-region keys won’t work here. The key is stored in Keychain.",
+                "请使用对应区域平台上的 Token Plan 订阅 Key（sk-cp-…）。按量付费 sk-… 以及跨区 Key 在这里不可用。Key 会存入钥匙串。"
             ))
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -181,7 +185,7 @@ extension ProviderAccountEditorView {
                 .disabled(isWorking || miniMaxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button {
-                    if let url = URL(string: "https://platform.minimaxi.com/user-center/basic-information/interface-key") {
+                    if let url = URL(string: miniMaxConsoleURL(for: miniMaxAPIRegion)) {
                         NSWorkspace.shared.open(url)
                     }
                 } label: {
@@ -191,6 +195,66 @@ extension ProviderAccountEditorView {
                 .controlSize(.large)
                 .disabled(isWorking)
             }
+        }
+    }
+
+    // MARK: - API Region
+
+    private func apiRegionPicker(selection: Binding<ProviderAPIRegion>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L("Region", "区域"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Picker("", selection: selection) {
+                Text(L("Auto", "自动")).tag(ProviderAPIRegion.auto)
+                Text(L("China", "国内")).tag(ProviderAPIRegion.china)
+                Text(L("International", "海外")).tag(ProviderAPIRegion.international)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(isWorking)
+            Text(apiRegionHint(selection.wrappedValue))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func apiRegionHint(_ region: ProviderAPIRegion) -> String {
+        switch region {
+        case .auto:
+            return L(
+                "Tries China first, then International.",
+                "先试国内端点，失败再试海外。"
+            )
+        case .china:
+            return L(
+                "Only the China API. Use the China console for the key.",
+                "只请求国内 API，请到国内控制台取 Key。"
+            )
+        case .international:
+            return L(
+                "Only the International API. Use the International console for the key.",
+                "只请求海外 API，请到海外控制台取 Key。"
+            )
+        }
+    }
+
+    private func kimiConsoleURL(for region: ProviderAPIRegion) -> String {
+        switch region {
+        case .international:
+            return "https://platform.moonshot.ai/"
+        case .china, .auto:
+            return "https://www.kimi.com/code/console"
+        }
+    }
+
+    private func miniMaxConsoleURL(for region: ProviderAPIRegion) -> String {
+        switch region {
+        case .international:
+            return "https://platform.minimax.io/user-center/basic-information/interface-key"
+        case .china, .auto:
+            return "https://platform.minimaxi.com/user-center/basic-information/interface-key"
         }
     }
 

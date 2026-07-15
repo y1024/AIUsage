@@ -14,6 +14,8 @@ final class CLIProxyRuntimeController: ObservableObject {
 
     @Published private(set) var state: CLIProxyRuntimeState = .stopped
     @Published private(set) var recentLogs: [String] = []
+    /// 客户端密钥曾变更且用户尚未重新复制/确认时为 true。
+    @Published private(set) var clientKeyNeedsRecopy = false
     @Published var settings: CLIProxyGatewaySettings {
         didSet {
             guard !isLoadingSettings else { return }
@@ -21,6 +23,9 @@ final class CLIProxyRuntimeController: ObservableObject {
             catch { state = .failed(error.localizedDescription) }
         }
     }
+
+    private static let clientKeyFingerprintDefaultsKey = "cliproxy.gateway.client-key-fingerprint.v1"
+    private static let clientKeyAcknowledgedDefaultsKey = "cliproxy.gateway.client-key-ack.v1"
 
     private struct PIDRecord: Codable {
         let pid: Int32
@@ -32,6 +37,7 @@ final class CLIProxyRuntimeController: ObservableObject {
     private let binaryStore: CLIProxyBinaryStore
     private let configStore: CLIProxyConfigStore
     private let secretStore: CLIProxySecretStore
+    private let clientKeyStore: CLIProxyClientKeyStore
     private var cachedSecrets: CLIProxySecrets?
     private var process: Process?
     private var shouldBeRunning = false
@@ -59,6 +65,18 @@ final class CLIProxyRuntimeController: ObservableObject {
     var clientAPIKey: String? { cachedSecrets?.clientAPIKey }
     var managementKey: String? { cachedSecrets?.managementKey }
 
+    /// 用于 UI 展示的短指纹（末 4 位），避免整钥暴露。
+    var clientAPIKeyFingerprint: String? {
+        guard let key = cachedSecrets?.clientAPIKey, key.count >= 4 else { return nil }
+        return String(key.suffix(4))
+    }
+
+    func acknowledgeClientKeyCopied() {
+        guard let fingerprint = Self.fingerprint(for: cachedSecrets?.clientAPIKey) else { return }
+        UserDefaults.standard.set(fingerprint, forKey: Self.clientKeyAcknowledgedDefaultsKey)
+        clientKeyNeedsRecopy = false
+    }
+
     init(
         paths: CLIProxyPaths,
         binaryStore: CLIProxyBinaryStore? = nil,
@@ -69,12 +87,38 @@ final class CLIProxyRuntimeController: ObservableObject {
         self.binaryStore = binaryStore ?? CLIProxyBinaryStore(paths: paths)
         self.configStore = configStore ?? CLIProxyConfigStore(paths: paths)
         self.secretStore = secretStore
+        self.clientKeyStore = CLIProxyClientKeyStore(secretStore: secretStore)
         self.settings = (configStore ?? CLIProxyConfigStore(paths: paths)).loadSettings()
         self.cachedSecrets = secretStore.load()
         try paths.prepare()
         reapOwnedOrphanIfNeeded()
         reapStaleManagedListenerIfNeeded(port: settings.normalized.port)
         isLoadingSettings = false
+        refreshClientKeyRotationState()
+    }
+
+    func loadClientKeyEntries() throws -> [CLIProxyClientKeyEntry] {
+        try clientKeyStore.loadEntries()
+    }
+
+    /// 密钥变更后重写 config；若 CPA 在跑则重启，并确认进程回到 running。
+    /// Keychain 侧已由调用方先写入；此处失败会抛错，避免 UI 把「未生效」当成成功。
+    func applyClientKeyChanges() async throws {
+        _ = try writeManagedConfiguration()
+        guard state.isRunning else { return }
+        await restart()
+        switch state {
+        case .running:
+            return
+        case .failed(let message):
+            throw CLIProxyGatewayError.process(
+                "Client keys were saved, but CPA failed to restart: \(message)"
+            )
+        case .stopped, .starting, .stopping:
+            throw CLIProxyGatewayError.process(
+                "Client keys were saved, but CPA is not running after restart."
+            )
+        }
     }
 
     func start() async {
@@ -102,10 +146,22 @@ final class CLIProxyRuntimeController: ObservableObject {
         await startOnce()
     }
 
-    func applySettings(_ value: CLIProxyGatewaySettings) async {
-        settings = value.normalized
-        guard state.isRunning else { return }
-        await restart()
+    /// 返回 true 表示本次应用触发了 CPA 进程重启。
+    @discardableResult
+    func applySettings(_ value: CLIProxyGatewaySettings) async -> Bool {
+        let previous = settings.normalized
+        let next = value.normalized
+        settings = next
+        let needsProcessRestart = state.isRunning && previous.requiresCPAProcessRestart(comparedTo: next)
+        if needsProcessRestart {
+            await restart()
+            return true
+        }
+        if state.isRunning, previous != next {
+            // 仅应用侧字段变化：重写 config 以便下次启动一致，不打断进程。
+            _ = try? writeManagedConfiguration(settings: next)
+        }
+        return false
     }
 
     /// Persist and stabilize the managed config before `current` can move to a
@@ -251,11 +307,71 @@ final class CLIProxyRuntimeController: ObservableObject {
     ) throws -> CLIProxySecrets {
         let secrets = try secretStore.loadOrCreate()
         cachedSecrets = secrets
+        let clientKeys = (try? clientKeyStore.enabledKeysForRuntime()) ?? [secrets.clientAPIKey]
         try configStore.writeRuntimeConfig(
             settings: (value ?? settings).normalized,
-            secrets: secrets
+            secrets: secrets,
+            clientAPIKeys: clientKeys
         )
+        refreshClientKeyRotationState()
         return secrets
+    }
+
+    private func refreshClientKeyRotationState() {
+        guard let currentKey = cachedSecrets?.clientAPIKey,
+              let fingerprint = Self.fingerprint(for: currentKey) else {
+            clientKeyNeedsRecopy = false
+            return
+        }
+        let defaults = UserDefaults.standard
+        let previous = defaults.string(forKey: Self.clientKeyFingerprintDefaultsKey)
+        let acknowledged = defaults.string(forKey: Self.clientKeyAcknowledgedDefaultsKey)
+        let externalDrift = Self.detectExternalClientKeyDrift(expectedKey: currentKey)
+        if let previous, previous != fingerprint {
+            // Keychain 被清空/重建后会生成新钥；旧客户端仍用旧钥会 401。
+            clientKeyNeedsRecopy = acknowledged != fingerprint || externalDrift
+        } else if acknowledged == nil {
+            defaults.set(fingerprint, forKey: Self.clientKeyAcknowledgedDefaultsKey)
+            // 首次也能检出 Hermes 等外部客户端仍持旧钥。
+            clientKeyNeedsRecopy = externalDrift
+        } else {
+            clientKeyNeedsRecopy = acknowledged != fingerprint || externalDrift
+        }
+        defaults.set(fingerprint, forKey: Self.clientKeyFingerprintDefaultsKey)
+    }
+
+    private static func fingerprint(for key: String?) -> String? {
+        guard let key, !key.isEmpty else { return nil }
+        return "\(key.count):\(key.suffix(8))"
+    }
+
+    /// 只读探测常见本地客户端是否仍指向本机 CPA 却持有旧 client key。
+    private static func detectExternalClientKeyDrift(expectedKey: String) -> Bool {
+        let hermesRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".hermes")
+        let envURL = hermesRoot.appendingPathComponent(".env")
+        let configURL = hermesRoot.appendingPathComponent("config.yaml")
+        guard let text = try? String(contentsOf: envURL, encoding: .utf8) else { return false }
+
+        let envPointsToCPA = text.contains("14420")
+            || text.contains("CLIPROXY")
+            || text.contains("cliproxy")
+        let configPointsToCPA: Bool = {
+            guard let config = try? String(contentsOf: configURL, encoding: .utf8) else { return false }
+            return config.contains("127.0.0.1:14420") || config.contains("localhost:14420")
+        }()
+        guard envPointsToCPA || configPointsToCPA else { return false }
+
+        guard let match = text.range(
+            of: #"OPENAI_API_KEY=(cpa-client-[A-Za-z0-9_-]+)"#,
+            options: .regularExpression
+        ) else {
+            return false
+        }
+        let line = String(text[match])
+        let key = line.replacingOccurrences(of: "OPENAI_API_KEY=", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return !key.isEmpty && key != expectedKey
     }
 
     private func handleUnexpectedExit(status: Int32) {

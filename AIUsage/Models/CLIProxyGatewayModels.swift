@@ -183,9 +183,25 @@ nonisolated struct CLIProxyGatewaySettings: Codable, Equatable, Sendable {
     var autoStart: Bool = false
     var allowLANAccess: Bool = false
     var routingStrategy: CLIProxyRoutingStrategy = .roundRobin
-    var requestRetry: Int = 2
+    /// CPA `request-retry`：单次请求在可用凭据上的重试次数上限（含 429 冷却等待场景）。
+    /// 官方示例默认 3；与「额度用尽换号」互补，不是二选一。
+    var requestRetry: Int = 3
+    /// CPA `max-retry-interval`（秒）。为 0 时上游会跳过冷却等待重试，429 几乎无法换号。
+    var maxRetryInterval: Int = 30
+    /// CPA `max-retry-credentials`：单次请求最多尝试几把凭据；0 = 尝试全部可用凭据。
+    var maxRetryCredentials: Int = 0
+    /// CPA `quota-exceeded.switch-project`。缺省写入 true：额度/429 时切到其它可用凭据。
+    var quotaSwitchProject: Bool = true
+    /// CPA `quota-exceeded.switch-preview-model`。
+    var quotaSwitchPreviewModel: Bool = true
+    /// CPA `quota-exceeded.antigravity-credits`。
+    var quotaAntigravityCredits: Bool = true
     var proxyURL: String = ""
     var enablePlugins: Bool = false
+    /// AIUsage 侧：定时用「列模型」复检账号连通（不写 CPA yaml，无需重启进程）。
+    var accountModelProbeEnabled: Bool = true
+    /// 复检间隔（秒）。
+    var accountModelProbeIntervalSeconds: Int = 60
 
     static let `default` = CLIProxyGatewaySettings()
 
@@ -194,21 +210,39 @@ nonisolated struct CLIProxyGatewaySettings: Codable, Equatable, Sendable {
         autoStart: Bool = false,
         allowLANAccess: Bool = false,
         routingStrategy: CLIProxyRoutingStrategy = .roundRobin,
-        requestRetry: Int = 2,
+        requestRetry: Int = 3,
+        maxRetryInterval: Int = 30,
+        maxRetryCredentials: Int = 0,
+        quotaSwitchProject: Bool = true,
+        quotaSwitchPreviewModel: Bool = true,
+        quotaAntigravityCredits: Bool = true,
         proxyURL: String = "",
-        enablePlugins: Bool = false
+        enablePlugins: Bool = false,
+        accountModelProbeEnabled: Bool = true,
+        accountModelProbeIntervalSeconds: Int = 60
     ) {
         self.port = port
         self.autoStart = autoStart
         self.allowLANAccess = allowLANAccess
         self.routingStrategy = routingStrategy
         self.requestRetry = requestRetry
+        self.maxRetryInterval = maxRetryInterval
+        self.maxRetryCredentials = maxRetryCredentials
+        self.quotaSwitchProject = quotaSwitchProject
+        self.quotaSwitchPreviewModel = quotaSwitchPreviewModel
+        self.quotaAntigravityCredits = quotaAntigravityCredits
         self.proxyURL = proxyURL
         self.enablePlugins = enablePlugins
+        self.accountModelProbeEnabled = accountModelProbeEnabled
+        self.accountModelProbeIntervalSeconds = accountModelProbeIntervalSeconds
     }
 
     enum CodingKeys: String, CodingKey {
-        case port, autoStart, allowLANAccess, routingStrategy, requestRetry, proxyURL, enablePlugins
+        case port, autoStart, allowLANAccess, routingStrategy, requestRetry
+        case maxRetryInterval, maxRetryCredentials
+        case quotaSwitchProject, quotaSwitchPreviewModel, quotaAntigravityCredits
+        case proxyURL, enablePlugins
+        case accountModelProbeEnabled, accountModelProbeIntervalSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -217,15 +251,31 @@ nonisolated struct CLIProxyGatewaySettings: Codable, Equatable, Sendable {
         autoStart = try container.decodeIfPresent(Bool.self, forKey: .autoStart) ?? false
         allowLANAccess = try container.decodeIfPresent(Bool.self, forKey: .allowLANAccess) ?? false
         routingStrategy = try container.decodeIfPresent(CLIProxyRoutingStrategy.self, forKey: .routingStrategy) ?? .roundRobin
-        requestRetry = try container.decodeIfPresent(Int.self, forKey: .requestRetry) ?? 2
+        // 缺省与 CPA config.example.yaml 对齐：request-retry=3, max-retry-interval=30, max-retry-credentials=0
+        requestRetry = try container.decodeIfPresent(Int.self, forKey: .requestRetry) ?? 3
+        maxRetryInterval = try container.decodeIfPresent(Int.self, forKey: .maxRetryInterval) ?? 30
+        maxRetryCredentials = try container.decodeIfPresent(Int.self, forKey: .maxRetryCredentials) ?? 0
+        quotaSwitchProject = try container.decodeIfPresent(Bool.self, forKey: .quotaSwitchProject) ?? true
+        quotaSwitchPreviewModel = try container.decodeIfPresent(Bool.self, forKey: .quotaSwitchPreviewModel) ?? true
+        quotaAntigravityCredits = try container.decodeIfPresent(Bool.self, forKey: .quotaAntigravityCredits) ?? true
         proxyURL = try container.decodeIfPresent(String.self, forKey: .proxyURL) ?? ""
         enablePlugins = try container.decodeIfPresent(Bool.self, forKey: .enablePlugins) ?? false
+        accountModelProbeEnabled = try container.decodeIfPresent(Bool.self, forKey: .accountModelProbeEnabled) ?? true
+        accountModelProbeIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .accountModelProbeIntervalSeconds) ?? 60
     }
 
     var normalized: CLIProxyGatewaySettings {
         var value = self
         value.port = min(max(value.port, 1_024), 65_535)
         value.requestRetry = min(max(value.requestRetry, 0), 10)
+        // CPA：max-retry-interval<=0 时 shouldRetryAfterError 直接放弃，429 几乎无法换号。
+        value.maxRetryInterval = min(max(value.maxRetryInterval, 1), 1_800)
+        value.maxRetryCredentials = min(max(value.maxRetryCredentials, 0), 64)
+        // 额度/429 换号是网关应有行为，不开放成用户选项；始终强制开启。
+        value.quotaSwitchProject = true
+        value.quotaSwitchPreviewModel = true
+        value.quotaAntigravityCredits = true
+        value.accountModelProbeIntervalSeconds = min(max(value.accountModelProbeIntervalSeconds, 15), 3_600)
         value.proxyURL = value.proxyURL.trimmingCharacters(in: .whitespacesAndNewlines)
         return value
     }
@@ -245,10 +295,54 @@ nonisolated struct CLIProxyGatewaySettings: Codable, Equatable, Sendable {
         if allowLANAccess == base.allowLANAccess { merged.allowLANAccess = external.allowLANAccess }
         if routingStrategy == base.routingStrategy { merged.routingStrategy = external.routingStrategy }
         if requestRetry == base.requestRetry { merged.requestRetry = external.requestRetry }
+        if maxRetryInterval == base.maxRetryInterval { merged.maxRetryInterval = external.maxRetryInterval }
+        if maxRetryCredentials == base.maxRetryCredentials {
+            merged.maxRetryCredentials = external.maxRetryCredentials
+        }
+        if quotaSwitchProject == base.quotaSwitchProject {
+            merged.quotaSwitchProject = external.quotaSwitchProject
+        }
+        if quotaSwitchPreviewModel == base.quotaSwitchPreviewModel {
+            merged.quotaSwitchPreviewModel = external.quotaSwitchPreviewModel
+        }
+        if quotaAntigravityCredits == base.quotaAntigravityCredits {
+            merged.quotaAntigravityCredits = external.quotaAntigravityCredits
+        }
         if proxyURL == base.proxyURL { merged.proxyURL = external.proxyURL }
         if enablePlugins == base.enablePlugins { merged.enablePlugins = external.enablePlugins }
+        if accountModelProbeEnabled == base.accountModelProbeEnabled {
+            merged.accountModelProbeEnabled = external.accountModelProbeEnabled
+        }
+        if accountModelProbeIntervalSeconds == base.accountModelProbeIntervalSeconds {
+            merged.accountModelProbeIntervalSeconds = external.accountModelProbeIntervalSeconds
+        }
         return merged
     }
+
+    /// 相对 `other`，是否改动了必须重启 CPA 进程才能生效的字段。
+    func requiresCPAProcessRestart(comparedTo other: CLIProxyGatewaySettings) -> Bool {
+        let a = normalized
+        let b = other.normalized
+        return a.port != b.port
+            || a.allowLANAccess != b.allowLANAccess
+            || a.routingStrategy != b.routingStrategy
+            || a.requestRetry != b.requestRetry
+            || a.maxRetryInterval != b.maxRetryInterval
+            || a.maxRetryCredentials != b.maxRetryCredentials
+            || a.quotaSwitchProject != b.quotaSwitchProject
+            || a.quotaSwitchPreviewModel != b.quotaSwitchPreviewModel
+            || a.quotaAntigravityCredits != b.quotaAntigravityCredits
+            || a.proxyURL != b.proxyURL
+            || a.enablePlugins != b.enablePlugins
+        // accountModelProbe* 仅 AIUsage 侧定时任务，不需重启 CPA。
+    }
+
+}
+
+/// AIUsage 托管的 CPA `api-keys` 命名空间前缀。
+/// 配置同步时只回收这些前缀下、且不在当前启用列表中的值；其它 key 原样保留。
+nonisolated enum CLIProxyManagedAPIKeyNamespace: Sendable {
+    static let prefixes = ["cpa-client-", "cpa-key-"]
 }
 
 nonisolated struct CLIProxySecrets: Sendable, Equatable {
@@ -405,7 +499,12 @@ nonisolated struct CLIProxyAuthFile: Codable, Identifiable, Equatable, Sendable 
     }
 
     var displayProvider: String { provider ?? type ?? "unknown" }
-    var displayLabel: String { email ?? label ?? name }
+    /// Runtime identities (for example Gemini CLI project routes) carry the
+    /// discriminating project name in `label`. Prefer it so sheets, flashes,
+    /// and accessibility text do not collapse every route to the same email.
+    var displayLabel: String {
+        runtimeOnly ? (label ?? email ?? name) : (email ?? label ?? name)
+    }
     var isOpenAICompatibleRuntime: Bool {
         let value = (provider ?? type ?? "").lowercased()
         return runtimeOnly && (value == "openai-compatibility" || value.hasPrefix("openai-compatible-"))
@@ -1011,11 +1110,16 @@ nonisolated struct CLIProxyAccountSyncCandidate: Identifiable, Equatable, Sendab
     }
 }
 
+/// 同步模式。产品已取消自动推送；`keepUpdated` 仅保留解码兼容，落盘一律 `manualCopy`。
 nonisolated enum CLIProxyAccountSyncMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case manualCopy
+    /// Legacy. Decoded from old manifests then normalized to `manualCopy`.
     case keepUpdated
 
     var id: String { rawValue }
+
+    /// 写入 manifest 前的规范值：历史 keepUpdated 一律降为手动。
+    var normalizedForPersistence: CLIProxyAccountSyncMode { .manualCopy }
 }
 
 nonisolated enum CLIProxyAccountSyncState: String, Codable, Equatable, Sendable {
@@ -1066,7 +1170,7 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
         self.lastSourceSemanticFingerprint = lastSourceSemanticFingerprint
         self.lastCopiedSemanticFingerprint = lastCopiedSemanticFingerprint
         self.lastSyncedAt = lastSyncedAt
-        self.mode = mode
+        self.mode = mode.normalizedForPersistence
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1099,7 +1203,8 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
             forKey: .lastCopiedSemanticFingerprint
         )
         lastSyncedAt = try container.decode(Date.self, forKey: .lastSyncedAt)
-        mode = try container.decode(CLIProxyAccountSyncMode.self, forKey: .mode)
+        let decodedMode = try container.decode(CLIProxyAccountSyncMode.self, forKey: .mode)
+        mode = decodedMode.normalizedForPersistence
     }
 
     func encode(to encoder: Encoder) throws {
@@ -1119,7 +1224,7 @@ nonisolated struct CLIProxyAccountSyncRecord: Codable, Identifiable, Equatable, 
             forKey: .lastCopiedSemanticFingerprint
         )
         try container.encode(lastSyncedAt, forKey: .lastSyncedAt)
-        try container.encode(mode, forKey: .mode)
+        try container.encode(mode.normalizedForPersistence, forKey: .mode)
     }
 }
 
@@ -1586,7 +1691,9 @@ nonisolated enum CLIProxyManagedAuthSafety {
             "recentrequests",
             "status",
             "statusmessage",
-            "unavailable"
+            "unavailable",
+            // 启停是运行时控制位，不算「凭据被改过」。
+            "disabled"
         ].contains(normalized)
     }
 

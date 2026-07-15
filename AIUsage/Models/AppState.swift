@@ -395,13 +395,11 @@ class AppState: ObservableObject {
     }
 
     func hideAccount(_ entry: ProviderAccountEntry) {
-        accountStore.hideAccount(entry) { [weak self] in
-            self?.refreshCoordinator.removeLiveProviders(matching: entry)
-            self?.refreshCoordinator.reapplyVisibleSortedProviders()
-        }
+        hideAccounts([entry])
     }
 
     func hideAccounts(_ entries: [ProviderAccountEntry]) {
+        // 订阅与 CPA 账号池彼此独立：隐藏/删除只影响订阅侧，不联动 disable CPA 副本。
         accountStore.hideAccounts(entries) { [weak self] in
             self?.refreshCoordinator.removeLiveProviders(matching: entries)
             self?.refreshCoordinator.reapplyVisibleSortedProviders()

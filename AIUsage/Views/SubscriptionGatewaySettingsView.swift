@@ -4,6 +4,7 @@ import SwiftUI
 
 private enum GatewaySettingsCategory: String, CaseIterable, Identifiable {
     case runtime
+    case keys
     case updates
     case versions
     case diagnostics
@@ -13,6 +14,7 @@ private enum GatewaySettingsCategory: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .runtime: return L("Runtime", "运行")
+        case .keys: return L("API Keys", "密钥")
         case .updates: return L("Updates", "更新")
         case .versions: return L("Versions", "版本")
         case .diagnostics: return L("Diagnostics", "诊断")
@@ -22,6 +24,7 @@ private enum GatewaySettingsCategory: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .runtime: return "gearshape"
+        case .keys: return "key.fill"
         case .updates: return "arrow.down.circle"
         case .versions: return "shippingbox"
         case .diagnostics: return "stethoscope"
@@ -31,6 +34,7 @@ private enum GatewaySettingsCategory: String, CaseIterable, Identifiable {
     var color: Color {
         switch self {
         case .runtime: return .gray
+        case .keys: return .indigo
         case .updates: return .blue
         case .versions: return .orange
         case .diagnostics: return .teal
@@ -43,6 +47,7 @@ private enum GatewaySettingsCategory: String, CaseIterable, Identifiable {
 struct SubscriptionGatewaySettingsView: View {
     @ObservedObject var manager: CLIProxyGatewayManager
     @ObservedObject var runtime: CLIProxyRuntimeController
+    @ObservedObject private var navigation = CLIProxyGatewayNavigation.shared
     @Binding var draftSettings: CLIProxyGatewaySettings
     @Binding var pendingVersionDeletion: CLIProxyInstalledVersion?
 
@@ -54,6 +59,10 @@ struct SubscriptionGatewaySettingsView: View {
             settingsSidebar
             Divider()
             settingsDetail
+        }
+        .onAppear { consumeSettingsDestination() }
+        .onChange(of: navigation.settingsDestination) { _, _ in
+            consumeSettingsDestination()
         }
         .alert(L("Enable Local Network Access?", "开启局域网访问？"), isPresented: $showLANConfirmation) {
             Button(L("Enable and Apply", "开启并应用"), role: .destructive) {
@@ -68,6 +77,13 @@ struct SubscriptionGatewaySettingsView: View {
                 "CPA 将通过 HTTP 监听所有 IPv4 接口。请妥善保管密钥，仅在可信网络中开启。"
             ))
         }
+    }
+
+    private func consumeSettingsDestination() {
+        guard let destination = navigation.settingsDestination,
+              let category = GatewaySettingsCategory(rawValue: destination.rawValue) else { return }
+        selectedCategory = category
+        navigation.settingsDestination = nil
     }
 
     // MARK: - Sidebar
@@ -124,24 +140,47 @@ struct SubscriptionGatewaySettingsView: View {
 
     // MARK: - Detail
 
+    @ViewBuilder
     private var settingsDetail: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        switch selectedCategory {
+        case .runtime:
+            VStack(alignment: .leading, spacing: 12) {
                 errorBanners
-                switch selectedCategory {
-                case .runtime:
-                    runtimeSection
-                case .updates:
-                    updatesSection
-                case .versions:
-                    versionsSection
-                case .diagnostics:
-                    diagnosticsSection
-                }
+                SubscriptionGatewaySettingsRuntimePane(
+                    runtime: runtime,
+                    draftSettings: $draftSettings,
+                    onApply: requestApplySettings
+                )
+                .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
             }
-            .padding(22)
-            .frame(maxWidth: 760, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 22)
+            .padding(.top, 18)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        case .keys:
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    errorBanners
+                    SubscriptionGatewayClientKeysPane(runtime: runtime)
+                }
+                .padding(22)
+                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        case .updates, .versions, .diagnostics:
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    errorBanners
+                    switch selectedCategory {
+                    case .updates: updatesSection
+                    case .versions: versionsSection
+                    case .diagnostics: diagnosticsSection
+                    default: EmptyView()
+                    }
+                }
+                .padding(22)
+                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
         }
     }
 
@@ -151,159 +190,7 @@ struct SubscriptionGatewaySettingsView: View {
         if case .failed(let error) = runtime.state { GatewayErrorBanner(message: error) }
     }
 
-    // MARK: - Runtime
-
-    private var runtimeSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeader(title: L("Runtime", "运行")) {
-                if hasUnappliedChanges {
-                    GatewayQuietBadge(text: L("Not applied", "未应用"), tint: .orange)
-                }
-            }
-
-            GatewayCard(padding: 14) {
-                VStack(spacing: 0) {
-                    settingsRow(
-                        title: L("Start with AIUsage", "随 AIUsage 启动"),
-                        detail: L("Launch verified CPA after app start.", "应用启动后自动运行已校验的 CPA。")
-                    ) {
-                        Toggle("", isOn: $draftSettings.autoStart)
-                            .labelsHidden()
-                            .accessibilityLabel(L("Start with AIUsage", "随 AIUsage 启动"))
-                    }
-
-                    Divider().padding(.vertical, 10)
-
-                    settingsRow(
-                        title: L("Service port", "服务端口"),
-                        detail: L("Default 127.0.0.1; all interfaces when LAN is on.", "默认本机；开启局域网后监听所有接口。")
-                    ) {
-                        TextField(
-                            "14420",
-                            value: $draftSettings.port,
-                            format: IntegerFormatStyle<Int>.number.grouping(.never)
-                        )
-                        .multilineTextAlignment(.trailing)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 96)
-                        .accessibilityLabel(L("Service port", "服务端口"))
-                    }
-
-                    Divider().padding(.vertical, 10)
-
-                    settingsRow(
-                        title: L("LAN access", "局域网访问"),
-                        detail: L("Expose inference APIs on the local network.", "向同一网络开放推理 API。")
-                    ) {
-                        Toggle("", isOn: $draftSettings.allowLANAccess)
-                            .labelsHidden()
-                            .accessibilityLabel(L("LAN access", "局域网访问"))
-                    }
-
-                    if draftSettings.allowLANAccess {
-                        lanAddressesBlock
-                            .padding(.top, 10)
-                    }
-
-                    Divider().padding(.vertical, 10)
-
-                    settingsRow(
-                        title: L("Account routing", "账号路由"),
-                        detail: L("How CPA picks among ready accounts.", "在可用账号间的选择方式。")
-                    ) {
-                        Picker("", selection: $draftSettings.routingStrategy) {
-                            Text(L("Round robin", "轮询")).tag(CLIProxyRoutingStrategy.roundRobin)
-                            Text(L("Fill first", "优先用满")).tag(CLIProxyRoutingStrategy.fillFirst)
-                        }
-                        .labelsHidden()
-                        .frame(width: 140)
-                    }
-
-                    Divider().padding(.vertical, 10)
-
-                    settingsRow(
-                        title: L("Request retries", "请求重试"),
-                        detail: L("Retry on other accounts after failure.", "失败后在其它账号上重试。")
-                    ) {
-                        Stepper(value: $draftSettings.requestRetry, in: 0...10) {
-                            Text("\(draftSettings.requestRetry)")
-                                .monospacedDigit()
-                                .frame(minWidth: 18, alignment: .trailing)
-                        }
-                    }
-
-                    Divider().padding(.vertical, 10)
-
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(L("Network proxy URL", "网络代理 URL"))
-                            .font(.subheadline.weight(.semibold))
-                        TextField("http://127.0.0.1:7890", text: $draftSettings.proxyURL)
-                            .textFieldStyle(.roundedBorder)
-                        Text(L(
-                            "HTTP/SOCKS for CPA upstream calls. Empty = direct. Not an AIUsage proxy node.",
-                            "CPA 访问上游时使用的 HTTP/SOCKS；留空直连。不是 AIUsage 代理节点。"
-                        ))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Divider().padding(.vertical, 10)
-
-                    settingsRow(
-                        title: L("Official plugins", "官方插件"),
-                        detail: L("Allow installed CPA provider plugins.", "允许已安装的 CPA 提供商插件。")
-                    ) {
-                        Toggle("", isOn: $draftSettings.enablePlugins)
-                            .labelsHidden()
-                            .accessibilityLabel(L("Official plugins", "官方插件"))
-                    }
-                }
-            }
-
-            HStack {
-                if hasUnappliedChanges {
-                    Button(L("Reset", "还原")) { draftSettings = runtime.settings }
-                        .buttonStyle(.borderless)
-                }
-                Spacer()
-                Button {
-                    requestApplySettings()
-                } label: {
-                    Label(L("Apply", "应用"), systemImage: "checkmark")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!hasUnappliedChanges || runtime.state.isTransitioning)
-            }
-        }
-    }
-
-    private var lanAddressesBlock: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.shield.fill")
-                .font(.caption)
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(L("Trusted networks only", "仅可信网络"))
-                    .font(.caption.weight(.semibold))
-                let addresses = runtime.detectedLANBaseURLs(port: draftSettings.normalized.port)
-                if addresses.isEmpty {
-                    Text(L("No private IPv4 detected.", "未检测到私有 IPv4。"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(addresses, id: \.absoluteString) { address in
-                        Text(address.absoluteString)
-                            .font(.caption2.monospaced())
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
+    // Runtime / Keys panes live in dedicated files.
 
     // MARK: - Updates
 

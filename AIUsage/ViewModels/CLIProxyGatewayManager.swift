@@ -119,12 +119,14 @@ final class CLIProxyGatewayManager: ObservableObject {
     @Published var authImportSession: CLIProxyAuthImportSession?
     @Published var isImportingAuthFiles = false
 
-    private let paths: CLIProxyPaths
+    let paths: CLIProxyPaths
     private let releaseClient: CLIProxyReleaseClient
     private let downloader: CLIProxyAssetDownloader
     private let binaryStore: CLIProxyBinaryStore
     let runtime: CLIProxyRuntimeController
     private var accountRegistryCancellable: AnyCancellable?
+    private var accountProbeCancellables = Set<AnyCancellable>()
+    private var accountProbeTask: Task<Void, Never>?
     private var syncCandidateRefreshTask: Task<Void, Never>?
     private var lastSyncCandidateSources: [CLIProxySyncCandidateSource] = []
     private var syncCandidateGeneration = 0
@@ -193,6 +195,35 @@ final class CLIProxyGatewayManager: ObservableObject {
                     sources: Self.syncCandidateSources(from: accounts)
                 )
             }
+        // 定时列模型探测挂在 Manager，不依赖 Accounts 页生命周期。
+        Publishers.CombineLatest(self.runtime.$state, self.runtime.$settings)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] state, settings in
+                self?.syncAccountProbeLoop(
+                    isRunning: state.isRunning,
+                    settings: settings.normalized
+                )
+            }
+            .store(in: &accountProbeCancellables)
+    }
+
+    /// 设置开启且 CPA 在跑时，按间隔刷新账号池并复检列模型。
+    private func syncAccountProbeLoop(isRunning: Bool, settings: CLIProxyGatewaySettings) {
+        accountProbeTask?.cancel()
+        accountProbeTask = nil
+        guard isRunning, settings.accountModelProbeEnabled else { return }
+        let interval = max(15, settings.accountModelProbeIntervalSeconds)
+        accountProbeTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval))
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+                let current = self.runtime.settings.normalized
+                guard self.runtime.state.isRunning, current.accountModelProbeEnabled else { return }
+                await self.refreshAccounts(refreshCandidates: false)
+                await self.probeAllAccountModels()
+            }
+        }
     }
 
     func refresh(checkRemote: Bool = true) async {
@@ -325,9 +356,20 @@ final class CLIProxyGatewayManager: ObservableObject {
             let validNames = Set(authFiles.map(\.name))
             authFileModels = authFileModels.filter { validNames.contains($0.key) }
             authFileModelErrors = authFileModelErrors.filter { validNames.contains($0.key) }
-            await refreshSyncStates(using: client, allowKeepUpdated: true)
+            await refreshSyncStates(using: client)
             await reconcileManagedDistributionIfNeeded()
         } catch { lastError = error.localizedDescription }
+    }
+
+    /// 强制复检全部账号的列模型连通（检测全部 / 定时任务用）。
+    func probeAllAccountModels() async {
+        guard runtime.state.isRunning else { return }
+        // 清缓存，确保每个账号都会 force 再拉。
+        for file in authFiles {
+            authFileModels[file.name] = nil
+            authFileModelErrors[file.name] = nil
+        }
+        await prefetchAuthFileModels(for: authFiles, retryEmpty: true)
     }
 
     func refreshSyncCandidates() async {
@@ -540,6 +582,11 @@ final class CLIProxyGatewayManager: ObservableObject {
         authFileModels[file.name] ?? []
     }
 
+    /// `nil` = 尚未拉取；有值（含 0）= 已缓存。
+    func cachedModelCount(for file: CLIProxyAuthFile) -> Int? {
+        authFileModels[file.name]?.count
+    }
+
     func loadModels(for file: CLIProxyAuthFile, force: Bool = false) async {
         if file.isOpenAICompatibleRuntime,
            let provider = openAICompatibleProvider(named: file.displayLabel) {
@@ -557,26 +604,104 @@ final class CLIProxyGatewayManager: ObservableObject {
         }
     }
 
+    /// 探测账号可用性：强制拉取该凭据可用模型。成功返回模型数。
+    func testAccountAvailability(for file: CLIProxyAuthFile) async -> (ok: Bool, modelCount: Int, message: String?) {
+        await loadModels(for: file, force: true)
+        if let error = authFileModelErrors[file.name]?.nilIfBlank {
+            return (false, 0, error)
+        }
+        return (true, authFileModels[file.name]?.count ?? 0, nil)
+    }
+
+    /// 账号中心 / 池变更后预取各凭据可用模型（有限并发）。
+    /// `retryEmpty`：已缓存但为空的条目会强制再拉一次（新账号刚写入时常先返回空列表）。
+    func prefetchAuthFileModels(
+        for files: [CLIProxyAuthFile],
+        concurrency: Int = 4,
+        retryEmpty: Bool = false
+    ) async {
+        let pending = files.filter { file in
+            if authFileModels[file.name] == nil { return true }
+            if retryEmpty,
+               authFileModels[file.name]?.isEmpty == true,
+               authFileModelErrors[file.name] == nil {
+                return true
+            }
+            return false
+        }
+        guard !pending.isEmpty else { return }
+        let limit = max(1, concurrency)
+        // 预先算好 force，避免 task 闭包跨隔离域读 @MainActor 状态。
+        let jobs: [(CLIProxyAuthFile, Bool)] = pending.map { file in
+            (file, authFileModels[file.name] != nil)
+        }
+        await withTaskGroup(of: Void.self) { group in
+            var index = 0
+            func enqueueNext() {
+                guard index < jobs.count else { return }
+                let job = jobs[index]
+                index += 1
+                group.addTask { @MainActor in
+                    await self.loadModels(for: job.0, force: job.1)
+                }
+            }
+            for _ in 0..<min(limit, jobs.count) {
+                enqueueNext()
+            }
+            for await _ in group {
+                enqueueNext()
+            }
+        }
+    }
+
     func setAuthFile(_ file: CLIProxyAuthFile, disabled: Bool) async {
+        await setAuthFiles([file], disabled: disabled)
+    }
+
+    /// Applies one account-level enable/disable action to every underlying
+    /// login/project record, then refreshes the pool once. This avoids visible
+    /// partial states and repeated list reloads for project-expanded accounts.
+    func setAuthFiles(_ files: [CLIProxyAuthFile], disabled: Bool) async {
         guard !isManagingAccounts, let client = managementClient() else { return }
+        guard !files.isEmpty else { return }
         isManagingAccounts = true
         lastError = nil
+        defer { isManagingAccounts = false }
         do {
-            if file.isOpenAICompatibleRuntime {
-                try await client.setOpenAICompatibleProviderDisabled(name: file.displayLabel, disabled: disabled)
+            var requiresRestart = false
+            var handledNames = Set<String>()
+            var updateError: Error?
+            for file in files where handledNames.insert(file.name.lowercased()).inserted {
+                do {
+                    if file.isOpenAICompatibleRuntime {
+                        try await client.setOpenAICompatibleProviderDisabled(
+                            name: file.displayLabel,
+                            disabled: disabled
+                        )
+                        requiresRestart = true
+                    } else {
+                        try await client.setDisabled(disabled, name: file.name)
+                    }
+                } catch {
+                    if updateError == nil { updateError = error }
+                }
+            }
+
+            let refreshClient: CLIProxyManagementClient
+            if requiresRestart {
                 await runtime.restart()
                 guard runtime.state.isRunning, let refreshedClient = managementClient() else {
                     throw CLIProxyGatewayError.process("CPA did not restart after updating the provider")
                 }
-                authFiles = try await loadAuthPool(using: refreshedClient)
-                await refreshModelCatalogAndDistribution(using: refreshedClient)
+                refreshClient = refreshedClient
             } else {
-                try await client.setDisabled(disabled, name: file.name)
-                authFiles = try await loadAuthPool(using: client)
-                await refreshModelCatalogAndDistribution(using: client)
+                refreshClient = client
             }
+
+            authFiles = try await loadAuthPool(using: refreshClient)
+            await refreshModelCatalogAndDistribution(using: refreshClient)
+            if let updateError { throw updateError }
         } catch { lastError = error.localizedDescription }
-        isManagingAccounts = false
     }
 
     func updateAuthFileMetadata(_ file: CLIProxyAuthFile, note: String, priority: Int) async {
@@ -587,7 +712,7 @@ final class CLIProxyGatewayManager: ObservableObject {
         do {
             guard !file.runtimeOnly else {
                 throw CLIProxyGatewayError.configuration(
-                    L("Runtime providers do not support auth-file notes or priority editing here.", "运行时提供商不支持在此编辑认证文件备注或优先级。")
+                    L("Plugin-managed projects do not support notes or priority editing here.", "插件自动管理的项目不支持在此编辑备注或优先级。")
                 )
             }
             try await client.patchAuthFileFields(name: file.name, note: note, priority: priority)
@@ -839,7 +964,6 @@ final class CLIProxyGatewayManager: ObservableObject {
 
     func syncAccount(
         _ candidate: CLIProxyAccountSyncCandidate,
-        mode: CLIProxyAccountSyncMode? = nil,
         forceOverwriteCPA: Bool = false
     ) async {
         guard syncManifestHealthy,
@@ -869,7 +993,6 @@ final class CLIProxyGatewayManager: ObservableObject {
             }
             let name = evaluation.authFileName
             let data = evaluation.copiedData
-            let effectiveMode = mode ?? syncRecord(for: candidate)?.mode ?? .manualCopy
             try await client.uploadAuthFile(data: data, name: name)
             // 回读 CPA 落盘内容作基线：上传后 CPA 可能立刻改写 access_token / last_refresh，
             // 若仍用本地上传前 hash，下次 refresh 会误报「CPA 副本已修改」。
@@ -888,7 +1011,7 @@ final class CLIProxyGatewayManager: ObservableObject {
                 lastSourceSemanticFingerprint: evaluation.sourceSemanticFingerprint,
                 lastCopiedSemanticFingerprint: baseline.semanticFingerprint,
                 lastSyncedAt: Date(),
-                mode: effectiveMode
+                mode: .manualCopy
             )
             upsertSyncRecord(record)
             try saveSyncManifest()
@@ -899,24 +1022,6 @@ final class CLIProxyGatewayManager: ObservableObject {
             }
             await refreshModelCatalogAndDistribution(using: client)
         } catch { lastError = error.localizedDescription }
-    }
-
-    func setSyncMode(_ candidate: CLIProxyAccountSyncCandidate, mode: CLIProxyAccountSyncMode) async {
-        guard syncManifestHealthy else { return }
-        guard var record = syncRecord(for: candidate) else {
-            await syncAccount(candidate, mode: mode)
-            return
-        }
-        record.mode = mode
-        upsertSyncRecord(record)
-        do {
-            try saveSyncManifest()
-            if mode == .keepUpdated, accountSyncStates[candidate.id] == .sourceChanged {
-                await syncAccount(candidate, mode: mode)
-            }
-        } catch {
-            lastError = error.localizedDescription
-        }
     }
 
     func authFileName(for candidate: CLIProxyAccountSyncCandidate) -> String {
@@ -936,8 +1041,49 @@ final class CLIProxyGatewayManager: ObservableObject {
     }
 
     func isSynced(_ candidate: CLIProxyAccountSyncCandidate) -> Bool {
-        let name = syncRecord(for: candidate)?.authFileName ?? authFileName(for: candidate)
-        return authFiles.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        // 1) 清单记录指向的 auth 文件仍在
+        if let record = syncRecord(for: candidate),
+           authFiles.contains(where: {
+               $0.name.caseInsensitiveCompare(record.authFileName) == .orderedSame
+           }) {
+            return true
+        }
+        // 2) CPA 文件已打上同一 AIUsage credential id（凭据轮换后清单可能短暂对不上）
+        if authFiles.contains(where: { file in
+            accountIdentity(for: file)?.sourceCredentialID?
+                .caseInsensitiveCompare(candidate.credentialId) == .orderedSame
+        }) {
+            return true
+        }
+        // 3) 预期文件名已存在
+        let expected = authFileName(for: candidate)
+        if authFiles.contains(where: {
+            $0.name.caseInsensitiveCompare(expected) == .orderedSame
+        }) {
+            return true
+        }
+        // 4) 强身份已在 CPA（同原生账号换过本地 credential id）
+        if let key = managedIdentityKey(for: candidate),
+           authFileIdentities.values.contains(where: {
+               $0.key.caseInsensitiveCompare(key) == .orderedSame
+           }) {
+            return true
+        }
+        // 5) Antigravity 缺 project_id 时：仅当 CPA 侧同邮箱且也缺 project 的「唯一」条目才视为已接入。
+        // 有 project 的条目必须走强身份，避免多项目被邮箱误判成已同步。
+        if candidate.providerId.caseInsensitiveCompare("antigravity") == .orderedSame,
+           candidate.accountIdentity?.projectID == nil,
+           let email = candidate.accountIdentity?.email?.lowercased(),
+           !email.isEmpty {
+            let emailPeers = authFileIdentities.values.filter {
+                $0.providerID.caseInsensitiveCompare("antigravity") == .orderedSame
+                    && $0.email?.lowercased() == email
+            }
+            if emailPeers.count == 1, emailPeers[0].projectID == nil {
+                return true
+            }
+        }
+        return false
     }
 
     func syncState(for candidate: CLIProxyAccountSyncCandidate) -> CLIProxyAccountSyncState {
@@ -946,10 +1092,6 @@ final class CLIProxyGatewayManager: ObservableObject {
 
     func syncStatus(for candidate: CLIProxyAccountSyncCandidate) -> CLIProxyAccountSyncState {
         syncState(for: candidate)
-    }
-
-    func syncMode(for candidate: CLIProxyAccountSyncCandidate) -> CLIProxyAccountSyncMode? {
-        syncRecord(for: candidate)?.mode
     }
 
     func beginOAuth(_ provider: CLIProxyOAuthProvider) async {
@@ -998,8 +1140,9 @@ final class CLIProxyGatewayManager: ObservableObject {
                     oauthStatusMessage = L("Account connected.", "账号已连接。")
                     authFiles = try await loadAuthPool(using: client)
                     availableModels = Self.normalizedModels((try? await client.availableModels()) ?? availableModels)
-                    await refreshSyncStates(using: client, allowKeepUpdated: true)
+                    await refreshSyncStates(using: client)
                     await reconcileManagedDistributionIfNeeded()
+                    await prefetchAuthFileModels(for: authFiles, retryEmpty: true)
                     oauthFlowState = .succeeded(provider)
                     oauthSession = nil
                     oauthProvider = nil
@@ -1071,8 +1214,9 @@ final class CLIProxyGatewayManager: ObservableObject {
                     oauthStatusMessage = L("Account connected.", "账号已连接。")
                     authFiles = try await loadAuthPool(using: client)
                     availableModels = Self.normalizedModels((try? await client.availableModels()) ?? availableModels)
-                    await refreshSyncStates(using: client, allowKeepUpdated: true)
+                    await refreshSyncStates(using: client)
                     await reconcileManagedDistributionIfNeeded()
+                    await prefetchAuthFileModels(for: authFiles, retryEmpty: true)
                     oauthFlowState = .pluginSucceeded(plugin.displayName)
                     oauthSession = nil
                     oauthPlugin = nil
@@ -1606,7 +1750,6 @@ final class CLIProxyGatewayManager: ObservableObject {
             let baseRecord = matchingRecords.max(by: { $0.lastSyncedAt < $1.lastSyncedAt }) else {
                 continue
             }
-            let keepUpdated = matchingRecords.contains { $0.mode == .keepUpdated }
             let candidate = syncCandidates.first {
                 managedIdentityKey(for: $0)?.caseInsensitiveCompare(identityKey) == .orderedSame
             }
@@ -1632,7 +1775,7 @@ final class CLIProxyGatewayManager: ObservableObject {
                 lastSourceSemanticFingerprint: baseRecord.lastSourceSemanticFingerprint,
                 lastCopiedSemanticFingerprint: baseRecord.lastCopiedSemanticFingerprint,
                 lastSyncedAt: baseRecord.lastSyncedAt,
-                mode: keepUpdated ? .keepUpdated : baseRecord.mode
+                mode: .manualCopy
             )
             records.removeAll { matchingIDs.contains($0.id.lowercased()) }
             records.append(replacement)
@@ -1714,7 +1857,6 @@ final class CLIProxyGatewayManager: ObservableObject {
             $0.authFileName.caseInsensitiveCompare(canonicalName) == .orderedSame
         }
         let baseRecord = canonicalRecord ?? existingRecords.max { $0.lastSyncedAt < $1.lastSyncedAt }
-        let keepUpdated = existingRecords.contains { $0.mode == .keepUpdated }
 
         if let baseRecord {
             return CLIProxyAccountSyncRecord(
@@ -1727,7 +1869,7 @@ final class CLIProxyGatewayManager: ObservableObject {
                 lastSourceSemanticFingerprint: baseRecord.lastSourceSemanticFingerprint,
                 lastCopiedSemanticFingerprint: baseRecord.lastCopiedSemanticFingerprint,
                 lastSyncedAt: baseRecord.lastSyncedAt,
-                mode: keepUpdated ? .keepUpdated : baseRecord.mode
+                mode: .manualCopy
             )
         }
 
@@ -1934,8 +2076,7 @@ final class CLIProxyGatewayManager: ObservableObject {
     }
 
     private func refreshSyncStates(
-        using client: CLIProxyManagementClient,
-        allowKeepUpdated: Bool
+        using client: CLIProxyManagementClient
     ) async {
         guard syncManifestHealthy else { return }
         var states: [String: CLIProxyAccountSyncState] = [:]
@@ -1987,40 +2128,12 @@ final class CLIProxyGatewayManager: ObservableObject {
                         lastCopiedSemanticFingerprint: evaluation.baselineSemanticFingerprint
                             ?? existing.lastCopiedSemanticFingerprint,
                         lastSyncedAt: existing.lastSyncedAt,
-                        mode: existing.mode
+                        mode: .manualCopy
                     )
                     upsertSyncRecord(healed)
                     manifestChanged = true
                 }
-
-                guard allowKeepUpdated,
-                      evaluation.state == .sourceChanged,
-                      let record = syncRecord(for: candidate),
-                      record.mode == .keepUpdated else { continue }
-
-                try await client.uploadAuthFile(data: evaluation.copiedData, name: record.authFileName)
-                let baseline = await authFileBaselineAfterUpload(
-                    name: record.authFileName,
-                    uploaded: evaluation.copiedData,
-                    client: client
-                )
-                let updated = CLIProxyAccountSyncRecord(
-                    providerId: record.providerId,
-                    credentialId: candidate.credentialId,
-                    authFileName: record.authFileName,
-                    accountIdentity: managedIdentityKey(for: candidate) ?? record.accountIdentity,
-                    sourceFingerprint: evaluation.sourceFingerprint,
-                    lastCopiedFingerprint: baseline.fullFingerprint,
-                    lastSourceSemanticFingerprint: evaluation.sourceSemanticFingerprint,
-                    lastCopiedSemanticFingerprint: baseline.semanticFingerprint,
-                    lastSyncedAt: Date(),
-                    mode: .keepUpdated
-                )
-                upsertSyncRecord(updated)
-                authFileModels[record.authFileName] = nil
-                authFileModelErrors[record.authFileName] = nil
-                states[candidate.id] = .current
-                manifestChanged = true
+                // 不再自动 keepUpdated 推送；源变更只反映状态，由用户点「从订阅更新」。
             } catch {
                 states[candidate.id] = accountSyncStates[candidate.id] ?? .notSynced
                 if lastError == nil { lastError = error.localizedDescription }

@@ -77,6 +77,16 @@ final class AccountStore: ObservableObject {
                    AccountIdentityPolicy.sourceFilePathsMatch($0.sourceFilePath, resolvedSourcePath) {
                     return true
                 }
+                // CPA→订阅会 copy 到 AuthImports；墓碑常记着 CPA 原路径，用 metadata.sourcePath 对齐。
+                if let credentialId,
+                   let cred = AccountCredentialStore.shared.loadCredential(
+                    providerId: providerId,
+                    credentialId: credentialId
+                   ),
+                   let metaSource = cred.metadata["sourcePath"],
+                   AccountIdentityPolicy.sourceFilePathsMatch($0.sourceFilePath, metaSource) {
+                    return true
+                }
                 // Re-adding a deleted Codex workspace must revive the permanent tombstone.
                 if providerId.lowercased() == "codex",
                    let normalizedAccountId,
@@ -155,8 +165,17 @@ final class AccountStore: ObservableObject {
         let displayName: String? = usage.accountName?.nilIfBlank
             ?? credential.accountLabel?.nilIfBlank
             ?? usage.accountLogin?.nilIfBlank
-        let accountId: String? = usage.usageAccountId?.nilIfBlank
-            ?? usage.accountLogin?.nilIfBlank
+        // Codex / Antigravity：accountId 必须是 workspace/project 原生 id。
+        // accountLogin 常是 user-xxx，写进 registry 会把墓碑和去重搞乱（Free/Business 互挡）。
+        let accountId: String? = {
+            if let usageAccountId = usage.usageAccountId?.nilIfBlank {
+                return usageAccountId
+            }
+            if AccountIdentityPolicy.isMultiWorkspace(providerId) {
+                return nil
+            }
+            return usage.accountLogin?.nilIfBlank
+        }()
 
         var enrichedCredential = credential
         let validatedAt = SharedFormatters.iso8601String(from: Date())
@@ -183,6 +202,9 @@ final class AccountStore: ObservableObject {
         if providerId == "antigravity",
            let projectId = (usage.extra["projectId"]?.value as? String)?.nilIfBlank {
             enrichedCredential.metadata["projectId"] = projectId
+        }
+        if let apiRegion = (usage.extra[ProviderAPIRegion.metadataKey]?.value as? String)?.nilIfBlank {
+            enrichedCredential.metadata[ProviderAPIRegion.metadataKey] = apiRegion
         }
         enrichedCredential.lastUsedAt = validatedAt
 

@@ -240,6 +240,36 @@ enum ProviderAuthManager {
         )
     }
 
+    static func makeAntigravityCandidate(authFileURL: URL) -> ProviderAuthCandidate {
+        let path = authFileURL.path
+        let json = loadJSONObject(at: path)
+        let email = stringValue(json?["email"])
+            ?? jwtEmail(from: stringValue(json?["id_token"]))
+            ?? jwtEmail(from: stringValue(json?["access_token"]))
+        let fingerprint: String?
+        if let json {
+            fingerprint = sessionFingerprint(from: json)
+        } else {
+            fingerprint = nil
+        }
+
+        return ProviderAuthCandidate(
+            id: "antigravity-oauth:\(path)",
+            providerId: "antigravity",
+            sourceIdentifier: "antigravity-oauth:\(path)",
+            sessionFingerprint: fingerprint,
+            title: email ?? "Antigravity Login",
+            subtitle: "From CPA",
+            detail: authFileURL.lastPathComponent,
+            modifiedAt: Date(),
+            authMethod: .authFile,
+            credentialValue: path,
+            sourcePath: path,
+            shouldCopyFile: true,
+            identityScope: .sharedSource
+        )
+    }
+
     static func discoverCandidates(for providerId: String) -> [ProviderAuthCandidate] {
         let rawCandidates: [ProviderAuthCandidate]
 
@@ -373,25 +403,35 @@ enum ProviderAuthManager {
         providerId: String,
         authMethod: AuthMethod,
         value: String,
-        suggestedLabel: String? = nil
+        suggestedLabel: String? = nil,
+        apiRegion: ProviderAPIRegion = .auto
     ) async throws -> (AccountCredential, ProviderUsage) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw ProviderError("missing_credential", "Credential value is empty.")
         }
 
-        let credential = AccountCredential(
+        var metadata: [String: String] = [
+            "sourceIdentifier": "manual:\(authMethod.rawValue):\(UUID().uuidString)",
+            "importedAt": SharedFormatters.iso8601String(from: Date()),
+            "identityScope": ProviderAuthCandidate.IdentityScope.sharedSource.rawValue
+        ]
+        if apiRegion != .auto {
+            metadata[ProviderAPIRegion.metadataKey] = apiRegion.rawValue
+        }
+
+        var credential = AccountCredential(
             providerId: providerId,
             accountLabel: suggestedLabel?.nilIfBlank,
             authMethod: authMethod,
             credential: trimmed,
-            metadata: [
-                "sourceIdentifier": "manual:\(authMethod.rawValue):\(UUID().uuidString)",
-                "importedAt": SharedFormatters.iso8601String(from: Date()),
-                "identityScope": ProviderAuthCandidate.IdentityScope.sharedSource.rawValue
-            ]
+            metadata: metadata
         )
         let usage = try await validate(credential: credential)
+        // 自动探测成功后把实际命中区域写回，后续刷新直打对应端点。
+        if let resolved = (usage.extra[ProviderAPIRegion.metadataKey]?.value as? String)?.nilIfBlank {
+            credential.metadata[ProviderAPIRegion.metadataKey] = resolved
+        }
         return (credential, usage)
     }
 
@@ -429,15 +469,7 @@ enum ProviderAuthManager {
     }
 
     private static func managedImportDirectory(for providerId: String) throws -> URL {
-        let base = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let directory = base
-            .appendingPathComponent("AIUsage", isDirectory: true)
-            .appendingPathComponent("AuthImports", isDirectory: true)
+        let directory = try ProviderManagedImportStore.managedImportsRootDirectory()
             .appendingPathComponent(providerId, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
