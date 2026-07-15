@@ -357,90 +357,13 @@ final class GeminiLoginCoordinator: ObservableObject {
     }
 
     private nonisolated static func resolveOAuthConfiguration() -> OAuthConfiguration? {
-        if let environmentConfiguration = oauthConfigurationFromEnvironment(
-            clientIDKey: "AIUSAGE_GEMINI_OAUTH_CLIENT_ID",
-            clientSecretKey: "AIUSAGE_GEMINI_OAUTH_CLIENT_SECRET"
-        ) {
-            return environmentConfiguration
-        }
-
-        if let bundleDirectory = geminiBundleDirectory() {
-            let files = (try? FileManager.default.contentsOfDirectory(
-                at: bundleDirectory,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            )) ?? []
-
-            for file in files where file.pathExtension == "js" {
-                guard let content = try? String(contentsOf: file, encoding: .utf8),
-                      let clientId = extractConstant("OAUTH_CLIENT_ID", from: content),
-                      let clientSecret = extractConstant("OAUTH_CLIENT_SECRET", from: content) else {
-                    continue
-                }
-                return OAuthConfiguration(clientId: clientId, clientSecret: clientSecret)
-            }
-        }
-
-        return nil
-    }
-
-    private nonisolated static func oauthConfigurationFromEnvironment(clientIDKey: String, clientSecretKey: String) -> OAuthConfiguration? {
-        let environment = ProcessInfo.processInfo.environment
-        guard let clientId = environment[clientIDKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let clientSecret = environment[clientSecretKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !clientId.isEmpty,
-              !clientSecret.isEmpty else {
+        guard let credentials = CLIProxyGeminiCredentialBridge.oauthClientCredentials() else {
             return nil
         }
-        return OAuthConfiguration(clientId: clientId, clientSecret: clientSecret)
-    }
-
-    private nonisolated static func geminiBundleDirectory() -> URL? {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let executableCandidates = [
-            "/opt/homebrew/bin/gemini",
-            "/usr/local/bin/gemini",
-            "/usr/bin/gemini",
-            "/bin/gemini",
-            "\(home)/.local/bin/gemini",
-            "\(home)/bin/gemini"
-        ]
-
-        guard let executable = executableCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            return nil
-        }
-        let executableURL = URL(fileURLWithPath: executable).resolvingSymlinksInPath()
-        let parent = executableURL.deletingLastPathComponent().deletingLastPathComponent()
-        let directBundle = parent.appendingPathComponent("lib/node_modules/@google/gemini-cli/bundle", isDirectory: true)
-        if FileManager.default.fileExists(atPath: directBundle.path) {
-            return directBundle
-        }
-
-        let commonPaths = [
-            "/opt/homebrew/lib/node_modules/@google/gemini-cli/bundle",
-            "/usr/local/lib/node_modules/@google/gemini-cli/bundle"
-        ]
-        return commonPaths
-            .map { URL(fileURLWithPath: $0, isDirectory: true) }
-            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
-    }
-
-    private nonisolated static func extractConstant(_ name: String, from content: String) -> String? {
-        let patterns = [
-            "var\\s+\(NSRegularExpression.escapedPattern(for: name))\\s*=\\s*\"([^\"]+)\"",
-            "const\\s+\(NSRegularExpression.escapedPattern(for: name))\\s*=\\s*\"([^\"]+)\""
-        ]
-
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern),
-                  let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
-                  let range = Range(match.range(at: 1), in: content) else {
-                continue
-            }
-            return String(content[range])
-        }
-
-        return nil
+        return OAuthConfiguration(
+            clientId: credentials.clientID,
+            clientSecret: credentials.clientSecret
+        )
     }
 
     private nonisolated static func makeAuthURL(clientId: String, redirectURL: URL, stateToken: String) -> URL? {

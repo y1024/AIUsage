@@ -270,6 +270,33 @@ enum ProviderAuthManager {
         )
     }
 
+    static func makeGeminiCandidate(authFileURL: URL) -> ProviderAuthCandidate {
+        let path = authFileURL.path
+        let data = try? Data(contentsOf: authFileURL, options: .mappedIfSafe)
+        let email = data.flatMap { CLIProxyGeminiCredentialBridge.accountEmail(from: $0) }
+        let json = loadJSONObject(at: path)
+        let fingerprint = json.flatMap {
+            sessionFingerprint(from: $0, preferredKeys: ["email"])
+        } ?? email.flatMap { normalizedHandle($0) }
+
+        return ProviderAuthCandidate(
+            id: "gemini-oauth:\(path)",
+            providerId: "gemini",
+            sourceIdentifier: "gemini-oauth:\(path)",
+            sessionFingerprint: fingerprint,
+            title: email ?? "Gemini CLI Login",
+            subtitle: "From CPA",
+            detail: authFileURL.lastPathComponent,
+            modifiedAt: (try? authFileURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate,
+            authMethod: .authFile,
+            credentialValue: path,
+            sourcePath: path,
+            shouldCopyFile: true,
+            identityScope: .sharedSource
+        )
+    }
+
     static func discoverCandidates(for providerId: String) -> [ProviderAuthCandidate] {
         let rawCandidates: [ProviderAuthCandidate]
 
@@ -458,9 +485,14 @@ enum ProviderAuthManager {
         let destinationURL = directory.appendingPathComponent(filename)
 
         let data: Data
+        let normalizedProviderID = CLIProxyCredentialAdapter.normalizedProviderID(providerId)
         if providerId == "droid",
            let normalizedData = DroidProvider.managedSessionData(from: sourcePath) {
             data = normalizedData
+        } else if normalizedProviderID == "gemini" {
+            data = try CLIProxyGeminiCredentialBridge.makeNativePayload(
+                from: Data(contentsOf: sourceURL, options: .mappedIfSafe)
+            )
         } else {
             data = try Data(contentsOf: sourceURL)
         }

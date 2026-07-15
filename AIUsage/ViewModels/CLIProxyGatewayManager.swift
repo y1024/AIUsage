@@ -229,10 +229,12 @@ final class CLIProxyGatewayManager: ObservableObject {
     func refresh(checkRemote: Bool = true) async {
         await reloadInstalledVersions()
         refreshDistributionState()
-        await refreshSyncCandidates()
         if runtime.state.isRunning {
-            await refreshAccounts(refreshCandidates: false)
             await refreshProviderPlugins(includeStore: false)
+            await refreshSyncCandidates()
+            await refreshAccounts(refreshCandidates: false)
+        } else {
+            await refreshSyncCandidates()
         }
         guard checkRemote else { return }
         await checkForUpdates()
@@ -393,6 +395,12 @@ final class CLIProxyGatewayManager: ObservableObject {
     private func rebuildSyncCandidates(from sources: [CLIProxySyncCandidateSource]) async {
         syncCandidateGeneration &+= 1
         let generation = syncCandidateGeneration
+        let enabledPluginProviderIDs = Set(
+            providerPlugins
+                .filter(\.effectiveEnabled)
+                .flatMap { [$0.id, $0.providerID] }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        )
         let results = await withTaskGroup(
             of: [CLIProxySyncCandidateResult].self,
             returning: [CLIProxySyncCandidateResult].self
@@ -402,7 +410,10 @@ final class CLIProxyGatewayManager: ObservableObject {
                 results.reserveCapacity(sources.count)
                 for source in sources {
                     guard !Task.isCancelled else { break }
-                    if let result = Self.evaluateSyncCandidate(source) {
+                    if let result = Self.evaluateSyncCandidate(
+                        source,
+                        enabledPluginProviderIDs: enabledPluginProviderIDs
+                    ) {
                         results.append(result)
                     }
                 }
@@ -470,8 +481,8 @@ final class CLIProxyGatewayManager: ObservableObject {
         }
 
         // Multiple historical credential IDs can point at the same native account.
-        // Collapse only strong provider-native identities; weak/email-only identities
-        // stay separate so Codex workspaces are never merged by display label.
+        // Collapse only identities each provider parser marks strong. Codex never
+        // treats email alone as strong; Gemini's Google email is its parent identity.
         var preferredByIdentity: [String: (candidate: CLIProxyAccountSyncCandidate, modifiedAt: Date?)] = [:]
         for evaluated in evaluatedCandidates {
             let identityKey: String
@@ -520,10 +531,25 @@ final class CLIProxyGatewayManager: ObservableObject {
     }
 
     nonisolated private static func evaluateSyncCandidate(
-        _ source: CLIProxySyncCandidateSource
+        _ source: CLIProxySyncCandidateSource,
+        enabledPluginProviderIDs: Set<String>
     ) -> CLIProxySyncCandidateResult? {
         let capability = CLIProxyCapabilityMatrix.capability(forAIUsageProvider: source.providerID)
-        guard case .syncableFromAIUsage = capability else {
+        let normalizedProviderID = CLIProxyCredentialAdapter.normalizedProviderID(source.providerID)
+        let adapterAvailable = CLIProxyCredentialAdapter.supportedProviderIDs.contains(normalizedProviderID)
+        let isSyncable: Bool
+        switch capability {
+        case .syncableFromAIUsage:
+            isSyncable = adapterAvailable
+        case .requiresPlugin(let pluginHint):
+            let aliases: Set<String> = pluginHint == "gemini-cli"
+                ? ["gemini", "gemini-cli"]
+                : [pluginHint.lowercased()]
+            isSyncable = adapterAvailable && !enabledPluginProviderIDs.isDisjoint(with: aliases)
+        case .requiresCPAOAuth, .notAnUpstream:
+            isSyncable = false
+        }
+        guard isSyncable else {
             // Downstream/monitoring-only providers disappear entirely;
             // OAuth/plugin-capable providers become non-credential hints.
             if case .notAnUpstream = capability { return nil }
@@ -537,7 +563,7 @@ final class CLIProxyGatewayManager: ObservableObject {
         let evaluation: CLIProxySyncCandidateEvaluation
         if credential.authMethod != .authFile {
             evaluation = .notAnAuthFile
-        } else if !CLIProxyCredentialAdapter.supportedProviderIDs.contains(source.providerID) {
+        } else if !adapterAvailable {
             evaluation = .notACandidate(.notAnUpstream)
         } else if !FileManager.default.fileExists(atPath: credential.credential) {
             evaluation = .missingFile
@@ -966,6 +992,26 @@ final class CLIProxyGatewayManager: ObservableObject {
         _ candidate: CLIProxyAccountSyncCandidate,
         forceOverwriteCPA: Bool = false
     ) async {
+        if case .requiresPlugin(let pluginHint) = CLIProxyCapabilityMatrix.capability(
+            forAIUsageProvider: candidate.providerId
+        ) {
+            let aliases: Set<String> = pluginHint == "gemini-cli"
+                ? ["gemini", "gemini-cli"]
+                : [pluginHint.lowercased()]
+            let enabled = Set(
+                providerPlugins
+                    .filter(\.effectiveEnabled)
+                    .flatMap { [$0.id, $0.providerID] }
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            )
+            guard !enabled.isDisjoint(with: aliases) else {
+                lastError = L(
+                    "Enable the official \(pluginHint) plugin before copying this account to CPA.",
+                    "请先启用官方 \(pluginHint) 插件，再将该账号复制到 CPA。"
+                )
+                return
+            }
+        }
         guard syncManifestHealthy,
               !isManagingAccounts,
               case .compatible = candidate.compatibility,
@@ -981,7 +1027,8 @@ final class CLIProxyGatewayManager: ObservableObject {
             let evaluation = try await evaluateSyncState(
                 candidate: candidate,
                 credential: credential,
-                client: client
+                client: client,
+                allowGeminiProjectDiscovery: true
             )
             if !forceOverwriteCPA && (evaluation.state == .cpaChanged || evaluation.state == .conflict) {
                 throw CLIProxyGatewayError.syncConflict(
@@ -1025,6 +1072,9 @@ final class CLIProxyGatewayManager: ObservableObject {
     }
 
     func authFileName(for candidate: CLIProxyAccountSyncCandidate) -> String {
+        if let existingName = existingGeminiAuthFileName(for: candidate) {
+            return existingName
+        }
         if let identityKey = managedIdentityKey(for: candidate),
            let digest = identityKey.split(separator: ":").last,
            !digest.isEmpty {
@@ -1034,6 +1084,39 @@ final class CLIProxyGatewayManager: ObservableObject {
             .unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "-" }
             .prefix(24)
         return "aiusage-\(candidate.providerId)-\(String(safeID)).json"
+    }
+
+    /// A Google login is one account even when the plugin expands it into many
+    /// projects. Reuse an existing physical parent instead of creating a second
+    /// CPA credential for the same email.
+    private func existingGeminiAuthFileName(
+        for candidate: CLIProxyAccountSyncCandidate
+    ) -> String? {
+        guard CLIProxyCredentialAdapter.normalizedProviderID(candidate.providerId) == "gemini",
+              let email = candidate.accountIdentity?.email?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !email.isEmpty else { return nil }
+
+        return authFiles
+            .filter { file in
+                guard !file.runtimeOnly,
+                      CLIProxyCredentialAdapter.normalizedProviderID(file.gatewayProviderID) == "gemini",
+                      let fileEmail = file.email?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                    return false
+                }
+                return fileEmail.caseInsensitiveCompare(email) == .orderedSame
+            }
+            .sorted { lhs, rhs in
+                let lhsManaged = lhs.name.lowercased().hasPrefix("aiusage-")
+                let rhsManaged = rhs.name.lowercased().hasPrefix("aiusage-")
+                if lhsManaged != rhsManaged { return !lhsManaged }
+                let lhsDate = lhs.lastRefresh ?? lhs.updatedAt ?? lhs.modTime ?? lhs.createdAt ?? .distantPast
+                let rhsDate = rhs.lastRefresh ?? rhs.updatedAt ?? rhs.modTime ?? rhs.createdAt ?? .distantPast
+                if lhsDate != rhsDate { return lhsDate > rhsDate }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+            .first?
+            .name
     }
 
     func accountIdentity(for file: CLIProxyAuthFile) -> CLIProxyAccountIdentity? {
@@ -2095,7 +2178,8 @@ final class CLIProxyGatewayManager: ObservableObject {
                 let evaluation = try await evaluateSyncState(
                     candidate: candidate,
                     credential: credential,
-                    client: client
+                    client: client,
+                    allowGeminiProjectDiscovery: false
                 )
                 states[candidate.id] = evaluation.state
 
@@ -2150,12 +2234,12 @@ final class CLIProxyGatewayManager: ObservableObject {
     private func evaluateSyncState(
         candidate: CLIProxyAccountSyncCandidate,
         credential: AccountCredential,
-        client: CLIProxyManagementClient
+        client: CLIProxyManagementClient,
+        allowGeminiProjectDiscovery: Bool
     ) async throws -> SyncEvaluation {
         let sourceData = try Data(contentsOf: URL(fileURLWithPath: credential.credential), options: .mappedIfSafe)
         let sourceFingerprint = try CLIProxyJSONFingerprint.hash(sourceData, requireObject: true)
-        let copiedData = try convertedAuthFile(credential, sourceData: sourceData)
-        let copiedFingerprint = try CLIProxyJSONFingerprint.hash(copiedData, requireObject: true)
+        let baseCopiedData = try convertedAuthFile(credential, sourceData: sourceData)
         let record = syncRecord(for: candidate)
         let name = record?.authFileName ?? authFileName(for: candidate)
 
@@ -2165,6 +2249,18 @@ final class CLIProxyGatewayManager: ObservableObject {
         } catch CLIProxyGatewayError.managementAPI(let status, _) where status == 404 {
             cpaData = nil
         }
+
+        let copiedData: Data
+        if CLIProxyCredentialAdapter.normalizedProviderID(credential.providerId) == "gemini" {
+            copiedData = try await CLIProxyGeminiCredentialBridge.prepareCPAPayloadForUpload(
+                baseCopiedData,
+                existingCPAData: cpaData,
+                allowNetworkDiscovery: allowGeminiProjectDiscovery
+            )
+        } else {
+            copiedData = baseCopiedData
+        }
+        let copiedFingerprint = try CLIProxyJSONFingerprint.hash(copiedData, requireObject: true)
 
         let sourceSemantic = try? CLIProxyManagedAuthSafety.syncStabilityFingerprint(for: copiedData)
 

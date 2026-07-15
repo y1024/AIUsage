@@ -250,7 +250,8 @@ extension CLIProxyGatewayManager {
                        object["aiusage_credential_id"] != nil {
                         isManaged = true
                     }
-                    if let providerType, ["codex", "antigravity"].contains(providerType),
+                    if let providerType,
+                       ["codex", "antigravity", "gemini", "gemini-cli"].contains(providerType),
                        let identity = try? CLIProxyAccountIdentity.parse(data: data, providerHint: providerType),
                        identity.canAutomaticallyMerge {
                         identityKey = identity.key

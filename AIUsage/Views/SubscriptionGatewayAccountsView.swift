@@ -355,6 +355,9 @@ struct SubscriptionGatewayAccountsView: View {
                         GatewayAccountFamilyRow(
                             family: family,
                             identity: family.primaryFile.flatMap { manager.accountIdentity(for: $0) },
+                            linkedCandidate: family.primaryFile.flatMap {
+                                linkedCandidates[$0.name.lowercased()]
+                            },
                             modelErrorNames: modelErrors,
                             isExpanded: isExpanded,
                             isBusy: manager.isManagingAccounts,
@@ -367,7 +370,13 @@ struct SubscriptionGatewayAccountsView: View {
                             },
                             onTestAvailability: {
                                 Task { await testAvailability(family) }
-                            }
+                            },
+                            onRequestSync: requestSync,
+                            onAddToSubscription: {
+                                guard let primaryFile = family.primaryFile else { return }
+                                Task { await addToSubscription(primaryFile) }
+                            },
+                            showsAddToSubscription: family.primaryFile.map(canAddToSubscription) ?? false
                         )
                         if isExpanded {
                             Divider().padding(.leading, 58)
@@ -456,9 +465,13 @@ struct SubscriptionGatewayAccountsView: View {
                 Task { await addToSubscription(file) }
             },
             onDelete: { pendingDeletion = file },
-            showsAddToSubscription: ["codex", "antigravity"]
-                .contains(file.gatewayProviderID.lowercased())
+            showsAddToSubscription: presentation == .account && canAddToSubscription(file)
         )
+    }
+
+    private func canAddToSubscription(_ file: CLIProxyAuthFile) -> Bool {
+        !file.runtimeOnly && ["codex", "antigravity", "gemini", "gemini-cli"]
+            .contains(file.gatewayProviderID.lowercased())
     }
 
     private func requestSync(_ candidate: CLIProxyAccountSyncCandidate) {

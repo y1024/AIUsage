@@ -27,7 +27,7 @@ nonisolated struct CLIProxyAuthImportInspection: Equatable, Sendable {
     /// An `aiusage_credential_id` ownership marker was removed. Manual imports
     /// must never masquerade as AIUsage-managed copies.
     let strippedManagedMarker: Bool
-    /// Strong provider-native identity, only for verified parsers (Codex/Antigravity).
+    /// Strong provider-native identity, only for verified parsers (Codex/Antigravity/Gemini).
     let identityKey: String?
     /// The provider type requires a CPA plugin that is not currently enabled.
     let missingPluginHint: String?
@@ -149,7 +149,7 @@ nonisolated enum CLIProxyAuthImportInspector {
         let hash = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
 
         var identityKey: String?
-        if ["codex", "antigravity"].contains(providerType),
+        if ["codex", "antigravity", "gemini", "gemini-cli"].contains(providerType),
            let identity = try? CLIProxyAccountIdentity.parse(data: payload, providerHint: providerType),
            identity.canAutomaticallyMerge {
             identityKey = identity.key

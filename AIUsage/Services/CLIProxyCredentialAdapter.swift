@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated enum CLIProxyCredentialAdapter {
-    static let supportedProviderIDs: Set<String> = ["codex", "antigravity"]
+    static let supportedProviderIDs: Set<String> = ["codex", "antigravity", "gemini"]
 
     static func convert(
         providerId: String,
@@ -10,13 +10,22 @@ nonisolated enum CLIProxyCredentialAdapter {
         metadata: [String: String],
         sourceData: Data
     ) throws -> Data {
-        guard supportedProviderIDs.contains(providerId) else {
+        let normalizedProviderID = normalizedProviderID(providerId)
+        guard supportedProviderIDs.contains(normalizedProviderID) else {
             throw CLIProxyGatewayError.unsupportedAccount("no verified adapter for \(providerId)")
+        }
+        if normalizedProviderID == "gemini" {
+            return try CLIProxyGeminiCredentialBridge.makeCPAPayload(
+                sourceData: sourceData,
+                credentialID: credentialId,
+                accountLabel: accountLabel,
+                metadata: metadata
+            )
         }
         guard var object = try JSONSerialization.jsonObject(with: sourceData) as? [String: Any] else {
             throw CLIProxyGatewayError.invalidResponse("credential file is not a JSON object")
         }
-        switch providerId {
+        switch normalizedProviderID {
         case "codex":
             if let tokens = object["tokens"] as? [String: Any] {
                 for key in ["id_token", "access_token", "refresh_token", "account_id"] {
@@ -46,5 +55,12 @@ nonisolated enum CLIProxyCredentialAdapter {
         }
         object["aiusage_credential_id"] = credentialId
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    }
+
+    static func normalizedProviderID(_ providerID: String) -> String {
+        switch providerID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "gemini-cli": return "gemini"
+        default: return providerID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
     }
 }

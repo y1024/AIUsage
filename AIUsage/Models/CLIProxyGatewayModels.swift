@@ -1343,13 +1343,13 @@ nonisolated struct CLIProxyAccountIdentity: Equatable, Sendable {
         let hintedProvider = normalizedProviderID(providerHint)
         let embeddedProvider = normalizedProviderID(string(root["type"]) ?? string(root["provider"]))
         guard let providerID = hintedProvider ?? embeddedProvider else {
-            throw CLIProxyGatewayError.unsupportedAccount("a Codex or Antigravity provider is required")
+            throw CLIProxyGatewayError.unsupportedAccount("a supported OAuth provider is required")
         }
         if let hintedProvider, let embeddedProvider, hintedProvider != embeddedProvider {
             throw CLIProxyGatewayError.invalidAuthFile("provider hint does not match the credential file")
         }
 
-        let tokens = root["tokens"] as? [String: Any]
+        let tokens = (root["tokens"] as? [String: Any]) ?? (root["token"] as? [String: Any])
         let tokenClaims = [
             string(root["id_token"]),
             string(tokens?["id_token"]),
@@ -1473,6 +1473,35 @@ nonisolated struct CLIProxyAccountIdentity: Equatable, Sendable {
                 planType: nil
             )
 
+        case "gemini":
+            // A Gemini login owns a set of Google Cloud projects. Projects are
+            // runtime children, not separate subscription identities, so the
+            // parent Google email is the stable reconciliation key.
+            let email = resolveEquivalentClaims(
+                [root["email"], tokens?["email"]] + tokenClaims.map { $0["email"] },
+                lowercased: true
+            )
+            let subject = resolveEquivalentClaims(
+                [root["sub"], tokens?["sub"]] + tokenClaims.map { $0["sub"] },
+                lowercased: true
+            )
+            let isStrong = email.value?.contains("@") == true && !email.hasConflict
+            let material = identityMaterial(
+                providerID: providerID,
+                fields: [("email", email.material)]
+            )
+            return CLIProxyAccountIdentity(
+                key: identityKey(providerID: providerID, material: material),
+                providerID: providerID,
+                sourceCredentialID: sourceCredentialID,
+                canAutomaticallyMerge: isStrong,
+                accountID: nil,
+                projectID: nil,
+                userID: subject.value,
+                email: email.value,
+                planType: nil
+            )
+
         default:
             throw CLIProxyGatewayError.unsupportedAccount("stable identity is not available for \(providerID)")
         }
@@ -1522,6 +1551,7 @@ nonisolated struct CLIProxyAccountIdentity: Equatable, Sendable {
         switch value {
         case "codex", "chatgpt", "openai": return "codex"
         case "antigravity", "google-antigravity": return "antigravity"
+        case "gemini", "gemini-cli": return "gemini"
         default: return value
         }
     }

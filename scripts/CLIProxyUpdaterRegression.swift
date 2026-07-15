@@ -28,6 +28,7 @@ struct CLIProxyUpdaterRegression {
         try testRuntimeConfiguration()
         try testDefaultPluginDirectoryUpgradeMigration()
         try testCredentialAdapters()
+        try await testGeminiCredentialBridge()
         try testCanonicalCredentialFingerprint()
         try testSyncManifestValidation()
         try testCodexIdentityKeepsPlansSeparate()
@@ -596,17 +597,6 @@ struct CLIProxyUpdaterRegression {
 
         do {
             _ = try CLIProxyCredentialAdapter.convert(
-                providerId: "gemini",
-                credentialId: "credential-2",
-                accountLabel: nil,
-                metadata: [:],
-                sourceData: codex
-            )
-            throw RegressionFailure("unknown credential adapter was accepted")
-        } catch is CLIProxyGatewayError {}
-
-        do {
-            _ = try CLIProxyCredentialAdapter.convert(
                 providerId: "antigravity",
                 credentialId: "credential-3",
                 accountLabel: nil,
@@ -614,6 +604,122 @@ struct CLIProxyUpdaterRegression {
                 sourceData: Data(#"{"access_token":"access"}"#.utf8)
             )
             throw RegressionFailure("credential without refresh token was accepted")
+        } catch is CLIProxyGatewayError {}
+    }
+
+    private static func testGeminiCredentialBridge() async throws {
+        let native = Data(#"""
+        {
+          "access_token":"gemini-access",
+          "refresh_token":"gemini-refresh",
+          "token_type":"Bearer",
+          "email":"user@example.com",
+          "expiry_date":4102444800000,
+          "scope":"openid cloud-platform",
+          "project_id":"project-primary",
+          "project_ids":["project-primary","project-secondary"]
+        }
+        """#.utf8)
+        let cpa = try CLIProxyCredentialAdapter.convert(
+            providerId: "gemini",
+            credentialId: "credential-gemini",
+            accountLabel: "user@example.com",
+            metadata: [:],
+            sourceData: native
+        )
+        guard let cpaObject = try JSONSerialization.jsonObject(with: cpa) as? [String: Any],
+              let token = cpaObject["token"] as? [String: Any] else {
+            throw RegressionFailure("Gemini adapter did not produce a CPA object")
+        }
+        try expect(cpaObject["type"] as? String == "gemini-cli", "Gemini adapter did not select the plugin type")
+        try expect(cpaObject["email"] as? String == "user@example.com", "Gemini adapter lost the account email")
+        try expect(token["access_token"] as? String == "gemini-access", "Gemini adapter lost the nested access token")
+        try expect(token["refresh_token"] as? String == "gemini-refresh", "Gemini adapter lost the nested refresh token")
+        try expect(
+            (cpaObject["project_ids"] as? [String]) == ["project-primary", "project-secondary"],
+            "Gemini adapter lost the project inventory"
+        )
+
+        let nativeRoundTrip = try CLIProxyGeminiCredentialBridge.makeNativePayload(from: cpa)
+        guard let nativeObject = try JSONSerialization.jsonObject(with: nativeRoundTrip) as? [String: Any] else {
+            throw RegressionFailure("Gemini reverse adapter did not produce native JSON")
+        }
+        try expect(nativeObject["access_token"] as? String == "gemini-access", "Gemini reverse adapter lost access token")
+        try expect(nativeObject["refresh_token"] as? String == "gemini-refresh", "Gemini reverse adapter lost refresh token")
+        try expect(nativeObject["expiry_date"] is NSNumber, "Gemini reverse adapter did not normalize expiry_date")
+
+        let firstIdentity = try CLIProxyAccountIdentity.parse(data: cpa, providerHint: "gemini")
+        let secondCPA = try CLIProxyCredentialAdapter.convert(
+            providerId: "gemini-cli",
+            credentialId: "credential-round-trip",
+            accountLabel: nil,
+            metadata: [:],
+            sourceData: nativeRoundTrip
+        )
+        let secondIdentity = try CLIProxyAccountIdentity.parse(data: secondCPA, providerHint: "gemini-cli")
+        try expect(firstIdentity.key == secondIdentity.key, "Gemini identity changed across a round trip")
+        try expect(firstIdentity.canAutomaticallyMerge, "Gemini email identity was not treated as stable")
+
+        var projectlessObject = cpaObject
+        projectlessObject.removeValue(forKey: "project_id")
+        projectlessObject.removeValue(forKey: "project_ids")
+        let projectless = try JSONSerialization.data(withJSONObject: projectlessObject)
+        var existingObject = cpaObject
+        existingObject["note"] = "Keep CPA preference"
+        let existingData = try JSONSerialization.data(withJSONObject: existingObject)
+        let prepared = try await CLIProxyGeminiCredentialBridge.prepareCPAPayloadForUpload(
+            projectless,
+            existingCPAData: existingData,
+            allowNetworkDiscovery: false
+        )
+        let preparedObject = try JSONSerialization.jsonObject(with: prepared) as? [String: Any]
+        try expect(
+            (preparedObject?["project_ids"] as? [String]) == ["project-primary", "project-secondary"],
+            "Gemini bridge did not reuse the same account's existing project inventory"
+        )
+        try expect(
+            preparedObject?["note"] as? String == "Keep CPA preference",
+            "Gemini bridge overwrote a CPA-local account preference"
+        )
+
+        let preparedWithProjects = try await CLIProxyGeminiCredentialBridge.prepareCPAPayloadForUpload(
+            cpa,
+            existingCPAData: existingData,
+            allowNetworkDiscovery: false
+        )
+        let preparedWithProjectsObject = try JSONSerialization.jsonObject(
+            with: preparedWithProjects
+        ) as? [String: Any]
+        try expect(
+            preparedWithProjectsObject?["note"] as? String == "Keep CPA preference",
+            "Gemini bridge dropped CPA preferences when the source already had projects"
+        )
+
+        let refreshOnlyNative = try CLIProxyGeminiCredentialBridge.makeNativePayload(
+            from: Data(#"{"type":"gemini-cli","refresh_token":"refresh-only","email":"user@example.com"}"#.utf8)
+        )
+        let refreshOnlyObject = try JSONSerialization.jsonObject(with: refreshOnlyNative) as? [String: Any]
+        try expect(
+            refreshOnlyObject?["refresh_token"] as? String == "refresh-only",
+            "Gemini reverse adapter rejected a refreshable session without a cached access token"
+        )
+
+        do {
+            _ = try CLIProxyCredentialAdapter.convert(
+                providerId: "droid",
+                credentialId: "unsupported",
+                accountLabel: nil,
+                metadata: [:],
+                sourceData: native
+            )
+            throw RegressionFailure("unknown credential adapter was accepted")
+        } catch is CLIProxyGatewayError {}
+
+        do {
+            _ = try CLIProxyGeminiCredentialBridge.makeNativePayload(
+                from: Data(#"{"type":"gemini-cli","access_token":"only-access"}"#.utf8)
+            )
+            throw RegressionFailure("Gemini credential without refresh token was accepted")
         } catch is CLIProxyGatewayError {}
     }
 

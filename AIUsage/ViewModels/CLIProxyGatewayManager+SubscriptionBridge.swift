@@ -22,8 +22,10 @@ enum CLIProxySubscriptionAddOutcome: Equatable {
 extension CLIProxyGatewayManager {
     /// 将单个 CPA auth 文件加入订阅账号；已存在则不去重写入。
     func addAuthFileToSubscriptionAccounts(_ file: CLIProxyAuthFile) async -> CLIProxySubscriptionAddOutcome {
-        let providerID = file.gatewayProviderID.lowercased()
-        guard Self.subscriptionImportableProviderIDs.contains(providerID) else {
+        let gatewayProviderID = file.gatewayProviderID.lowercased()
+        guard !file.runtimeOnly,
+              Self.subscriptionImportableProviderIDs.contains(gatewayProviderID),
+              let providerID = Self.subscriptionProviderID(for: gatewayProviderID) else {
             return .unsupported(providerID: file.gatewayProviderID)
         }
 
@@ -39,6 +41,8 @@ extension CLIProxyGatewayManager {
             candidate = ProviderAuthManager.makeCodexCandidate(authFileURL: authURL)
         case "antigravity":
             candidate = ProviderAuthManager.makeAntigravityCandidate(authFileURL: authURL)
+        case "gemini":
+            candidate = ProviderAuthManager.makeGeminiCandidate(authFileURL: authURL)
         default:
             return .unsupported(providerID: file.gatewayProviderID)
         }
@@ -113,7 +117,18 @@ extension CLIProxyGatewayManager {
         }
     }
 
-    private static let subscriptionImportableProviderIDs: Set<String> = ["codex", "antigravity"]
+    private static let subscriptionImportableProviderIDs: Set<String> = [
+        "codex", "antigravity", "gemini", "gemini-cli"
+    ]
+
+    private static func subscriptionProviderID(for gatewayProviderID: String) -> String? {
+        switch gatewayProviderID.lowercased() {
+        case "codex": return "codex"
+        case "antigravity": return "antigravity"
+        case "gemini", "gemini-cli": return "gemini"
+        default: return nil
+        }
+    }
 
     private func displayLabel(
         for candidate: ProviderAuthCandidate,

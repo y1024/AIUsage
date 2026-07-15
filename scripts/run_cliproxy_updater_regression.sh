@@ -13,6 +13,7 @@ swiftc -parse-as-library \
   "$ROOT_DIR/AIUsage/Models/CLIProxyGatewayModels.swift" \
   "$ROOT_DIR/AIUsage/Services/CLIProxyPaths.swift" \
   "$ROOT_DIR/AIUsage/Services/CLIProxyConfigStore.swift" \
+  "$ROOT_DIR/AIUsage/Services/CLIProxyGeminiCredentialBridge.swift" \
   "$ROOT_DIR/AIUsage/Services/CLIProxyCredentialAdapter.swift" \
   "$ROOT_DIR/AIUsage/Services/CLIProxyManagementClient.swift" \
   "$ROOT_DIR/AIUsage/Services/CLIProxyReleaseClient.swift" \

@@ -321,6 +321,7 @@ struct GatewayAccountRow: View {
 struct GatewayAccountFamilyRow: View {
     let family: GatewayAccountFamily
     let identity: CLIProxyAccountIdentity?
+    let linkedCandidate: CLIProxyAccountSyncCandidate?
     let modelErrorNames: Set<String>
     let isExpanded: Bool
     let isBusy: Bool
@@ -328,6 +329,9 @@ struct GatewayAccountFamilyRow: View {
     let onSetEnabled: (Bool) -> Void
     let onOpenDetail: () -> Void
     let onTestAvailability: () -> Void
+    let onRequestSync: (CLIProxyAccountSyncCandidate) -> Void
+    let onAddToSubscription: () -> Void
+    var showsAddToSubscription: Bool = false
 
     private var primaryFile: CLIProxyAuthFile? { family.primaryFile }
 
@@ -412,6 +416,25 @@ struct GatewayAccountFamilyRow: View {
                 }
                 Button(action: onTestAvailability) {
                     Label(L("Check this account", "检查此账号"), systemImage: "waveform.path.ecg")
+                }
+                if let linkedCandidate {
+                    Button {
+                        onRequestSync(linkedCandidate)
+                    } label: {
+                        Label(
+                            L("Update from Subscription", "从订阅更新"),
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                }
+                if showsAddToSubscription {
+                    Divider()
+                    Button(action: onAddToSubscription) {
+                        Label(
+                            L("Add to Subscription Accounts", "添加到订阅账号"),
+                            systemImage: "person.badge.plus"
+                        )
+                    }
                 }
             } label: {
                 Image(systemName: "ellipsis")
