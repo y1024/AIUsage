@@ -10,7 +10,7 @@ enum OpenCodeConnectivityTester {
 
     /// 执行一次连通性测试。要求节点已填 baseURL 且模型列表非空。
     static func test(node: OpenCodeNode) async -> ProxyConnectivityTestState {
-        guard let model = node.models.first(where: { !$0.isEmpty }),
+        guard let model = node.effectiveDefaultModel,
               let url = endpointURL(baseURL: node.baseURL, protocolType: node.protocolType) else {
             return ProxyConnectivityTestState(
                 isTesting: false,
