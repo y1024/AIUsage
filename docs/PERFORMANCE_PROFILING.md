@@ -1,7 +1,6 @@
 # 性能排查方法论（macOS / SwiftUI）
 
 > 核心原则：**卡顿先抓证据，不要猜代码。** 用 Instruments Time Profiler 拿到主线程真实热点，再针对性优化。
-> 配套的 AI 规则见 `.cursor/rules/performance-profiling.mdc`。
 
 ## 适用场景
 
@@ -100,7 +99,7 @@ for s,w in sorted(total.items(), key=lambda x:-x[1])[:40]:
 ### 6. 解读与修复
 
 - 找主线程上**自身代码**（非 framework）的头号符号。
-- 修复优先级（对应 `.cursor/rules/main.mdc` 规则#9）：
+- 修复优先级：
   1. **高成本对象重复创建** → 静态常量 / `NSCache` 缓存（`NSRegularExpression`、大字典、`DateFormatter`）。
   2. **被多视图 body 反复读取的昂贵计算属性** → 失效式记忆化：缓存结果，输入源 `objectWillChange` 时置脏，读取命中缓存直接返回。
   3. **主线程文件系统调用**（`resolvingSymlinksInPath`/`fileExists`/`lstat`）→ 缓存或移出主线程。
