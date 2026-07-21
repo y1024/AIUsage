@@ -32,6 +32,13 @@ public struct ScienceModelProtocolAdapter: Sendable {
 
     /// Some Science releases accept only Claude-shaped model IDs.
     static let generatedIDPrefix = "claude-aiusage-v1-"
+    public static let desktopOpusRouteID = "claude-opus-4-6-aiusage-v1"
+    public static let desktopSonnetRouteID = "claude-sonnet-4-6-aiusage-v1"
+    public static let desktopHaikuRouteID = "claude-haiku-4-5-aiusage-v1"
+
+    public static func isStableDesktopTierRoute(_ model: String) -> Bool {
+        [desktopOpusRouteID, desktopSonnetRouteID, desktopHaikuRouteID].contains(model)
+    }
 
     /// Prevents Science's display-only `Internal` heuristic from matching.
     /// It must never be used as an upstream model ID.
@@ -70,7 +77,9 @@ public struct ScienceModelProtocolAdapter: Sendable {
             return Model(
                 id: id,
                 upstreamModel: upstream,
-                displayName: routeStyle == .science ? Self.presentationName(for: upstream) : upstream,
+                displayName: routeStyle == .science
+                    ? Self.presentationName(for: upstream)
+                    : Self.desktopPresentationName(for: upstream),
                 supports1M: supports1MUpstreamModels.contains(upstream)
             )
         }
@@ -198,6 +207,15 @@ public struct ScienceModelProtocolAdapter: Sendable {
         }
         return ["claude", "sonnet", "opus", "haiku", "fable", "mythos", "anthropic"]
             .contains(where: normalized.contains)
+    }
+
+    private static func desktopPresentationName(for model: String) -> String {
+        switch model {
+        case desktopOpusRouteID: return "AIUsage Opus"
+        case desktopSonnetRouteID: return "AIUsage Sonnet"
+        case desktopHaikuRouteID: return "AIUsage Haiku"
+        default: return model
+        }
     }
 
     private static func stableHashDecimal(_ value: String) -> String {

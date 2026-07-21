@@ -609,16 +609,16 @@ final class GlobalProxyManager: ObservableObject {
             for: node,
             supports1M: config.claudeDesktopSupports1MModels(for: node.id)
         )
-        let upstreamModels = catalog.map(\.upstreamModel)
-        if let data = try? JSONEncoder().encode(upstreamModels),
+        let publicRoutes = catalog.map(\.id)
+        if let data = try? JSONEncoder().encode(publicRoutes),
            let json = String(data: data, encoding: .utf8) {
             env["AIUSAGE_CLAUDE_MODELS_JSON"] = json
         }
-        if let defaultModel = catalog.first(where: { $0.upstreamModel == node.defaultModel })?.upstreamModel
-            ?? catalog.first?.upstreamModel {
-            env["AIUSAGE_CLAUDE_DEFAULT_MODEL"] = defaultModel
+        if let defaultRoute = catalog.first(where: { $0.id == ClaudeDesktopProfileStore.sonnetRouteID })?.id
+            ?? catalog.first?.id {
+            env["AIUSAGE_CLAUDE_DEFAULT_MODEL"] = defaultRoute
         }
-        let supports1M = catalog.filter(\.supports1M).map(\.upstreamModel)
+        let supports1M = catalog.filter(\.supports1M).map(\.id)
         if let data = try? JSONEncoder().encode(supports1M),
            let json = String(data: data, encoding: .utf8) {
             env["AIUSAGE_CLAUDE_SUPPORTS_1M_JSON"] = json

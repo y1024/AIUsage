@@ -217,6 +217,40 @@ final class ClaudeProxyConverterTests: XCTestCase {
         XCTAssertEqual(config.mapToUpstreamModel(generatedRoute), "gpt-5.4")
     }
 
+    func testDesktopStableTierRoutesMapThroughCurrentGatewayNode() {
+        let routes = [
+            ScienceModelProtocolAdapter.desktopOpusRouteID,
+            ScienceModelProtocolAdapter.desktopSonnetRouteID,
+            ScienceModelProtocolAdapter.desktopHaikuRouteID,
+        ]
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.example.com",
+            upstreamAPIKey: "test-key",
+            bigModel: "node-a-large",
+            middleModel: "node-a-balanced",
+            smallModel: "node-a-fast",
+            availableModels: routes,
+            defaultModel: ScienceModelProtocolAdapter.desktopSonnetRouteID,
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .desktop
+        )
+
+        XCTAssertEqual(
+            config.scienceCatalogModels.map(\.id),
+            routes,
+            "stable Desktop route identities must survive catalog projection"
+        )
+        XCTAssertEqual(
+            config.scienceCatalogModels.map(\.displayName),
+            ["AIUsage Opus", "AIUsage Sonnet", "AIUsage Haiku"]
+        )
+        XCTAssertEqual(config.mapToUpstreamModel(routes[0]), "node-a-large")
+        XCTAssertEqual(config.mapToUpstreamModel(routes[1]), "node-a-balanced")
+        XCTAssertEqual(config.mapToUpstreamModel(routes[2]), "node-a-fast")
+    }
+
     func testRawCatalogIDThatLooksGeneratedStillRoutesExactly() {
         let raw = "claude-aiusage-v1-upstream-owned-model"
         let config = ClaudeProxyConfiguration(

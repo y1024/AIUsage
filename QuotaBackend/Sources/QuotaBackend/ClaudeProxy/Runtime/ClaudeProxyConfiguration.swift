@@ -151,11 +151,27 @@ public struct ClaudeProxyConfiguration: Sendable {
                requestModel,
                acceptingRawUpstreamIDs: preferExactCatalogModels
            ) {
+            // Desktop publishes stable Opus/Sonnet/Haiku route identities.
+            // The route itself must pass through the current node's tier map;
+            // returning it as a literal upstream model would couple Desktop to
+            // one node and defeat Gateway hot switching.
+            if catalogRouteStyle == .desktop,
+               ScienceModelProtocolAdapter.isStableDesktopTierRoute(resolved) {
+                return mapTierRouteToUpstream(resolved)
+            }
             return resolved
         }
         if preferExactCatalogModels, availableModels.contains(requestModel) {
+            if catalogRouteStyle == .desktop,
+               ScienceModelProtocolAdapter.isStableDesktopTierRoute(requestModel) {
+                return mapTierRouteToUpstream(requestModel)
+            }
             return requestModel
         }
+        return mapTierRouteToUpstream(requestModel)
+    }
+
+    private func mapTierRouteToUpstream(_ requestModel: String) -> String {
         let normalized = requestModel.lowercased()
         if normalized.contains("opus") {
             return bigModel

@@ -89,11 +89,15 @@ enum ClaudeDesktopProfileError: LocalizedError {
 
 final class ClaudeDesktopProfileStore {
     static let shared = ClaudeDesktopProfileStore()
+    private static let journalVersion = 2
 
     /// Stable forever after release.  A stable identity avoids duplicate
     /// entries when users alternate between AIUsage and another profile tool.
     static let profileID = "a1a5a9e0-7c1d-4e5f-9a0b-c1d2e3f4a5b6"
     static let profileName = "AIUsage Gateway"
+    static let opusRouteID = "claude-opus-4-6-aiusage-v1"
+    static let sonnetRouteID = "claude-sonnet-4-6-aiusage-v1"
+    static let haikuRouteID = "claude-haiku-4-5-aiusage-v1"
 
     struct Paths {
         let normalConfig: URL
@@ -162,27 +166,23 @@ final class ClaudeDesktopProfileStore {
         for node: ProxyConfiguration,
         supports1M: Set<String> = []
     ) -> [ClaudeDesktopCatalogEntry] {
-        var upstreamModels = node.modelLibrary.map(\.name)
-        if upstreamModels.isEmpty {
-            upstreamModels = [
-                node.defaultModel,
-                node.modelMapping.bigModel.name,
-                node.modelMapping.middleModel.name,
-                node.modelMapping.smallModel.name,
-            ]
-        }
-        let adapter = ScienceModelProtocolAdapter(
-            upstreamModels: upstreamModels,
-            requestedDefault: node.defaultModel,
-            routeStyle: .desktop,
-            supports1MUpstreamModels: supports1M
-        )
-        return adapter.models.map {
-            ClaudeDesktopCatalogEntry(
-                id: $0.id,
-                upstreamModel: $0.upstreamModel,
-                displayName: $0.displayName,
-                supports1M: $0.supports1M
+        // Desktop keeps these public identities for the lifetime of the
+        // integration. Only the Gateway's big/middle/small projection changes
+        // on a node switch, so existing Desktop sessions never depend on a
+        // node-specific model ID or a profile-file hot reload.
+        let routes: [(id: String, upstream: String, label: String)] = [
+            (Self.opusRouteID, node.modelMapping.bigModel.name, "AIUsage Opus"),
+            (Self.sonnetRouteID, node.modelMapping.middleModel.name, "AIUsage Sonnet"),
+            (Self.haikuRouteID, node.modelMapping.smallModel.name, "AIUsage Haiku"),
+        ]
+        return routes.compactMap { route in
+            let upstream = route.upstream.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !upstream.isEmpty else { return nil }
+            return ClaudeDesktopCatalogEntry(
+                id: route.id,
+                upstreamModel: upstream,
+                displayName: route.label,
+                supports1M: supports1M.contains(upstream)
             )
         }
     }
@@ -220,27 +220,45 @@ final class ClaudeDesktopProfileStore {
         catalog: [ClaudeDesktopCatalogEntry]
     ) throws {
         try withLock {
+            var takeoverSnapshots: [FileSnapshot]?
             if let journal = try loadJournal() {
                 switch journal.phase {
                 case .applying:
                     try restore(journal.snapshots)
                     try removeJournal()
-                case .active:
-                    guard status().isOwnedByAIUsage else {
-                        throw ClaudeDesktopProfileError.profileOwnedByAnotherTool
+                case .active, .externalConflict:
+                    if status().isOwnedByAIUsage {
+                        // `connect` is an explicit user request. Repair only
+                        // AIUsage-owned fields and adopt unrelated preference
+                        // changes made by Claude Desktop itself.
+                        try refreshLocked(
+                            baseURL: baseURL,
+                            clientKey: clientKey,
+                            catalog: catalog,
+                            journal: journal
+                        )
+                        return
                     }
-                    var checkedJournal = journal
-                    try ensureManagedFilesUnchanged(&checkedJournal)
-                    try refreshLocked(baseURL: baseURL, clientKey: clientKey, catalog: catalog, journal: checkedJournal)
-                    return
-                case .externalConflict:
-                    throw ClaudeDesktopProfileError.profileOwnedByAnotherTool
+
+                    // The user explicitly clicked Connect after another
+                    // profile became active. Rebase the restore point onto the
+                    // current Desktop selection, while retaining the original
+                    // snapshot for AIUsage's dedicated profile file. A later
+                    // disconnect therefore restores the profile that was
+                    // active immediately before this takeover.
+                    takeoverSnapshots = try rebasedSnapshots(from: journal)
+                    try removeJournal()
                 }
             }
 
-            let snapshots = try paths.protectedFiles.map(snapshot)
+            let snapshots: [FileSnapshot]
+            if let takeoverSnapshots {
+                snapshots = takeoverSnapshots
+            } else {
+                snapshots = try paths.protectedFiles.map(snapshot)
+            }
             var journal = Journal(
-                version: 1,
+                version: Self.journalVersion,
                 phase: .applying,
                 createdAt: Date(),
                 snapshots: snapshots,
@@ -249,21 +267,7 @@ final class ClaudeDesktopProfileStore {
             try writeJournal(journal)
 
             do {
-                var normal = try readJSONObject(paths.normalConfig, missingAsEmpty: true)
-                var threeP = try readJSONObject(paths.threePConfig, missingAsEmpty: true)
-                var meta = try readJSONObject(paths.meta, missingAsEmpty: true)
-                var profile = try readJSONObject(paths.profile, missingAsEmpty: true)
-
-                normal["deploymentMode"] = "3p"
-                threeP["deploymentMode"] = "3p"
-                mergeMeta(&meta)
-                mergeProfile(&profile, baseURL: baseURL, clientKey: clientKey, catalog: catalog)
-
-                try writeJSONObject(normal, to: paths.normalConfig)
-                try writeJSONObject(threeP, to: paths.threePConfig)
-                try writeJSONObject(meta, to: paths.meta)
-                try writeJSONObject(profile, to: paths.profile)
-                try verify(baseURL: baseURL, clientKey: clientKey, expectedModelCount: catalog.count)
+                try applyManagedConfiguration(baseURL: baseURL, clientKey: clientKey, catalog: catalog)
 
                 journal.phase = .active
                 journal.managedHashes = try managedHashes()
@@ -282,35 +286,41 @@ final class ClaudeDesktopProfileStore {
         catalog: [ClaudeDesktopCatalogEntry]
     ) throws {
         try withLock {
-            guard var journal = try loadJournal(), journal.phase == .active else {
+            guard let journal = try loadJournal(), journal.phase == .active else {
                 throw ClaudeDesktopProfileError.noRestoreJournal
             }
             guard status().isOwnedByAIUsage else {
                 throw ClaudeDesktopProfileError.profileOwnedByAnotherTool
             }
-            try ensureManagedFilesUnchanged(&journal)
             try refreshLocked(baseURL: baseURL, clientKey: clientKey, catalog: catalog, journal: journal)
         }
     }
 
-    /// Returns true when the exact pre-connect bytes were restored.  If a
-    /// third-party tool changed appliedId, fail closed and leave its selection
-    /// untouched.
+    /// Restores AIUsage-owned fields while preserving unrelated preferences
+    /// written by Claude Desktop during the connection. If another profile is
+    /// active, fail closed and leave that selection untouched.
     @discardableResult
     func disconnect() throws -> Bool {
         try withLock {
-            guard var journal = try loadJournal() else {
+            guard let journal = try loadJournal() else {
                 throw ClaudeDesktopProfileError.noRestoreJournal
             }
             guard status().isOwnedByAIUsage else {
+                var journal = journal
                 journal.phase = .externalConflict
                 try writeJournal(journal)
                 throw ClaudeDesktopProfileError.profileOwnedByAnotherTool
             }
-            try ensureManagedFilesUnchanged(&journal)
-            try restore(journal.snapshots)
-            try removeJournal()
-            return true
+
+            let rollback = try paths.protectedFiles.map(snapshot)
+            do {
+                try restoreManagedState(from: journal)
+                try removeJournal()
+                return true
+            } catch {
+                try? restore(rollback)
+                throw error
+            }
         }
     }
 
@@ -323,12 +333,36 @@ final class ClaudeDesktopProfileStore {
         journal original: Journal
     ) throws {
         var journal = original
+        try applyManagedConfiguration(baseURL: baseURL, clientKey: clientKey, catalog: catalog)
+        journal.phase = .active
+        // Keep the first managed hashes as per-file change detectors. A later
+        // refresh may change AIUsage-owned fields, and Desktop may change
+        // unrelated preferences; either case makes that one file use the
+        // field-level restore path without sacrificing exact restoration for
+        // the other untouched files.
+        try writeJournal(journal)
+    }
+
+    private func applyManagedConfiguration(
+        baseURL: String,
+        clientKey: String,
+        catalog: [ClaudeDesktopCatalogEntry]
+    ) throws {
+        var normal = try readJSONObject(paths.normalConfig, missingAsEmpty: true)
+        var threeP = try readJSONObject(paths.threePConfig, missingAsEmpty: true)
+        var meta = try readJSONObject(paths.meta, missingAsEmpty: true)
         var profile = try readJSONObject(paths.profile, missingAsEmpty: true)
+
+        normal["deploymentMode"] = "3p"
+        threeP["deploymentMode"] = "3p"
+        mergeMeta(&meta)
         mergeProfile(&profile, baseURL: baseURL, clientKey: clientKey, catalog: catalog)
+
+        try writeJSONObject(normal, to: paths.normalConfig)
+        try writeJSONObject(threeP, to: paths.threePConfig)
+        try writeJSONObject(meta, to: paths.meta)
         try writeJSONObject(profile, to: paths.profile)
         try verify(baseURL: baseURL, clientKey: clientKey, expectedModelCount: catalog.count)
-        journal.managedHashes = try managedHashes()
-        try writeJournal(journal)
     }
 
     private func mergeMeta(_ object: inout [String: Any]) {
@@ -362,9 +396,9 @@ final class ClaudeDesktopProfileStore {
         object["inferenceGatewayBaseUrl"] = baseURL
         object["inferenceGatewayApiKey"] = clientKey
         object["disableDeploymentModeChooser"] = true
-        // The profile and /v1/models both expose a presentation label. The
-        // route remains Anthropic-shaped while the user sees the real upstream
-        // model name in Claude Desktop's picker.
+        // Desktop sees stable Anthropic-shaped tier routes. The actual node
+        // models remain private Gateway targets, so a node switch never
+        // requires Desktop to reload this profile.
         object.removeValue(forKey: "inferenceGatewayAuthScheme")
         object["inferenceModels"] = catalog.map { entry -> [String: Any] in
             var model: [String: Any] = [
@@ -423,27 +457,134 @@ final class ClaudeDesktopProfileStore {
         }
     }
 
+    /// Rebase a stale journal when the user explicitly asks AIUsage to take
+    /// over again. Shared files use their current bytes so disconnect restores
+    /// the latest Desktop/profile-tool state. The dedicated AIUsage profile
+    /// keeps its original pre-AIUsage snapshot so we still remove/restore our
+    /// own file correctly.
+    private func rebasedSnapshots(from journal: Journal) throws -> [FileSnapshot] {
+        let original = Dictionary(uniqueKeysWithValues: journal.snapshots.map { ($0.path, $0) })
+        return try paths.protectedFiles.map { url in
+            if url == paths.profile, let prior = original[url.path] {
+                return prior
+            }
+            return try snapshot(url)
+        }
+    }
+
+    /// Restore each protected file independently. Untouched files return to
+    /// their exact bytes; changed files restore only AIUsage-owned fields so
+    /// Desktop preferences and unknown extension fields survive.
+    private func restoreManagedState(from journal: Journal) throws {
+        let byPath = Dictionary(uniqueKeysWithValues: journal.snapshots.map { ($0.path, $0) })
+        if try matchesManagedHash(paths.normalConfig, journal: journal) {
+            try restoreSnapshot(byPath[paths.normalConfig.path])
+        } else {
+            try restoreDeploymentMode(at: paths.normalConfig, snapshot: byPath[paths.normalConfig.path])
+        }
+        if try matchesManagedHash(paths.threePConfig, journal: journal) {
+            try restoreSnapshot(byPath[paths.threePConfig.path])
+        } else {
+            try restoreDeploymentMode(at: paths.threePConfig, snapshot: byPath[paths.threePConfig.path])
+        }
+        if try matchesManagedHash(paths.meta, journal: journal) {
+            try restoreSnapshot(byPath[paths.meta.path])
+        } else {
+            try restoreMeta(snapshot: byPath[paths.meta.path])
+        }
+        if try matchesManagedHash(paths.profile, journal: journal) {
+            try restoreSnapshot(byPath[paths.profile.path])
+        } else {
+            try restoreProfile(snapshot: byPath[paths.profile.path])
+        }
+    }
+
+    private func matchesManagedHash(_ url: URL, journal: Journal) throws -> Bool {
+        guard let expected = journal.managedHashes[url.path],
+              fileManager.fileExists(atPath: url.path) else { return false }
+        return Self.sha256(try Data(contentsOf: url)) == expected
+    }
+
+    private func restoreSnapshot(_ snapshot: FileSnapshot?) throws {
+        guard let snapshot else {
+            throw ClaudeDesktopProfileError.verificationFailed("missing restore snapshot")
+        }
+        try restore([snapshot])
+    }
+
+    private func restoreDeploymentMode(at url: URL, snapshot: FileSnapshot?) throws {
+        var current = try readJSONObject(url, missingAsEmpty: true)
+        let original = try snapshotJSONObject(snapshot)
+        restoreKey("deploymentMode", from: original, into: &current)
+        try writeOrRemove(current, to: url, snapshot: snapshot)
+    }
+
+    private func restoreMeta(snapshot: FileSnapshot?) throws {
+        var current = try readJSONObject(paths.meta, missingAsEmpty: true)
+        let original = try snapshotJSONObject(snapshot)
+        restoreKey("appliedId", from: original, into: &current)
+
+        var currentEntries = (current["entries"] as? [Any] ?? [])
+            .compactMap { $0 as? [String: Any] }
+            .filter { $0["id"] as? String != Self.profileID }
+        let originalOwnEntry = (original["entries"] as? [Any] ?? [])
+            .compactMap { $0 as? [String: Any] }
+            .first { $0["id"] as? String == Self.profileID }
+        if let originalOwnEntry { currentEntries.append(originalOwnEntry) }
+        if currentEntries.isEmpty, original["entries"] == nil {
+            current.removeValue(forKey: "entries")
+        } else {
+            current["entries"] = currentEntries
+        }
+        try writeOrRemove(current, to: paths.meta, snapshot: snapshot)
+    }
+
+    private func restoreProfile(snapshot: FileSnapshot?) throws {
+        var current = try readJSONObject(paths.profile, missingAsEmpty: true)
+        let original = try snapshotJSONObject(snapshot)
+        for key in [
+            "inferenceProvider",
+            "inferenceGatewayBaseUrl",
+            "inferenceGatewayApiKey",
+            "inferenceGatewayAuthScheme",
+            "disableDeploymentModeChooser",
+            "inferenceModels",
+        ] {
+            restoreKey(key, from: original, into: &current)
+        }
+        try writeOrRemove(current, to: paths.profile, snapshot: snapshot)
+    }
+
+    private func snapshotJSONObject(_ snapshot: FileSnapshot?) throws -> [String: Any] {
+        guard let snapshot, snapshot.existed, let data = snapshot.data else { return [:] }
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ClaudeDesktopProfileError.invalidJSONObject(URL(fileURLWithPath: snapshot.path).lastPathComponent)
+        }
+        return object
+    }
+
+    private func restoreKey(_ key: String, from original: [String: Any], into current: inout [String: Any]) {
+        if original.keys.contains(key) {
+            current[key] = original[key]
+        } else {
+            current.removeValue(forKey: key)
+        }
+    }
+
+    private func writeOrRemove(_ object: [String: Any], to url: URL, snapshot: FileSnapshot?) throws {
+        if snapshot?.existed != true, object.isEmpty {
+            if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
+            return
+        }
+        try writeJSONObject(object, to: url, permissions: snapshot?.permissions ?? 0o600)
+    }
+
     private func managedHashes() throws -> [String: String] {
         var result: [String: String] = [:]
         for url in paths.protectedFiles where fileManager.fileExists(atPath: url.path) {
             result[url.path] = Self.sha256(try Data(contentsOf: url))
         }
         return result
-    }
-
-    /// Restoring byte snapshots necessarily overwrites the four protected
-    /// files. Refuse that restore when another process edited any of them after
-    /// AIUsage connected, even if it left our `appliedId` selected.
-    private func ensureManagedFilesUnchanged(_ journal: inout Journal) throws {
-        for url in paths.protectedFiles {
-            guard let expected = journal.managedHashes[url.path],
-                  fileManager.fileExists(atPath: url.path),
-                  Self.sha256(try Data(contentsOf: url)) == expected else {
-                journal.phase = .externalConflict
-                try writeJournal(journal)
-                throw ClaudeDesktopProfileError.profileChangedExternally(url.lastPathComponent)
-            }
-        }
     }
 
     private func loadJournal() throws -> Journal? {
@@ -478,12 +619,12 @@ final class ClaudeDesktopProfileStore {
         return dictionary
     }
 
-    private func writeJSONObject(_ object: [String: Any], to url: URL) throws {
+    private func writeJSONObject(_ object: [String: Any], to url: URL, permissions: UInt16 = 0o600) throws {
         let data = try JSONSerialization.data(
             withJSONObject: object,
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         )
-        try atomicWrite(data + Data("\n".utf8), to: url, permissions: 0o600)
+        try atomicWrite(data + Data("\n".utf8), to: url, permissions: permissions)
     }
 
     private func atomicWrite(_ data: Data, to url: URL, permissions: UInt16) throws {

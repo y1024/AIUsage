@@ -272,8 +272,8 @@ struct ClaudeDesktopIntegrationView: View {
                             .background(Capsule().fill(Color.secondary.opacity(0.10)))
                     }
                     Text(L(
-                        "Use any Claude Code proxy node through Desktop's official third-party model mode.",
-                        "把任意 Claude Code 代理节点，一键接入 Desktop 官方第三方模型模式。"
+                        "Stable Opus, Sonnet and Haiku routes switch upstream nodes instantly inside the Gateway.",
+                        "Desktop 使用固定的 Opus、Sonnet、Haiku 路由；切换节点只在 Gateway 内即时生效。"
                     ))
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -443,7 +443,7 @@ struct ClaudeDesktopIntegrationView: View {
 
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(L("Desktop model catalog", "Desktop 模型目录"))
+            Text(L("Desktop Gateway routes", "Desktop Gateway 路由"))
                 .font(.headline)
 
             if previewModels.isEmpty {
@@ -483,7 +483,7 @@ struct ClaudeDesktopIntegrationView: View {
                 Image(systemName: "textformat")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Self.brand)
-                Text(L("Display names", "显示名称"))
+                Text(L("Stable route → active model", "固定路由 → 当前模型"))
                     .font(.caption.weight(.semibold))
                 Spacer()
                 if previewModels.count > 3 {
@@ -502,11 +502,16 @@ struct ClaudeDesktopIntegrationView: View {
                         Circle()
                             .fill(Self.brand.opacity(0.75))
                             .frame(width: 5, height: 5)
-                        Text(model.displayName)
-                            .font(.callout)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(model.displayName)
+                                .font(.callout.weight(.medium))
+                                .lineLimit(1)
+                            Text("→ \(model.upstreamModel)")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .textSelection(.enabled)
+                        }
                         Spacer(minLength: 0)
                     }
                     .padding(.vertical, 7)
@@ -565,8 +570,8 @@ struct ClaudeDesktopIntegrationView: View {
         .opacity(selectedNode == nil ? 0.55 : 1)
         .onHover { isModelManagerHovered = $0 }
         .accessibilityHint(L(
-            "Opens the full Desktop model catalog.",
-            "打开完整的 Desktop 模型目录。"
+            "Shows the stable Desktop routes and their current upstream mappings.",
+            "查看固定 Desktop 路由及其当前上游映射。"
         ))
     }
 
@@ -889,6 +894,7 @@ private struct ClaudeDesktopModelManagerSheet: View {
         return catalog.filter {
             $0.displayName.localizedCaseInsensitiveContains(query)
                 || $0.id.localizedCaseInsensitiveContains(query)
+                || $0.upstreamModel.localizedCaseInsensitiveContains(query)
         }
     }
 
@@ -919,7 +925,7 @@ private struct ClaudeDesktopModelManagerSheet: View {
                         .fill(ClaudeDesktopIntegrationView.brand.opacity(0.12))
                 )
             VStack(alignment: .leading, spacing: 4) {
-                Text(L("Desktop models", "Desktop 模型"))
+                Text(L("Desktop Gateway routes", "Desktop Gateway 路由"))
                     .font(.title3.weight(.bold))
                 Text(node.name)
                     .font(.callout)
@@ -935,13 +941,13 @@ private struct ClaudeDesktopModelManagerSheet: View {
     private var searchBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(L(
-                "Display name is the real upstream model. Model ID is the compatible route Claude Desktop sends to AIUsage.",
-                "显示名称是真实上游模型；Model ID 是 Claude Desktop 发给 AIUsage 的兼容路由。"
+                "Claude Desktop keeps these three route IDs. AIUsage remaps each route to the selected node inside the Gateway, so ordinary node switches do not require a Desktop restart.",
+                "Claude Desktop 始终使用这三个固定路由；AIUsage 在 Gateway 内把它们映射到当前节点，普通切换无需重启 Desktop。"
             ))
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            TextField(L("Search display name or Model ID", "搜索显示名称或 Model ID"), text: $searchText)
+            TextField(L("Search route, Model ID or upstream model", "搜索路由、Model ID 或上游模型"), text: $searchText)
                 .textFieldStyle(.roundedBorder)
         }
         .padding(.horizontal, 20)
@@ -963,6 +969,11 @@ private struct ClaudeDesktopModelManagerSheet: View {
                             Text(model.displayName)
                                 .font(.callout.weight(.semibold))
                                 .lineLimit(1)
+                            Text(L("Current target · \(model.upstreamModel)", "当前目标 · \(model.upstreamModel)"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .textSelection(.enabled)
                             Text("Model ID · \(model.id)")
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.secondary)
@@ -1022,8 +1033,8 @@ private struct ClaudeDesktopModelManagerSheet: View {
             Image(systemName: "info.circle")
                 .foregroundStyle(.secondary)
             Text(L(
-                "Enable 1M only when the upstream provider actually supports that context size; AIUsage advertises the option but cannot add capacity to the model.",
-                "仅在上游服务确实支持 1M 上下文时开启；AIUsage 负责展示该选项，无法替模型增加上下文能力。"
+                "Enable 1M only when the current upstream really supports it. Changing visible capability metadata reloads a running Desktop; switching only the upstream route does not.",
+                "仅在当前上游确实支持 1M 时开启。可见能力变化会重新加载正在运行的 Desktop；仅切换上游路由不会。"
             ))
             .font(.caption)
             .foregroundStyle(.secondary)

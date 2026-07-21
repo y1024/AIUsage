@@ -30,6 +30,11 @@ enum ClaudeDesktopAppError: LocalizedError {
 enum ClaudeDesktopAppController {
     static let bundleIdentifier = "com.anthropic.claudefordesktop"
 
+    static var isRunning: Bool {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .contains(where: { !$0.isTerminated })
+    }
+
     /// Fully quits Claude Desktop without reopening it. Closing the process is
     /// important after restoring a profile because Desktop keeps its selected
     /// 3P configuration in memory for the lifetime of the app.
@@ -343,6 +348,15 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
             ))
             return
         }
+        // Node-specific upstream model names are intentionally absent from
+        // Desktop's public profile. A normal node switch therefore changes
+        // only Gateway routing and does not depend on Desktop reloading a
+        // config file. Restart Desktop only when visible catalog capabilities
+        // (currently the 1M flag) actually changed while the app is running.
+        let visibleCatalogChanged = !configuredModels.isEmpty
+            && profileSurface(of: configuredModels) != profileSurface(of: catalog)
+        let shouldReloadDesktop = visibleCatalogChanged && ClaudeDesktopAppController.isRunning
+        let trafficBaseline = runtime.claudeDesktopObservedTrafficCount
         do {
             try profileStore.refresh(
                 baseURL: gateway.config.claudeDesktopBaseURL,
@@ -351,6 +365,15 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
             )
             configuredModels = catalog
             activeNodeName = node.name
+            if shouldReloadDesktop, let appURL = installation.appURL {
+                state = .preparing(AppSettings.shared.t(
+                    "Reloading Claude Desktop for updated model capabilities…",
+                    "模型能力已变化，正在重新加载 Claude Desktop…"
+                ))
+                try await ClaudeDesktopAppController.restart(appURL: appURL)
+                state = .ready
+                beginTrafficObservation(after: trafficBaseline)
+            }
         } catch let error as ClaudeDesktopProfileError {
             if error.isExternalConflict {
                 state = .conflict(error.localizedDescription)
@@ -360,6 +383,12 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func profileSurface(
+        of catalog: [ClaudeDesktopCatalogEntry]
+    ) -> [String] {
+        catalog.map { "\($0.id)|\($0.displayName)|\($0.supports1M)" }
     }
 
     private func beginTrafficObservation(after baseline: UInt64) {

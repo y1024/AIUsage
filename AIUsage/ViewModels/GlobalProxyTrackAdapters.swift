@@ -172,6 +172,8 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
             for: node,
             supports1M: config.claudeDesktopSupports1MModels(for: node.id)
         )
+        let desktopDefaultRoute = desktopCatalog.first(where: { $0.id == ClaudeDesktopProfileStore.sonnetRouteID })?.id
+            ?? desktopCatalog.first?.id
         var payload: [String: Any] = [
             "nodeId": node.id,
             "mode": passthrough ? "passthrough" : "convert",
@@ -183,12 +185,12 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
             "smallModel": node.modelMapping.smallModel.name,
             "maxOutputTokens": node.maxOutputTokens,
             "enableModelAliasMapping": passthrough,
-            "availableModels": desktopCatalog.map(\.upstreamModel),
-            "defaultModel": node.defaultModel,
+            "availableModels": desktopCatalog.map(\.id),
+            "defaultModel": desktopDefaultRoute ?? ClaudeDesktopProfileStore.sonnetRouteID,
         ]
         if config.effectiveClaudeDesktopEnabled {
             payload["catalogRouteStyle"] = "desktop"
-            payload["catalogSupports1M"] = desktopCatalog.filter(\.supports1M).map(\.upstreamModel)
+            payload["catalogSupports1M"] = desktopCatalog.filter(\.supports1M).map(\.id)
         }
         return payload
     }
