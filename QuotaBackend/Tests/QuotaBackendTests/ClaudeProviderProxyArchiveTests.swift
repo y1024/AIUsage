@@ -27,6 +27,7 @@ final class ClaudeProviderProxyArchiveTests: XCTestCase {
         let usage = try await provider.fetchUsage()
         let summary = UsageNormalizer.normalize(provider: provider, usage: usage)
 
+        XCTAssertEqual(usage.label, "Claude")
         XCTAssertEqual(summary.costSummary?.overall?.tokens, 430)
         XCTAssertEqual(summary.costSummary?.overall?.usd, 0)
         XCTAssertNil(summary.unpricedModels)

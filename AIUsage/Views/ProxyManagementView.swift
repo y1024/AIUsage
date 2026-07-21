@@ -13,6 +13,9 @@ struct ProxyManagementView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var viewModel: ProxyViewModel
     @Environment(\.colorScheme) var colorScheme
+    @ObservedObject var claudeGateway = GlobalProxyManager.claude
+    @ObservedObject var claudeGatewayRuntime = GlobalProxyRuntime.claude
+    @ObservedObject var scienceProxy = ScienceProxyManager.shared
     @State var showingNewConfigEditor = false
     @State var editingConfig: ProxyConfiguration?
     @State var editingProfile: NodeProfile?

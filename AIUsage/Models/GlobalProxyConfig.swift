@@ -15,6 +15,14 @@ enum GlobalProxyTrack: String, Codable, CaseIterable {
     var configFileName: String { "global-proxy-\(rawValue).json" }
 }
 
+/// A product currently attached to the shared Claude Gateway. Code and
+/// Desktop deliberately share one upstream route; Science owns another
+/// runtime and therefore never appears in this set.
+enum ClaudeGatewayConsumer: String, Codable, CaseIterable, Hashable {
+    case code
+    case desktop
+}
+
 // MARK: - Global Proxy Config
 // 全局统一代理：给某条轨一个「固定入口」——固定端口 + 固定 client key + 固定虚拟模型名，
 // CLI 一次性指向它即可。切换激活节点只在常驻代理进程内热替换上游（base_url/key/model），
@@ -37,7 +45,8 @@ struct ScienceWorkspace: Codable, Equatable, Identifiable, Hashable {
 }
 
 struct GlobalProxyConfig: Codable, Equatable {
-    /// 是否启用全局代理模式（启用时接管 CLI 配置、拉起常驻代理；停用时还原）。
+    /// 是否启用全局代理模式。Claude 轨中这是 `hasClaudeConsumers` 的兼容聚合镜像；
+    /// 任何产品级判断都必须使用下面的 consumer 字段，不能再用这个总开关推断 Code 状态。
     var isEnabled: Bool
     /// 常驻监听端口（固定，CLI 永远指向它）。
     var port: Int
@@ -232,6 +241,12 @@ struct GlobalProxyConfig: Codable, Equatable {
     var effectiveClaudeCodeEnabled: Bool { claudeCodeEnabled ?? (isEnabled && claudeDesktopEnabled != true) }
     var effectiveClaudeDesktopEnabled: Bool { claudeDesktopEnabled ?? false }
     var hasClaudeConsumers: Bool { effectiveClaudeCodeEnabled || effectiveClaudeDesktopEnabled }
+    var claudeConsumers: Set<ClaudeGatewayConsumer> {
+        var result = Set<ClaudeGatewayConsumer>()
+        if effectiveClaudeCodeEnabled { result.insert(.code) }
+        if effectiveClaudeDesktopEnabled { result.insert(.desktop) }
+        return result
+    }
     var effectiveClaudeDesktopHTTPSPort: Int {
         let requested = claudeDesktopHTTPSPort ?? Self.defaultClaudeDesktopHTTPSPort
         guard (1_024...65_535).contains(requested), requested != port else {

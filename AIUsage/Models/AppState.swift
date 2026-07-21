@@ -35,7 +35,7 @@ class AppState: ObservableObject {
         ProviderCatalogItem(id: "kimi", titleEn: "Kimi Code", titleZh: "Kimi Code", summaryEn: "Kimi Code subscription weekly usage and rolling rate-limit windows", summaryZh: "Kimi Code 订阅的本周用量与滚动频控窗口", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "minimax", titleEn: "MiniMax Token Plan", titleZh: "MiniMax Token Plan", summaryEn: "MiniMax Token Plan 5-hour rolling and weekly subscription credits", summaryZh: "MiniMax Token Plan 5 小时滚动与周窗口的订阅额度", channel: "cli", kind: .official),
         ProviderCatalogItem(id: "droid", titleEn: "Droid", titleZh: "Droid", summaryEn: "Token-heavy usage pools and remaining allowances", summaryZh: "以 token 为主的额度池与剩余额度", channel: "cli", kind: .official),
-        ProviderCatalogItem(id: "claude", titleEn: "Claude Code", titleZh: "Claude Code", summaryEn: "Local token and cost ledger from Claude proxy usage", summaryZh: "基于 Claude 代理用量的本地 Token 与费用账本", channel: "local", kind: .costTracking),
+        ProviderCatalogItem(id: "claude", titleEn: "Claude", titleZh: "Claude", summaryEn: "Code, Desktop and Science usage recorded by Claude Gateway", summaryZh: "Claude Gateway 记录的 Code、Desktop 与 Science 用量", channel: "local", kind: .costTracking),
         ProviderCatalogItem(id: "codex-cost", titleEn: "Codex", titleZh: "Codex", summaryEn: "Proxy cost ledger plus non-proxy Codex token usage", summaryZh: "Codex 代理费用账本与非代理 Token 用量", channel: "local", kind: .costTracking),
         ProviderCatalogItem(id: "opencode", titleEn: "OpenCode", titleZh: "OpenCode", summaryEn: "Local token and cost ledger from OpenCode sessions", summaryZh: "基于 OpenCode 本地会话的 Token 与费用账本", channel: "local", kind: .costTracking)
     ]

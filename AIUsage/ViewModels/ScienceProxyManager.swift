@@ -50,6 +50,20 @@ final class ScienceProxyManager: ObservableObject {
     /// 浏览器实际访问的公开端口。两种模式都由 `ScienceAuthProxy` 监听。
     var listenPort: Int { endpointPlan.publicPort }
 
+    /// Science owns two additional listeners beyond its inference Gateway.
+    /// Publishing them to the central arbiter prevents another product from
+    /// killing or colliding with the public/auth and daemon ports.
+    func runningPortOwners() -> [ProxyPortArbiter.Owner] {
+        guard config.isEnabled, sandboxHealthy, ScienceAuthProxy.shared.isRunning else { return [] }
+        let plan = endpointPlan
+        return [ProxyPortArbiter.Owner(
+            id: "__aiusage_science_surface__",
+            ports: [plan.publicPort, plan.daemonPort],
+            track: AppSettings.shared.t("Claude Science", "Claude Science"),
+            label: node(for: config.activeNodeId)?.name ?? ""
+        )]
+    }
+
     /// 浏览器永远只接触公开反代；daemon 留在独立内部端口。
     /// 这样 sandbox 与 adopt 共用同一条即时 `/api/models` 与免登录链路。
     private var endpointPlan: ScienceProxyEndpointPlan {
@@ -214,6 +228,16 @@ final class ScienceProxyManager: ObservableObject {
                 "所选端口已被 Claude Science 内部链路保留。请更换代理或 Science 端口（保留：\(reserved)）。"
             )
         case nil:
+            if let conflict = ProxyPortArbiter.conflict(
+                forPorts: [plan.publicPort, plan.daemonPort],
+                excluding: "__aiusage_science_surface__"
+            ) {
+                let owner = conflict.label.isEmpty ? conflict.track : "\(conflict.track) · \(conflict.label)"
+                return AppSettings.shared.t(
+                    "Science port \(conflict.port) is already used by \(owner). Stop it or choose another Science port.",
+                    "Science 端口 \(conflict.port) 已被 \(owner) 占用。请先停用该服务，或更换 Science 端口。"
+                )
+            }
             return nil
         }
     }

@@ -20,7 +20,9 @@ extension MenuBarView {
         let track: GlobalProxyTrack = family.isCodex ? .codex : .claude
         let manager = family.isCodex ? globalCodex : globalClaude
         let globalEnabled = manager.isEnabled
-        let routeManaged = family.isCodex ? globalEnabled : manager.isRuntimeEnabled
+        // The Claude Code chip reports the Code route only. A Desktop-only
+        // Gateway must never make Code look enabled or hide its direct node.
+        let routeManaged = globalEnabled
         let globalActiveNode = routeManaged ? manager.node(for: manager.activeNodeId) : nil
 
         let activeId = proxyVM.activatedId(isCodex: family.isCodex)
@@ -127,7 +129,7 @@ extension MenuBarView {
     private func codexClaudePanel(family: ProxyNodeFamily) -> some View {
         let manager = family.isCodex ? globalCodex : globalClaude
         let globalEnabled = manager.isEnabled
-        let routeManaged = family.isCodex ? globalEnabled : manager.isRuntimeEnabled
+        let routeManaged = globalEnabled
         let globalNodes = manager.availableNodes()
         let activeId = proxyVM.activatedId(isCodex: family.isCodex)
         let familyNodes = proxyVM.configurations.filter { family.contains($0.nodeType) }
@@ -244,6 +246,9 @@ extension MenuBarView {
             title: L("Active node · hot-swap", "激活节点 · 热切换"),
             rows: nodes.map { node in
                 MenuBarTrackPanelRow(id: node.id, name: node.name,
+                                     subtitle: manager.track == .claude && manager.config.effectiveClaudeDesktopEnabled
+                                        ? L("Switches the shared Code + Desktop route", "将同时切换 Code + Desktop 共享路由")
+                                        : nil,
                                      isActive: manager.activeNodeId == node.id) {
                     Task { await manager.switchActiveNode(to: node.id) }
                     closePanel()

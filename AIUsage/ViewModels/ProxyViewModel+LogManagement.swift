@@ -147,7 +147,9 @@ extension ProxyViewModel {
                         pricingResolved: true,
                         errorMessage: log.errorMessage,
                         errorType: log.errorType,
-                        statusCode: log.statusCode
+                        statusCode: log.statusCode,
+                        clientSurface: log.clientSurface,
+                        isGlobalProxy: log.isGlobalProxy
                     ))
                     continue
                 }

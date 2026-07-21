@@ -25,12 +25,17 @@ extension ProxyManagementView {
                     let stats = viewModel.statistics[config.id] ?? .empty
                     let isSelected = selectedConfigId == config.id
                     let isDragging = draggingConfigId == config.id
+                    let claudeUsage = claudeNodeUsage(for: config.id)
+                    let canAttachCodeToGateway = shouldAttachCodeToGateway(nodeID: config.id)
                     VStack(spacing: 0) {
                         ConfigurationCardView(
                             config: config,
                             isActive: viewModel.isNodeActivated(config.id),
                             isProxyOnlyRunning: viewModel.proxyOnlyRunningIds.contains(config.id),
                             isBusy: viewModel.isOperationInProgress(config.id),
+                            isActivationManaged: !family.isCodex && claudeGateway.isEnabled,
+                            canAttachCodeToGateway: canAttachCodeToGateway,
+                            claudeUsage: claudeUsage,
                             isSelected: isSelected,
                             statsRequests: stats.totalRequests,
                             statsSuccessRate: stats.successRate,
@@ -44,7 +49,7 @@ extension ProxyManagementView {
                                 dragTranslation = t
                             },
                             onDragEnded: { commitNodeDrag() },
-                            onToggleActivation: { Task { await viewModel.toggleActivation(config.id) } },
+                            onToggleActivation: { toggleCodeRoute(for: config) },
                             onToggleProxyOnly: { Task { await viewModel.toggleProxyOnly(config.id) } },
                             onCopyLaunchCommand: { viewModel.copyLaunchCommand(for: config.id) },
                             onTestConnectivity: { Task { await viewModel.testConnectivity(config.id) } },
@@ -110,6 +115,45 @@ extension ProxyManagementView {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
         )
+    }
+
+    private func claudeNodeUsage(for nodeID: String) -> ClaudeNodeUsage {
+        guard !family.isCodex else { return .none }
+        let directCode = viewModel.isNodeActivated(nodeID)
+        let gatewayCode = claudeGateway.isEnabled && claudeGateway.activeNodeId == nodeID
+        let node = viewModel.configurations.first(where: { $0.id == nodeID })
+        let directCodeRunning = directCode && (node?.needsProxyProcess != true || viewModel.isProxyRunning(nodeID))
+        let gatewayRunning = claudeGatewayRuntime.isProcessRunning
+        let desktop = claudeGateway.config.effectiveClaudeDesktopEnabled
+            && claudeGateway.activeNodeId == nodeID
+        let science = scienceProxy.isEnabled && scienceProxy.activeNodeId == nodeID
+        return ClaudeNodeUsage(
+            codeRoute: gatewayCode ? .gateway : (directCode ? .direct : nil),
+            codeRunning: gatewayCode ? gatewayRunning : directCodeRunning,
+            desktop: desktop,
+            desktopRunning: desktop && claudeGatewayRuntime.isClaudeDesktopListenerRunning,
+            science: science,
+            scienceRunning: science && scienceProxy.isProxyRunning && scienceProxy.sandboxHealthy
+        )
+    }
+
+    /// Desktop already owns this node's Gateway route. Treat the node's Code
+    /// toggle as "join the existing route" instead of trying to start a second
+    /// listener that may collide with the Gateway port.
+    private func shouldAttachCodeToGateway(nodeID: String) -> Bool {
+        guard !family.isCodex,
+              !claudeGateway.isEnabled,
+              claudeGateway.config.effectiveClaudeDesktopEnabled,
+              claudeGateway.activeNodeId == nodeID else { return false }
+        return !viewModel.isNodeActivated(nodeID)
+    }
+
+    private func toggleCodeRoute(for config: ProxyConfiguration) {
+        if shouldAttachCodeToGateway(nodeID: config.id) {
+            Task { await claudeGateway.enable(activeNodeId: config.id) }
+        } else {
+            Task { await viewModel.toggleActivation(config.id) }
+        }
     }
 
     // MARK: - Model Quick Switch

@@ -481,10 +481,10 @@ extension SettingsView {
                 HStack(spacing: 8) {
                     Text("$")
                         .foregroundStyle(.secondary)
-                    TextField("0.00", value: $settings.claudeCodeDailyThreshold, format: .number.precision(.fractionLength(2)))
+                    TextField("0.00", value: $settings.claudeDailyThreshold, format: .number.precision(.fractionLength(2)))
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 100)
-                        .onChange(of: settings.claudeCodeDailyThreshold) { _, _ in
+                        .onChange(of: settings.claudeDailyThreshold) { _, _ in
                             settings.saveSettings()
                         }
                     Text(L("USD", "美元"))

@@ -79,8 +79,8 @@ enum ProxyRuntimeError: LocalizedError {
             return AppSettings.shared.t("The node stopped, but AIUsage could not persist the deactivated state.", "节点已停止，但 AIUsage 无法保存停用状态。")
         case .managedByGlobalProxy:
             return AppSettings.shared.t(
-                "The global proxy is enabled for this track. Switch the active node from the global proxy panel, or turn it off to activate nodes individually.",
-                "本轨全局代理已启用。请在全局代理面板里切换激活节点，或先关闭全局代理再单独激活节点。"
+                "Claude Code is attached to Claude Gateway. Switch its route from the Gateway card, or disconnect Code before using a direct node.",
+                "Claude Code 已接入 Claude Gateway。请在 Gateway 卡片中切换路由，或先断开 Code 再使用直连节点。"
             )
         }
     }
@@ -589,7 +589,7 @@ class ProxyViewModel: ObservableObject {
 
         // 全局代理接管本轨时，禁止每节点激活（改由全局代理面板切换激活节点）。
         let globalManager = isCodex ? GlobalProxyManager.codex : GlobalProxyManager.claude
-        if globalManager.config.isEnabled {
+        if globalManager.isEnabled {
             throw ProxyRuntimeError.managedByGlobalProxy
         }
 

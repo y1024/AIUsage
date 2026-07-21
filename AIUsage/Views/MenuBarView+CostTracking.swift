@@ -2,7 +2,7 @@ import SwiftUI
 import QuotaBackend
 
 // MARK: - MenuBarView Cost Tracking Section
-// 各本地 cost 工具（Claude Code / Codex / OpenCode）的「费用 + 用量」汇总（今日 / 本月 / 总计）。
+// 各本地 cost 账本（Claude / Codex / OpenCode）的「费用 + 用量」汇总（今日 / 本月 / 总计）。
 // 数据源统一为对应本地 cost provider 的 costSummary（refreshCoordinator 已聚合）：
 //   · Claude：来自代理用量永久归档（费用与 token 同源）。
 //   · Codex：费用 = 代理轨（代理归档）；token = 代理 + 非代理合计，
@@ -47,7 +47,7 @@ extension MenuBarView {
 
     /// 各工具的展示描述：provider id → 品牌名 / 图标 / 配色。
     private static let costSourceDescriptors: [(providerId: String, label: String, iconAsset: String, tint: Color)] = [
-        ("claude", "Claude Code", "claude", Color(red: 0.85, green: 0.45, blue: 0.25)),
+        ("claude", "Claude", "claude", Color(red: 0.85, green: 0.45, blue: 0.25)),
         ("codex-cost", "Codex", "codex", Color(red: 0.40, green: 0.52, blue: 0.92)),
         ("opencode", "OpenCode", "opencode", Color(red: 0.18, green: 0.83, blue: 0.75))
     ]

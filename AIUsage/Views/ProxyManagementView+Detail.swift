@@ -304,6 +304,9 @@ extension ProxyManagementView {
                 HStack(spacing: 4) {
                     Text(log.upstreamModel)
                         .font(.caption.weight(.semibold))
+                    if let surface = requestSurfaceLabel(log.clientSurface) {
+                        cacheIndicator(surface, color: requestSurfaceColor(log.clientSurface))
+                    }
                     if log.tokensCacheRead > 0 {
                         cacheIndicator(L("Read", "读"), color: .green)
                     }
@@ -361,6 +364,23 @@ extension ProxyManagementView {
         .padding(.vertical, 8)
         .background(log.success ? Color.clear : Color.red.opacity(0.04))
         .help(log.success ? "" : (log.errorMessage ?? ""))
+    }
+
+    private func requestSurfaceLabel(_ rawValue: String?) -> String? {
+        switch rawValue {
+        case "claude_code": return "Code"
+        case "claude_desktop": return "Desktop"
+        case "claude_science": return "Science"
+        default: return nil
+        }
+    }
+
+    private func requestSurfaceColor(_ rawValue: String?) -> Color {
+        switch rawValue {
+        case "claude_desktop": return Color(red: 0.85, green: 0.45, blue: 0.25)
+        case "claude_science": return .purple
+        default: return .indigo
+        }
     }
 
     private func cacheIndicator(_ label: String, color: Color) -> some View {

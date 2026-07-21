@@ -127,7 +127,7 @@ final class ProviderRefreshCoordinator: ObservableObject {
                     }
                 }
             }
-            checkClaudeCodeDailyThreshold()
+            checkClaudeDailyThreshold()
         }
     }
 

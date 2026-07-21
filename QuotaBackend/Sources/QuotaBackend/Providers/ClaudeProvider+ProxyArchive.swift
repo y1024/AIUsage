@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - Claude Provider: Proxy Usage Archive Source
-// Claude Code 用量统计的唯一数据源是「代理用量永久日归档」，由 App 侧
+// Claude 用量统计的唯一数据源是「Gateway 用量永久日归档」，由 App 侧
 // (ProxyUsageArchiveStore) 从 ProxyRequestLog 折叠写出，成本逐条冻结、不可篡改。
 // QuotaBackend 只读该 JSON 文件（无法 import App 模块，故在此定义匹配的解码 DTO）。
 //

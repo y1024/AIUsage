@@ -3,8 +3,8 @@ import Charts
 import QuotaBackend
 
 // MARK: - ProxyStatsView
-// 用量统计页主视图。数据源为 JSONL 本地日志（通过 StatsDataAdapter 聚合），
-// 与仪表盘热力图/概览共享同一口径，不再依赖代理请求日志。
+// 用量统计页主视图。数据源为各产品的本地永久账本（通过 StatsDataAdapter 聚合），
+// 与仪表盘热力图/概览共享同一口径。Claude 账本来自 Gateway 请求归档。
 
 struct ProxyStatsView: View {
     @EnvironmentObject var appState: AppState
@@ -184,8 +184,8 @@ struct ProxyStatsView: View {
             Text(L("No usage data", "暂无用量数据"))
                 .font(.title3.weight(.medium))
                 .foregroundStyle(.secondary)
-            Text(L("Usage data will appear once Claude Code, Codex or OpenCode starts generating local logs.",
-                   "当 Claude Code、Codex 或 OpenCode 开始产生本地日志后，用量数据将自动展示。"))
+            Text(L("Usage data will appear after Claude Gateway, Codex or OpenCode records local usage.",
+                   "Claude Gateway、Codex 或 OpenCode 记录本地用量后，数据会自动展示。"))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -261,7 +261,7 @@ struct ProxyStatsView: View {
         ) { family in
             switch family {
             case .all: return L("Combined", "综合")
-            case .claude: return "Claude Code"
+            case .claude: return "Claude"
             case .codex: return "Codex"
             case .opencode: return "OpenCode"
             }
@@ -343,7 +343,7 @@ struct ProxyStatsView: View {
             if showClaude && !claudeLocalProviders.isEmpty {
                 LocalTokenUsageHeatmap(
                     providers: claudeLocalProviders,
-                    brandLabel: "Claude Code",
+                    brandLabel: "Claude",
                     brandAsset: "claude",
                     accent: Color(red: 0.85, green: 0.47, blue: 0.26)
                 )

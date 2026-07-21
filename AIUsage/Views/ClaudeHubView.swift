@@ -171,6 +171,7 @@ struct ClaudeDesktopIntegrationView: View {
     @State private var desktopPortDraft = ""
     @State private var portSaveMessage: String?
     @State private var portSaveError: String?
+    @State private var pendingSharedRouteNodeID: String?
     @FocusState private var isPortFieldFocused: Bool
 
     private var nodes: [GlobalProxyNodeRef] { gateway.availableNodes() }
@@ -219,6 +220,26 @@ struct ClaudeDesktopIntegrationView: View {
         }
         .onChange(of: gateway.config.effectiveClaudeDesktopHTTPSPort) { _, _ in
             if !isPortFieldFocused { syncDesktopPortDraft() }
+        }
+        .confirmationDialog(
+            L("Switch the shared Claude route?", "切换 Claude 共享路由？"),
+            isPresented: Binding(
+                get: { pendingSharedRouteNodeID != nil },
+                set: { if !$0 { pendingSharedRouteNodeID = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(sharedRouteSwitchButtonTitle) {
+                guard let nodeID = pendingSharedRouteNodeID else { return }
+                selectedNodeID = nodeID
+                pendingSharedRouteNodeID = nil
+                Task { await gateway.switchActiveNode(to: nodeID) }
+            }
+            Button(L("Cancel", "取消"), role: .cancel) {
+                pendingSharedRouteNodeID = nil
+            }
+        } message: {
+            Text(sharedRouteSwitchMessage)
         }
         .sheet(isPresented: $showModelManager) {
             if let selectedNode {
@@ -295,7 +316,12 @@ struct ClaudeDesktopIntegrationView: View {
     private var sharedRoute: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label(L("Shared Code + Desktop route", "Code + Desktop 共享路由"), systemImage: "point.3.connected.trianglepath.dotted")
+                Label(
+                    gateway.config.effectiveClaudeCodeEnabled
+                        ? L("Shared Code + Desktop route", "Code + Desktop 共享路由")
+                        : L("Desktop Gateway route", "Desktop Gateway 路由"),
+                    systemImage: "point.3.connected.trianglepath.dotted"
+                )
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -780,9 +806,33 @@ struct ClaudeDesktopIntegrationView: View {
     }
 
     private func selectNode(_ nodeID: String) {
+        if gateway.config.effectiveClaudeCodeEnabled,
+           nodeID != gateway.activeNodeId {
+            pendingSharedRouteNodeID = nodeID
+            return
+        }
         selectedNodeID = nodeID
-        guard manager.isConfigured else { return }
-        Task { await gateway.switchActiveNode(to: nodeID) }
+        if manager.isConfigured {
+            Task { await gateway.switchActiveNode(to: nodeID) }
+        }
+    }
+
+    private var sharedRouteSwitchButtonTitle: String {
+        manager.isConfigured
+            ? L("Switch Code + Desktop", "同时切换 Code + Desktop")
+            : L("Switch Code route", "切换 Code 路由")
+    }
+
+    private var sharedRouteSwitchMessage: String {
+        manager.isConfigured
+            ? L(
+                "Claude Code is attached to this Gateway too. Both products will use the new node immediately.",
+                "Claude Code 也已接入此 Gateway；切换后两端会立即改用新节点。"
+            )
+            : L(
+                "Desktop will join Claude Code's Gateway route. Selecting another node changes Code immediately; Desktop will use it after connection.",
+                "Desktop 将加入 Claude Code 当前的 Gateway 路由。选择其它节点会立即切换 Code；接入后 Desktop 也会使用该节点。"
+            )
     }
 
     private var statusTitle: String {

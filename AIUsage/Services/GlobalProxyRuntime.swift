@@ -76,7 +76,7 @@ final class GlobalProxyRuntime: ObservableObject {
     var trackLabel: String {
         switch track {
         case .codex: return AppSettings.shared.t("Codex global proxy", "Codex 全局代理")
-        case .claude: return AppSettings.shared.t("Claude Code global proxy", "Claude Code 全局代理")
+        case .claude: return "Claude Gateway"
         case .opencode: return AppSettings.shared.t("OpenCode global proxy", "OpenCode 全局代理")
         case .science: return AppSettings.shared.t("Claude Science proxy", "Claude Science 代理")
         }
@@ -105,6 +105,9 @@ final class GlobalProxyRuntime: ObservableObject {
     }
 
     var isProcessRunning: Bool { process?.isRunning == true }
+    var isClaudeDesktopListenerRunning: Bool {
+        track == .claude && isProcessRunning && httpsListenPort != nil
+    }
 
     /// 跨轨仲裁聚合用：本轨全局代理运行时占用的端口所有者（仅在确实运行时上报）。
     func runningPortOwners() -> [ProxyPortArbiter.Owner] {
@@ -200,7 +203,7 @@ final class GlobalProxyRuntime: ObservableObject {
                 guard line.hasPrefix("PROXY_LOG:") else { return }
                 Task { @MainActor in
                     // OpenCode 轨：归因到 OpenCodeProxyRuntime（节点卡片/统计/热力图同源、按节点定价算成本）。
-                    // Codex/Claude 轨：仍走 ProxyViewModel（其节点在 configurations 里，统计/归档复用既有链路）。
+                    // Codex/Claude/Science 轨：仍走 ProxyViewModel（节点在 configurations 里，统计/归档复用既有链路）。
                     if capturedTrack == .opencode {
                         OpenCodeProxyRuntime.shared.ingestGlobalProxyLog(jsonStr)
                     } else {

@@ -101,8 +101,10 @@ extension ProxyViewModel {
     }
 
     private func restoreActivatedNodeAsync() async {
-        // 全局代理启用时由它独占 settings.json；跳过每节点 Claude 恢复，避免清理/还原误删全局受管块。
-        if GlobalProxyManager.claude.config.isEnabled {
+        // Only the Code consumer owns settings.json. Desktop may keep the
+        // shared Gateway alive while Code still restores an independent direct
+        // node; using the legacy aggregate flag here used to hide that route.
+        if GlobalProxyManager.claude.isEnabled {
             return
         }
         let shouldAutoRestore = AppSettings.shared.proxyAutoRestoreOnLaunch
@@ -677,7 +679,8 @@ extension ProxyViewModel {
             pricingResolved: pricing != nil,
             errorMessage: json["error"] as? String,
             errorType: json["error_type"] as? String,
-            statusCode: json["status_code"] as? Int
+            statusCode: json["status_code"] as? Int,
+            clientSurface: (json["client_surface"] as? String)?.nilIfBlank
         )
 
         // parseProxyLog 本身已运行在 MainActor（pipe 回调经 Task { @MainActor } 跳转而来），

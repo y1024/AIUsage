@@ -213,7 +213,9 @@ final class AppSettings: ObservableObject {
     @Published var quotaIndicatorStyle: CardQuotaIndicatorStyle = CardQuotaIndicatorStyle(rawValue: UserDefaults.standard.string(forKey: DefaultsKey.quotaIndicatorStyle) ?? "") ?? .bar
     @Published var quotaIndicatorMetric: CardQuotaIndicatorMetric = CardQuotaIndicatorMetric(rawValue: UserDefaults.standard.string(forKey: DefaultsKey.quotaIndicatorMetric) ?? "") ?? .remaining
 
-    @Published var claudeCodeDailyThreshold: Double = {
+    /// Claude Gateway ledger threshold. The persisted key retains its legacy
+    /// name so existing user preferences migrate without a reset.
+    @Published var claudeDailyThreshold: Double = {
         let defaults = UserDefaults.standard
         let storedValue = defaults.object(forKey: DefaultsKey.claudeCodeDailyThreshold) != nil
             ? defaults.double(forKey: DefaultsKey.claudeCodeDailyThreshold)
@@ -221,7 +223,7 @@ final class AppSettings: ObservableObject {
         return storedValue
     }()
 
-    /// Persisted calendar day string (YYYY-MM-DD) for Claude Code cost threshold notification de-duplication.
+    /// Persisted calendar day string (YYYY-MM-DD) for Claude cost alert de-duplication.
     var lastNotifiedDate: String? {
         get { UserDefaults.standard.string(forKey: DefaultsKey.claudeCodeLastNotifiedDate) }
         set { UserDefaults.standard.set(newValue, forKey: DefaultsKey.claudeCodeLastNotifiedDate) }
@@ -309,7 +311,7 @@ final class AppSettings: ObservableObject {
         $language.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.appLanguage) }.store(in: &cancellables)
         $quotaIndicatorStyle.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.quotaIndicatorStyle) }.store(in: &cancellables)
         $quotaIndicatorMetric.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.quotaIndicatorMetric) }.store(in: &cancellables)
-        $claudeCodeDailyThreshold.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.claudeCodeDailyThreshold) }.store(in: &cancellables)
+        $claudeDailyThreshold.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.claudeCodeDailyThreshold) }.store(in: &cancellables)
         $cnyExchangeRate.dropFirst().sink { defaults.set($0, forKey: DefaultsKey.cnyExchangeRate) }.store(in: &cancellables)
         $menuBarDisplayMode.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.menuBarDisplayMode) }.store(in: &cancellables)
         $menuBarMetricType.dropFirst().sink { defaults.set($0.rawValue, forKey: DefaultsKey.menuBarMetricType) }.store(in: &cancellables)

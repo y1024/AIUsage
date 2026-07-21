@@ -4,7 +4,7 @@ import SwiftUI
 
 struct LocalTokenUsageHeatmap: View {
     let providers: [ProviderData]
-    /// 品牌口径：按工具（Claude Code / Codex）拆分展示时传入品牌名 + 图标 asset + 强调色。
+    /// 品牌口径：按账本家族（Claude / Codex / OpenCode）拆分展示时传入品牌名 + 图标 asset + 强调色。
     /// 强调色用于色阶与图例，让两块热力图各自带上自家品牌特色；为 nil 时回退到通用绿色。
     var brandLabel: String? = nil
     var brandAsset: String? = nil

@@ -44,6 +44,8 @@ protocol GlobalProxyTrackAdapter {
     /// 本轨「每节点激活」当前激活 id（启用全局前先停掉它，干净交接）。
     func currentPerNodeActiveId() -> String?
     func deactivatePerNode(_ id: String) async
+    /// Gateway 接管失败时恢复刚才停用的每节点路由。
+    func activatePerNode(_ id: String) async
 }
 
 // MARK: - Codex Adapter
@@ -109,6 +111,10 @@ struct CodexGlobalProxyAdapter: GlobalProxyTrackAdapter {
 
     func deactivatePerNode(_ id: String) async {
         await ProxyViewModel.shared.deactivateConfiguration(id)
+    }
+
+    func activatePerNode(_ id: String) async {
+        await ProxyViewModel.shared.activateConfiguration(id)
     }
 }
 
@@ -211,6 +217,10 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
 
     func deactivatePerNode(_ id: String) async {
         await ProxyViewModel.shared.deactivateConfiguration(id)
+    }
+
+    func activatePerNode(_ id: String) async {
+        await ProxyViewModel.shared.activateConfiguration(id)
     }
 }
 
@@ -335,5 +345,10 @@ struct OpenCodeGlobalProxyAdapter: GlobalProxyTrackAdapter {
 
     func deactivatePerNode(_ id: String) async {
         try? OpenCodeNodeStore.shared.deactivate()
+    }
+
+    func activatePerNode(_ id: String) async {
+        guard let node = node(id) else { return }
+        try? await OpenCodeNodeStore.shared.activate(node)
     }
 }

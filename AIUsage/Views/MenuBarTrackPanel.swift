@@ -46,12 +46,23 @@ struct MenuBarTrackPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if isGlobal {
-                Text(L("Fixed port :\(manager.config.port) · hot-swap",
-                       "固定端口 :\(manager.config.port) · 热切换"))
+                Text(manager.track == .claude && manager.config.effectiveClaudeDesktopEnabled
+                     ? L("Shared with Desktop · switching changes both", "与 Desktop 共享 · 切换将同时影响两端")
+                     : L("Fixed port :\(manager.config.port) · hot-swap",
+                         "固定端口 :\(manager.config.port) · 热切换"))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 8)
+            } else if manager.track == .claude && manager.config.effectiveClaudeDesktopEnabled {
+                Text(L(
+                    "Desktop is using Claude Gateway; Code remains independent.",
+                    "Desktop 正在使用 Claude Gateway；Code 仍保持独立。"
+                ))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
             }
             Divider()
             ScrollView {
@@ -98,7 +109,7 @@ struct MenuBarTrackPanel: View {
             if manager.isBusy {
                 SmallProgressView().frame(width: 12, height: 12)
             }
-            Text(L("Global", "全局代理"))
+            Text(manager.track == .claude ? L("Use Gateway", "接入 Gateway") : L("Global", "全局代理"))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
             Toggle("", isOn: Binding(

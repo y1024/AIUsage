@@ -3,6 +3,23 @@ import QuotaBackend
 
 // MARK: - Configuration Card (Equatable)
 
+enum ClaudeCodeNodeRoute: Equatable {
+    case direct
+    case gateway
+}
+
+struct ClaudeNodeUsage: Equatable {
+    var codeRoute: ClaudeCodeNodeRoute?
+    var codeRunning = false
+    var desktop = false
+    var desktopRunning = false
+    var science = false
+    var scienceRunning = false
+
+    static let none = ClaudeNodeUsage()
+    var isEmpty: Bool { codeRoute == nil && !desktop && !science }
+}
+
 /// Standalone Equatable View so SwiftUI can skip re-rendering cards whose inputs haven't changed.
 /// When `selectedConfigId` changes, only the previously-selected and newly-selected cards re-render;
 /// the rest are skipped entirely. Same optimization applies during drag-and-drop state changes.
@@ -11,6 +28,9 @@ struct ConfigurationCardView: View, Equatable {
     let isActive: Bool
     let isProxyOnlyRunning: Bool
     let isBusy: Bool
+    let isActivationManaged: Bool
+    let canAttachCodeToGateway: Bool
+    let claudeUsage: ClaudeNodeUsage
     let isSelected: Bool
     let statsRequests: Int
     let statsSuccessRate: Double
@@ -39,6 +59,9 @@ struct ConfigurationCardView: View, Equatable {
         lhs.isActive == rhs.isActive &&
         lhs.isProxyOnlyRunning == rhs.isProxyOnlyRunning &&
         lhs.isBusy == rhs.isBusy &&
+        lhs.isActivationManaged == rhs.isActivationManaged &&
+        lhs.canAttachCodeToGateway == rhs.canAttachCodeToGateway &&
+        lhs.claudeUsage == rhs.claudeUsage &&
         lhs.isSelected == rhs.isSelected &&
         lhs.statsRequests == rhs.statsRequests &&
         lhs.statsSuccessRate == rhs.statsSuccessRate &&
@@ -64,7 +87,7 @@ struct ConfigurationCardView: View, Equatable {
 
     /// 激活所针对的目标 CLI 名称：Codex 节点为 "Codex"，其余为 "Claude"。
     private var activationTargetName: String {
-        config.nodeType.isCodex ? "Codex" : "Claude"
+        config.nodeType.isCodex ? "Codex" : "Claude Code"
     }
 
     private var applyLabel: String {
@@ -101,7 +124,13 @@ struct ConfigurationCardView: View, Equatable {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            nodeTypeBadge
+            HStack(spacing: 6) {
+                nodeTypeBadge
+                if !claudeUsage.isEmpty {
+                    consumerBadges
+                }
+                Spacer(minLength: 0)
+            }
 
             HStack(spacing: 8) {
                 Image(systemName: "line.3.horizontal")
@@ -149,8 +178,13 @@ struct ConfigurationCardView: View, Equatable {
                         brandColor: brandColor,
                         isBusy: isBusy
                     ))
-                    .disabled(isBusy)
-                    .instantTooltip(isActive ? disconnectLabel : applyLabel)
+                    .disabled(isBusy || isActivationManaged)
+                    .instantTooltip(isActivationManaged
+                        ? L("Claude Code is managed by Claude Gateway", "Claude Code 正由 Claude Gateway 管理")
+                        : (canAttachCodeToGateway
+                           ? L("Attach Claude Code to Desktop's existing Gateway route",
+                               "让 Claude Code 加入 Desktop 当前的 Gateway 路由")
+                           : (isActive ? disconnectLabel : applyLabel)))
 
                     if config.needsProxyProcess {
                         Button(action: onToggleProxyOnly) {
@@ -495,6 +529,65 @@ struct ConfigurationCardView: View, Equatable {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .background(Capsule().fill(color.opacity(0.12)))
+    }
+
+    private var consumerBadges: some View {
+        HStack(spacing: 4) {
+            if let route = claudeUsage.codeRoute {
+                consumerBadge(
+                    title: "Code",
+                    icon: route == .gateway ? "point.3.connected.trianglepath.dotted" : "terminal",
+                    color: .indigo,
+                    isRunning: claudeUsage.codeRunning,
+                    help: route == .gateway
+                        ? L("Claude Code uses this node through Claude Gateway", "Claude Code 正通过 Claude Gateway 使用此节点")
+                        : L("Claude Code is connected directly to this node", "Claude Code 正直连接入此节点")
+                )
+            }
+            if claudeUsage.desktop {
+                consumerBadge(
+                    title: "Desktop",
+                    icon: "macwindow",
+                    color: Self.anthropicBrand,
+                    isRunning: claudeUsage.desktopRunning,
+                    help: L("Claude Desktop uses this node through Claude Gateway", "Claude Desktop 正通过 Claude Gateway 使用此节点")
+                )
+            }
+            if claudeUsage.science {
+                consumerBadge(
+                    title: "Science",
+                    icon: "atom",
+                    color: .purple,
+                    isRunning: claudeUsage.scienceRunning,
+                    help: L("Claude Science uses this node on its independent runtime", "Claude Science 正通过独立运行时使用此节点")
+                )
+            }
+        }
+    }
+
+    private func consumerBadge(
+        title: String,
+        icon: String,
+        color: Color,
+        isRunning: Bool,
+        help: String
+    ) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 7, weight: .bold))
+            Text(title)
+            if !isRunning {
+                Image(systemName: "clock")
+                    .font(.system(size: 6, weight: .bold))
+            }
+        }
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(isRunning ? color : Color.orange)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Capsule().fill((isRunning ? color : Color.orange).opacity(0.10)))
+        .overlay(Capsule().stroke((isRunning ? color : Color.orange).opacity(0.18), lineWidth: 0.5))
+        .help(isRunning ? help : L("Configured, but its runtime is not ready", "已配置，但运行时尚未就绪"))
     }
 
     private func statPill(icon: String, value: String, color: Color) -> some View {

@@ -161,11 +161,11 @@ public enum BrowserDiscovery {
         ),
         ProviderAuthCapability(
             providerId: "claude",
-            displayName: "Claude Code",
+            displayName: "Claude",
             supportedMethods: [.auto],
             cookieDomains: nil,
             cookieNames: nil,
-            instructions: "Reads AIUsage Claude proxy usage archive automatically. No credentials needed."
+            instructions: "Reads the AIUsage Claude Gateway usage archive automatically. No credentials needed."
         ),
         ProviderAuthCapability(
             providerId: "warp",

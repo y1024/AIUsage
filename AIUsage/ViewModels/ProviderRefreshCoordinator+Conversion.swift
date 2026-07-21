@@ -400,6 +400,8 @@ extension ProviderRefreshCoordinator {
             "This tracker reads AIUsage's Claude proxy usage archive. Token and cost totals are frozen when each proxy request is logged, so it works as a local cost ledger rather than an official subscription meter.": "这个追踪源会读取 AIUsage 的 Claude 代理用量归档。每条代理请求写入时就会冻结 Token 与费用，所以它是本地费用账本，而不是官方订阅额度计量器。",
             "This tracker combines priced Codex proxy archive usage with token-only non-proxy Codex session logs. Proxy JSONL rows are ignored here to avoid double counting.": "这个追踪源会合并已计价的 Codex 代理归档用量与仅统计 Token 的非代理 Codex 会话日志。这里会忽略代理 JSONL 行，避免重复统计。",
             "Claude proxy usage archive token and cost ledger": "Claude 代理用量归档的 Token 与费用账本",
+            "Claude Gateway usage archive token and cost ledger": "Claude Gateway 用量归档的 Token 与费用账本",
+            "Code, Desktop and Science usage recorded by Claude Gateway": "Claude Gateway 记录的 Code、Desktop 与 Science 用量",
             "Local token and cost ledger from Claude proxy usage": "基于 Claude 代理用量的本地 Token 与费用账本",
             "Proxy cost ledger plus non-proxy Codex token usage": "Codex 代理费用账本与非代理 Token 用量",
             "Codex": "Codex",
@@ -493,8 +495,8 @@ extension ProviderRefreshCoordinator {
 
     // MARK: - Claude threshold + notifications
 
-    func checkClaudeCodeDailyThreshold() {
-        guard settings.claudeCodeDailyThreshold > 0 else {
+    func checkClaudeDailyThreshold() {
+        guard settings.claudeDailyThreshold > 0 else {
             return
         }
 
@@ -508,16 +510,16 @@ extension ProviderRefreshCoordinator {
             return
         }
 
-        guard todayCost >= settings.claudeCodeDailyThreshold else {
+        guard todayCost >= settings.claudeDailyThreshold else {
             return
         }
 
-        providerRefreshLog.info("Sending Claude Code threshold notification: $\(todayCost, privacy: .public) > $\(self.settings.claudeCodeDailyThreshold, privacy: .public)")
-        sendClaudeCodeThresholdNotification(cost: todayCost, threshold: settings.claudeCodeDailyThreshold)
+        providerRefreshLog.info("Sending Claude threshold notification: $\(todayCost, privacy: .public) > $\(self.settings.claudeDailyThreshold, privacy: .public)")
+        sendClaudeDailyThresholdNotification(cost: todayCost, threshold: settings.claudeDailyThreshold)
         settings.lastNotifiedDate = String(today)
     }
 
-    func sendClaudeCodeThresholdNotification(cost: Double, threshold: Double) {
+    func sendClaudeDailyThresholdNotification(cost: Double, threshold: Double) {
         let content = UNMutableNotificationContent()
         content.title = settings.t("Claude daily cost alert", "Claude 每日消费提醒")
         content.body = settings.t(
@@ -537,7 +539,7 @@ extension ProviderRefreshCoordinator {
                 if let error = error {
                     providerRefreshLog.error("Failed to send notification: \(error.localizedDescription)")
                 } else {
-                    providerRefreshLog.info("Claude Code threshold notification sent: $\(cost, privacy: .public) > $\(threshold, privacy: .public)")
+                    providerRefreshLog.info("Claude threshold notification sent: $\(cost, privacy: .public) > $\(threshold, privacy: .public)")
                 }
             }
         }

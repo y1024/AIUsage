@@ -2,7 +2,8 @@ import Foundation
 import os.log
 
 // MARK: - Proxy Usage Archive
-// 代理日志的「永久每日用量归档」：按 家族(claude / codex) → 日 → 上游模型 聚合。
+// 代理日志的「永久每日用量归档」：按 家族 → 日 → 上游模型聚合，并在模型桶内保留
+// client surface（Code / Desktop / Science）维度。总量字段保持原结构，旧读取器可直接忽略新增维度。
 // 成本逐条冻结——直接累加 ProxyRequestLog.estimatedCostUSD（该值在请求发生时已用当时节点定价算好），
 // 因此同一模型在不同节点不同价不会冲突，改价也不影响已入档的历史。
 //
@@ -25,6 +26,26 @@ enum ProxyUsageFamily: String, CaseIterable, Sendable {
     case opencode
 }
 
+/// 一个产品面的冻结用量。它是模型总桶的可选细分，不参与旧版总量读取，
+/// 因而可以在不迁移现有 v1 归档的前提下逐步补齐来源维度。
+struct ProxyUsageSurfaceAgg: Codable, Sendable {
+    var inputTokens: Int = 0
+    var outputTokens: Int = 0
+    var cacheReadTokens: Int = 0
+    var cacheCreateTokens: Int = 0
+    var costUSD: Double = 0
+    var requests: Int = 0
+
+    mutating func add(_ log: ProxyRequestLog) {
+        inputTokens += log.tokensInput
+        outputTokens += log.tokensOutput
+        cacheReadTokens += log.tokensCacheRead
+        cacheCreateTokens += log.tokensCacheCreation
+        costUSD += log.estimatedCostUSD
+        requests += 1
+    }
+}
+
 struct ProxyUsageModelAgg: Codable, Sendable {
     var inputTokens: Int = 0
     var outputTokens: Int = 0
@@ -33,6 +54,7 @@ struct ProxyUsageModelAgg: Codable, Sendable {
     var costUSD: Double = 0
     var requests: Int = 0
     var pricingResolvedRequests: Int = 0
+    var surfaces: [String: ProxyUsageSurfaceAgg] = [:]
 
     var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + cacheCreateTokens }
 
@@ -43,7 +65,8 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         cacheCreateTokens: Int = 0,
         costUSD: Double = 0,
         requests: Int = 0,
-        pricingResolvedRequests: Int = 0
+        pricingResolvedRequests: Int = 0,
+        surfaces: [String: ProxyUsageSurfaceAgg] = [:]
     ) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
@@ -52,6 +75,7 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         self.costUSD = costUSD
         self.requests = requests
         self.pricingResolvedRequests = pricingResolvedRequests
+        self.surfaces = surfaces
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -62,6 +86,7 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         case costUSD
         case requests
         case pricingResolvedRequests
+        case surfaces
     }
 
     init(from decoder: Decoder) throws {
@@ -74,6 +99,7 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         requests = try c.decodeIfPresent(Int.self, forKey: .requests) ?? 0
         pricingResolvedRequests = try c.decodeIfPresent(Int.self, forKey: .pricingResolvedRequests)
             ?? (costUSD > 0 ? requests : 0)
+        surfaces = try c.decodeIfPresent([String: ProxyUsageSurfaceAgg].self, forKey: .surfaces) ?? [:]
     }
 
     mutating func add(_ log: ProxyRequestLog) {
@@ -86,6 +112,10 @@ struct ProxyUsageModelAgg: Codable, Sendable {
         if log.pricingResolved {
             pricingResolvedRequests += 1
         }
+        let surface = log.clientSurface?.nilIfBlank ?? "unknown"
+        var surfaceAgg = surfaces[surface] ?? ProxyUsageSurfaceAgg()
+        surfaceAgg.add(log)
+        surfaces[surface] = surfaceAgg
     }
 }
 

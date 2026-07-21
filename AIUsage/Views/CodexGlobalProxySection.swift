@@ -21,10 +21,12 @@ struct CodexGlobalProxySection: View {
     var body: some View {
         GlobalProxySectionScaffold(
             brand: Self.codexBrand,
+            title: L("Global Proxy", "全局代理"),
             subtitle: L("One stable endpoint; choose a node and start.", "一个固定入口，选择节点即可启动。"),
             isEnabled: isEnabled,
             isRunning: runtime.isRunning,
             isRuntimeOwnedByAnotherConsumer: false,
+            otherConsumerStatus: nil,
             isBusy: manager.isBusy,
             port: manager.config.port,
             bindHost: manager.config.displayBindHost,

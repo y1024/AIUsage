@@ -521,7 +521,7 @@ public enum UsageNormalizer {
         case "codex-cost":
             return "Codex"
         case "claude":
-            return "Claude Code"
+            return "Claude"
         case "copilot":
             return "Copilot"
         case "gemini":

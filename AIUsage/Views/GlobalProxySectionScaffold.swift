@@ -11,12 +11,14 @@ import SwiftUI
 
 struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View>: View {
     let brand: Color
+    let title: String
     let subtitle: String
     let isEnabled: Bool
     let isRunning: Bool
     /// True when another consumer owns this shared runtime. The visible track
     /// toggle remains off, but connection settings must stay locked.
     let isRuntimeOwnedByAnotherConsumer: Bool
+    let otherConsumerStatus: String?
     let isBusy: Bool
     let port: Int
     let bindHost: String
@@ -87,7 +89,7 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {
-                    Text(L("Global Proxy", "全局代理"))
+                    Text(title)
                         .font(.headline.weight(.bold))
                     statusBadge
                 }
@@ -147,7 +149,9 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
         if isBusy { return L("Working", "处理中") }
         if isEnabled, isRunning { return L("Running", "运行中") }
         if isEnabled { return L("Waiting", "等待启动") }
-        if isRuntimeOwnedByAnotherConsumer, isRunning { return L("Shared", "共享中") }
+        if isRuntimeOwnedByAnotherConsumer, isRunning {
+            return otherConsumerStatus ?? L("Shared", "共享中")
+        }
         if isRuntimeOwnedByAnotherConsumer { return L("Waiting", "等待启动") }
         return L("Off", "未启用")
     }

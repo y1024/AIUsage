@@ -587,6 +587,10 @@ struct ProxyRequestLog: Codable, Identifiable {
     let errorMessage: String?
     let errorType: String?
     let statusCode: Int?
+    /// 发起请求的 Claude 产品面。后端根据专用 header / 监听入口识别，旧日志为 nil。
+    /// 原始值与 QuotaBackend.ClaudeClientSurface 保持一致：
+    /// `claude_code` / `claude_desktop` / `claude_science` / `unknown`。
+    let clientSurface: String?
     /// 是否来自「全局统一代理」（一个常驻进程随激活节点轮转）。OpenCode 轨用它区分两类日志：
     /// 全局代理日志是该节点用量/成功率/最近请求的唯一来源（opencode.db 不记全局流量）；
     /// 而每节点「仅代理 / 路线 B」日志仅作观测（成功明细以 opencode.db 为准），故展示口径不同。
@@ -616,6 +620,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         errorMessage: String? = nil,
         errorType: String? = nil,
         statusCode: Int? = nil,
+        clientSurface: String? = nil,
         isGlobalProxy: Bool = false
     ) {
         self.id = id
@@ -637,6 +642,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         self.errorMessage = errorMessage
         self.errorType = errorType
         self.statusCode = statusCode
+        self.clientSurface = clientSurface
         self.isGlobalProxy = isGlobalProxy
     }
 
@@ -661,6 +667,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         case errorMessage
         case errorType
         case statusCode
+        case clientSurface
         case isGlobalProxy
     }
 
@@ -695,6 +702,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
         errorType = try c.decodeIfPresent(String.self, forKey: .errorType)
         statusCode = try c.decodeIfPresent(Int.self, forKey: .statusCode)
+        clientSurface = try c.decodeIfPresent(String.self, forKey: .clientSurface)
         isGlobalProxy = try c.decodeIfPresent(Bool.self, forKey: .isGlobalProxy) ?? false
     }
 
@@ -720,6 +728,7 @@ struct ProxyRequestLog: Codable, Identifiable {
         try c.encodeIfPresent(errorMessage, forKey: .errorMessage)
         try c.encodeIfPresent(errorType, forKey: .errorType)
         try c.encodeIfPresent(statusCode, forKey: .statusCode)
+        try c.encodeIfPresent(clientSurface, forKey: .clientSurface)
         if isGlobalProxy { try c.encode(isGlobalProxy, forKey: .isGlobalProxy) }
     }
 }

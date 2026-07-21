@@ -549,8 +549,8 @@ struct CallAnalyticsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(L("Data Sources", "数据来源", key: "calls.sources.title"))
                     .font(.subheadline.weight(.semibold))
-                Text(L("Local CLI logs scanned for the selected range — what feeds the stats above.",
-                       "上面所有统计的来源：按所选时间范围扫描的各 CLI 本地日志。",
+                Text(L("Directly scanned local CLI session logs — separate from the Gateway usage ledger.",
+                       "直接扫描各 CLI 的本地会话日志，与 Gateway 用量账本相互独立。",
                        key: "calls.sources.sub"))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -601,9 +601,16 @@ struct CallAnalyticsView: View {
                      "未检测到 \(status.source.displayName)，或本地没有会话日志。",
                      key: "calls.source.help.absent")
         }
-        return L("Scanned \(status.filesScanned) \(status.source.displayName) session file(s) and counted \(status.eventCount) tool / MCP / skill calls within the selected range.",
-                 "在所选时间范围内，扫描了 \(status.filesScanned) 个 \(status.source.displayName) 会话文件，统计到 \(status.eventCount) 次工具 / MCP / 技能调用。",
-                 key: "calls.source.help.ok")
+        let summary = L(
+            "Scanned \(status.filesScanned) \(status.source.displayName) session file(s) and counted \(status.eventCount) tool / MCP / skill calls within the selected range.",
+            "在所选时间范围内，扫描了 \(status.filesScanned) 个 \(status.source.displayName) 会话文件，统计到 \(status.eventCount) 次工具 / MCP / 技能调用。",
+            key: "calls.source.help.ok"
+        )
+        guard status.source == .claude else { return summary }
+        return summary + L(
+            " This source contains Claude Code sessions only; Desktop and Science Gateway traffic is excluded.",
+            " 此来源仅包含 Claude Code 会话，不含 Desktop 与 Science 的 Gateway 流量。"
+        )
     }
 
     private var emptyState: some View {

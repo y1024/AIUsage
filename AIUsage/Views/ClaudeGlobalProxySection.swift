@@ -15,6 +15,7 @@ struct ClaudeGlobalProxySection: View {
     @State private var sonnetModel: String = ""
     @State private var haikuModel: String = ""
     @State private var selectedNodeId: String = ""
+    @State private var pendingSharedRouteNodeId: String?
 
     private static let claudeBrand = Color(red: 0.85, green: 0.45, blue: 0.25)
 
@@ -25,10 +26,12 @@ struct ClaudeGlobalProxySection: View {
     var body: some View {
         GlobalProxySectionScaffold(
             brand: Self.claudeBrand,
-            subtitle: L("One stable endpoint with three model tiers.", "一个固定入口，自动映射三档模型。"),
+            title: "Claude Gateway",
+            subtitle: gatewaySubtitle,
             isEnabled: isEnabled,
             isRunning: runtime.isRunning,
             isRuntimeOwnedByAnotherConsumer: isRuntimeOwnedByDesktop,
+            otherConsumerStatus: L("Desktop active", "Desktop 使用中"),
             isBusy: manager.isBusy,
             port: manager.config.port,
             bindHost: manager.config.effectiveClaudeDesktopEnabled
@@ -43,6 +46,29 @@ struct ClaudeGlobalProxySection: View {
             runningSummary: { runningSummary }
         )
         .onAppear(perform: syncFromConfig)
+        .confirmationDialog(
+            L("Switch the shared Claude route?", "切换 Claude 共享路由？"),
+            isPresented: Binding(
+                get: { pendingSharedRouteNodeId != nil },
+                set: { if !$0 { pendingSharedRouteNodeId = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(L("Switch Code + Desktop", "同时切换 Code + Desktop")) {
+                guard let nodeId = pendingSharedRouteNodeId else { return }
+                selectedNodeId = nodeId
+                pendingSharedRouteNodeId = nil
+                Task { await manager.switchActiveNode(to: nodeId) }
+            }
+            Button(L("Cancel", "取消"), role: .cancel) {
+                pendingSharedRouteNodeId = nil
+            }
+        } message: {
+            Text(L(
+                "Code and Desktop are attached to the same Gateway route. Both products will use the new node immediately.",
+                "Code 与 Desktop 正在使用同一条 Gateway 路由；切换后两端会立即改用新节点。"
+            ))
+        }
     }
 
     // MARK: - Active Node (header; hot-switch when enabled)
@@ -54,12 +80,16 @@ struct ClaudeGlobalProxySection: View {
                 brand: Self.claudeBrand,
                 title: currentNodeName,
                 systemImage: "bolt.fill",
-                isDisabled: manager.isBusy,
+                isDisabled: manager.isBusy || isRuntimeOwnedByDesktop,
                 items: nodes.map { GlobalProxyPickerItem(id: $0.id, name: $0.name) },
                 selectedId: nodeBinding.wrappedValue,
                 onSelect: { nodeBinding.wrappedValue = $0 }
             )
         }
+        .help(isRuntimeOwnedByDesktop
+              ? L("Desktop owns this route. Switch it from the Desktop tab, or attach Code to share it.",
+                  "当前路由由 Desktop 使用；请在 Desktop 页签切换，或接入 Code 后共享。")
+              : L("Choose the Claude Gateway route", "选择 Claude Gateway 路由"))
     }
 
     private var currentNodeName: String {
@@ -70,6 +100,14 @@ struct ClaudeGlobalProxySection: View {
     // MARK: - Running Summary (read-only chips when enabled)
 
     @ViewBuilder private var runningSummary: some View {
+        GlobalProxySummaryChip(
+            label: "Code",
+            value: manager.config.effectiveClaudeCodeEnabled ? L("Attached", "已接入") : L("Independent", "独立")
+        )
+        GlobalProxySummaryChip(
+            label: "Desktop",
+            value: manager.config.effectiveClaudeDesktopEnabled ? L("Attached", "已接入") : L("Off", "未接入")
+        )
         GlobalProxySummaryChip(label: L("Opus", "Opus"), value: manager.config.claudeOpus)
         GlobalProxySummaryChip(label: L("Sonnet", "Sonnet"), value: manager.config.claudeSonnet)
         GlobalProxySummaryChip(label: L("Haiku", "Haiku"), value: manager.config.claudeHaiku)
@@ -155,8 +193,13 @@ struct ClaudeGlobalProxySection: View {
         Binding(
             get: { manager.isRuntimeEnabled ? (manager.activeNodeId ?? resolvedSelection) : resolvedSelection },
             set: { newId in
-                selectedNodeId = newId
-                if manager.isRuntimeEnabled {
+                if isEnabled, manager.config.effectiveClaudeDesktopEnabled,
+                   newId != manager.activeNodeId {
+                    pendingSharedRouteNodeId = newId
+                } else {
+                    selectedNodeId = newId
+                }
+                if manager.isRuntimeEnabled && pendingSharedRouteNodeId == nil {
                     Task { await manager.switchActiveNode(to: newId) }
                 }
             }
@@ -167,10 +210,37 @@ struct ClaudeGlobalProxySection: View {
 
     /// 当前选定节点（兜底到首个可用节点），保证 Picker/启用按钮总有合法目标。
     private var resolvedSelection: String {
+        // When Desktop already owns the Gateway, attaching Code must join the
+        // live shared route. A stale local picker draft must never switch
+        // Desktop as a side effect of turning Code on.
+        if manager.isRuntimeEnabled,
+           let active = manager.activeNodeId,
+           nodes.contains(where: { $0.id == active }) {
+            return active
+        }
         if !selectedNodeId.isEmpty, nodes.contains(where: { $0.id == selectedNodeId }) {
             return selectedNodeId
         }
         return manager.activeNodeId ?? nodes.first?.id ?? ""
+    }
+
+    private var gatewaySubtitle: String {
+        switch (manager.config.effectiveClaudeCodeEnabled, manager.config.effectiveClaudeDesktopEnabled) {
+        case (true, true):
+            return L(
+                "Code and Desktop share one stable route; switching affects both.",
+                "Code 与 Desktop 共享一条固定路由；切换会同时影响两端。"
+            )
+        case (true, false):
+            return L("Claude Code is attached to a stable local route.", "Claude Code 已接入固定本机路由。")
+        case (false, true):
+            return L(
+                "Desktop is using the Gateway; Code can stay direct or join this route.",
+                "Desktop 正在使用 Gateway；Code 可保持直连，也可加入此路由。"
+            )
+        case (false, false):
+            return L("Attach Code to a stable route with hot node switching.", "让 Code 接入可热切换节点的固定路由。")
+        }
     }
 
     private func syncFromConfig() {

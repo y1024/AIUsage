@@ -65,8 +65,8 @@ struct DashboardView: View {
         var monthCost = 0.0
     }
 
-    /// 从本地 cost provider (Claude + Codex) 的 costSummary 中汇总全量 Token/费用。
-    /// 比代理统计更完整——涵盖直连和代理的全部 JSONL 记录。
+    /// 从本地 cost provider (Claude + Codex + OpenCode) 的 costSummary 中汇总 Token/费用。
+    /// 各 provider 保持自身账本边界：Claude 为 Gateway 归档，Codex 合并代理与非代理轨。
     private var overviewCostAggregates: OverviewCostAggregates {
         var agg = OverviewCostAggregates()
         for provider in costTrackingProviders {
@@ -103,7 +103,7 @@ struct DashboardView: View {
         costTrackingProviders.filter { $0.baseProviderId == "opencode" }
     }
 
-    /// 顶部活动热力图：按工具（Claude Code / Codex / OpenCode）拆块展示，
+    /// 顶部活动热力图：按账本家族（Claude / Codex / OpenCode）拆块展示，
     /// 各自带上自家品牌色，与卡片/图标/菜单栏口径一致。
     /// 数据源统一为本地 costSummary：Claude 来自代理归档，Codex 来自代理归档 + 非代理 token 日志，
     /// OpenCode 来自本地会话库归档。
@@ -120,7 +120,7 @@ struct DashboardView: View {
 
     private var heatmapSpecs: [HeatmapSpec] {
         [
-            HeatmapSpec(id: "claude", providers: claudeLocalProviders, label: "Claude Code", asset: "claude", accent: Color(red: 0.85, green: 0.47, blue: 0.26)),
+            HeatmapSpec(id: "claude", providers: claudeLocalProviders, label: "Claude", asset: "claude", accent: Color(red: 0.85, green: 0.47, blue: 0.26)),
             HeatmapSpec(id: "codex-cost", providers: codexLocalProviders, label: "Codex", asset: "codex", accent: .indigo),
             HeatmapSpec(id: "opencode", providers: opencodeLocalProviders, label: "OpenCode", asset: "opencode", accent: Color(red: 0.18, green: 0.83, blue: 0.75))
         ].filter { !$0.providers.isEmpty }
