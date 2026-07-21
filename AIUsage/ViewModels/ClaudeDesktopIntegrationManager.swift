@@ -163,6 +163,7 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
         }
         let catalog = ClaudeDesktopProfileStore.catalog(
             for: node,
+            mode: gateway.config.effectiveClaudeDesktopCatalogMode,
             supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id)
         )
         guard !catalog.isEmpty else {
@@ -326,6 +327,7 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
         if let node = ProxyViewModel.shared.configurations.first(where: { $0.id == gateway.activeNodeId }) {
             configuredModels = ClaudeDesktopProfileStore.catalog(
                 for: node,
+                mode: gateway.config.effectiveClaudeDesktopCatalogMode,
                 supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id)
             )
             activeNodeName = node.name
@@ -339,6 +341,7 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
               let node = ProxyViewModel.shared.configurations.first(where: { $0.id == nodeID }) else { return }
         let catalog = ClaudeDesktopProfileStore.catalog(
             for: node,
+            mode: gateway.config.effectiveClaudeDesktopCatalogMode,
             supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id)
         )
         guard !catalog.isEmpty else {
@@ -348,11 +351,10 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
             ))
             return
         }
-        // Node-specific upstream model names are intentionally absent from
-        // Desktop's public profile. A normal node switch therefore changes
-        // only Gateway routing and does not depend on Desktop reloading a
-        // config file. Restart Desktop only when visible catalog capabilities
-        // (currently the 1M flag) actually changed while the app is running.
+        // Smart mode keeps the public IDs/display names stable, so a normal
+        // node switch remains Gateway-only. Full-catalog mode deliberately
+        // changes the visible profile surface and therefore reloads a running
+        // Desktop after the Gateway has already switched upstream.
         let visibleCatalogChanged = !configuredModels.isEmpty
             && profileSurface(of: configuredModels) != profileSurface(of: catalog)
         let shouldReloadDesktop = visibleCatalogChanged && ClaudeDesktopAppController.isRunning

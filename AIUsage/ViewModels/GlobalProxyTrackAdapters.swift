@@ -168,12 +168,11 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
     func switchPayload(config: GlobalProxyConfig, nodeId: String) -> [String: Any]? {
         guard let node = node(nodeId) else { return nil }
         let passthrough = isPassthrough(node)
-        let desktopCatalog = ClaudeDesktopProfileStore.catalog(
+        let desktopProjection = ClaudeDesktopProfileStore.gatewayProjection(
             for: node,
+            mode: config.effectiveClaudeDesktopCatalogMode,
             supports1M: config.claudeDesktopSupports1MModels(for: node.id)
         )
-        let desktopDefaultRoute = desktopCatalog.first(where: { $0.id == ClaudeDesktopProfileStore.sonnetRouteID })?.id
-            ?? desktopCatalog.first?.id
         var payload: [String: Any] = [
             "nodeId": node.id,
             "mode": passthrough ? "passthrough" : "convert",
@@ -185,12 +184,15 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
             "smallModel": node.modelMapping.smallModel.name,
             "maxOutputTokens": node.maxOutputTokens,
             "enableModelAliasMapping": passthrough,
-            "availableModels": desktopCatalog.map(\.id),
-            "defaultModel": desktopDefaultRoute ?? ClaudeDesktopProfileStore.sonnetRouteID,
+            "availableModels": desktopProjection.availableModels,
+            "defaultModel": desktopProjection.defaultModel
+                ?? (config.effectiveClaudeDesktopCatalogMode == .smartRoutes
+                    ? ClaudeDesktopProfileStore.sonnetRouteID
+                    : node.defaultModel),
         ]
         if config.effectiveClaudeDesktopEnabled {
             payload["catalogRouteStyle"] = "desktop"
-            payload["catalogSupports1M"] = desktopCatalog.filter(\.supports1M).map(\.id)
+            payload["catalogSupports1M"] = desktopProjection.supports1MModels
         }
         return payload
     }

@@ -172,6 +172,7 @@ struct ClaudeDesktopIntegrationView: View {
     @State private var portSaveMessage: String?
     @State private var portSaveError: String?
     @State private var pendingSharedRouteNodeID: String?
+    @State private var pendingCatalogMode: ClaudeDesktopCatalogMode?
     @FocusState private var isPortFieldFocused: Bool
 
     private var nodes: [GlobalProxyNodeRef] { gateway.availableNodes() }
@@ -187,11 +188,16 @@ struct ClaudeDesktopIntegrationView: View {
         return proxyVM.configurations.first(where: { $0.id == id })
     }
 
+    private var catalogMode: ClaudeDesktopCatalogMode {
+        gateway.config.effectiveClaudeDesktopCatalogMode
+    }
+
     private var previewModels: [ClaudeDesktopCatalogEntry] {
         if manager.isConfigured, !manager.configuredModels.isEmpty { return manager.configuredModels }
         guard let selectedNode else { return [] }
         return ClaudeDesktopProfileStore.catalog(
             for: selectedNode,
+            mode: catalogMode,
             supports1M: gateway.config.claudeDesktopSupports1MModels(for: selectedNode.id)
         )
     }
@@ -241,6 +247,25 @@ struct ClaudeDesktopIntegrationView: View {
         } message: {
             Text(sharedRouteSwitchMessage)
         }
+        .confirmationDialog(
+            L("Change the Desktop model mode?", "切换 Desktop 模型模式？"),
+            isPresented: Binding(
+                get: { pendingCatalogMode != nil },
+                set: { if !$0 { pendingCatalogMode = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(catalogModeConfirmationTitle) {
+                guard let mode = pendingCatalogMode else { return }
+                pendingCatalogMode = nil
+                Task { await gateway.updateClaudeDesktopCatalogMode(mode) }
+            }
+            Button(L("Cancel", "取消"), role: .cancel) {
+                pendingCatalogMode = nil
+            }
+        } message: {
+            Text(catalogModeConfirmationMessage)
+        }
         .sheet(isPresented: $showModelManager) {
             if let selectedNode {
                 ClaudeDesktopModelManagerSheet(node: selectedNode)
@@ -272,8 +297,8 @@ struct ClaudeDesktopIntegrationView: View {
                             .background(Capsule().fill(Color.secondary.opacity(0.10)))
                     }
                     Text(L(
-                        "Stable Opus, Sonnet and Haiku routes switch upstream nodes instantly inside the Gateway.",
-                        "Desktop 使用固定的 Opus、Sonnet、Haiku 路由；切换节点只在 Gateway 内即时生效。"
+                        "Choose stable tier routes for instant switching, or expose every model from the selected node.",
+                        "可用固定三档路由无感切换，也可显示当前节点的全部真实模型。"
                     ))
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -443,8 +468,15 @@ struct ClaudeDesktopIntegrationView: View {
 
     private var modelCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(L("Desktop Gateway routes", "Desktop Gateway 路由"))
-                .font(.headline)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L("What Desktop shows", "Desktop 中显示什么"))
+                    .font(.headline)
+                catalogModeSelector
+                Text(catalogModeDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if previewModels.isEmpty {
                 Text(L("Choose a node with a configured Model Library.", "请选择已配置模型库的节点。"))
@@ -477,14 +509,121 @@ struct ClaudeDesktopIntegrationView: View {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
     }
 
+    private var catalogModeSelector: some View {
+        HStack(spacing: 8) {
+            catalogModeButton(
+                .smartRoutes,
+                title: L("Hot-switch tiers", "热切换三档"),
+                subtitle: "Opus · Sonnet · Haiku",
+                symbol: "arrow.triangle.2.circlepath"
+            )
+            catalogModeButton(
+                .fullNodeCatalog,
+                title: L("All node models", "节点全部模型"),
+                subtitle: L("Real model names", "真实模型名称"),
+                symbol: "square.stack.3d.up"
+            )
+        }
+    }
+
+    private func catalogModeButton(
+        _ mode: ClaudeDesktopCatalogMode,
+        title: String,
+        subtitle: String,
+        symbol: String
+    ) -> some View {
+        let selected = catalogMode == mode
+        return Button {
+            requestCatalogMode(mode)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(selected ? Self.brand : Color.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(selected ? Self.brand.opacity(0.12) : Color.primary.opacity(0.045)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.callout.weight(.semibold))
+                    Text(subtitle).font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? Self.brand : Color.secondary.opacity(0.55))
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selected ? Self.brand.opacity(0.065) : Color.primary.opacity(0.025))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(selected ? Self.brand.opacity(0.35) : Color.primary.opacity(0.07), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(selected || gateway.isBusy || manager.isBusy)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func requestCatalogMode(_ mode: ClaudeDesktopCatalogMode) {
+        guard mode != catalogMode else { return }
+        if manager.isConfigured {
+            pendingCatalogMode = mode
+        } else {
+            Task { await gateway.updateClaudeDesktopCatalogMode(mode) }
+        }
+    }
+
+    private var catalogModeDetail: String {
+        switch catalogMode {
+        case .smartRoutes:
+            return L(
+                "Desktop always sees three stable routes. Switching the shared node only changes their Gateway targets, so Desktop keeps running.",
+                "Desktop 始终看到三条固定路由；切换共享节点只改变 Gateway 内的实际目标，无需重启 Desktop。"
+            )
+        case .fullNodeCatalog:
+            return L(
+                "Desktop sees every model in the selected node with its real name. A node or catalog change reloads a running Desktop so the picker stays accurate.",
+                "Desktop 会显示所选节点的全部真实模型；节点或模型目录变化时会重载正在运行的 Desktop，保证列表准确。"
+            )
+        }
+    }
+
+    private var catalogModeConfirmationTitle: String {
+        pendingCatalogMode == .smartRoutes
+            ? L("Use hot-switch tiers", "使用热切换三档")
+            : L("Show all node models", "显示节点全部模型")
+    }
+
+    private var catalogModeConfirmationMessage: String {
+        pendingCatalogMode == .smartRoutes
+            ? L(
+                "The Desktop picker will change to Opus, Sonnet and Haiku. AIUsage will reload Desktop once; later node switches stay live.",
+                "Desktop 模型列表将改为 Opus、Sonnet、Haiku。AIUsage 会重载一次 Desktop；之后切节点可保持无感。"
+            )
+            : L(
+                "The Desktop picker will change to the selected node's real models. AIUsage will reload Desktop now and whenever that visible catalog changes.",
+                "Desktop 模型列表将改为当前节点的真实模型。AIUsage 现在会重载 Desktop，以后可见目录变化时也会自动重载。"
+            )
+    }
+
     private var displayNamePreview: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 7) {
                 Image(systemName: "textformat")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Self.brand)
-                Text(L("Stable route → active model", "固定路由 → 当前模型"))
-                    .font(.caption.weight(.semibold))
+                Group {
+                    if catalogMode == .smartRoutes {
+                        Text(L("Stable route → active model", "固定路由 → 当前模型"))
+                    } else {
+                        Text(L("Desktop model → selected node", "Desktop 模型 → 当前节点"))
+                    }
+                }
+                .font(.caption.weight(.semibold))
                 Spacer()
                 if previewModels.count > 3 {
                     Text(L(
@@ -506,11 +645,13 @@ struct ClaudeDesktopIntegrationView: View {
                             Text(model.displayName)
                                 .font(.callout.weight(.medium))
                                 .lineLimit(1)
-                            Text("→ \(model.upstreamModel)")
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .textSelection(.enabled)
+                            if model.displayName != model.upstreamModel {
+                                Text("→ \(model.upstreamModel)")
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .textSelection(.enabled)
+                            }
                         }
                         Spacer(minLength: 0)
                     }
@@ -570,8 +711,8 @@ struct ClaudeDesktopIntegrationView: View {
         .opacity(selectedNode == nil ? 0.55 : 1)
         .onHover { isModelManagerHovered = $0 }
         .accessibilityHint(L(
-            "Shows the stable Desktop routes and their current upstream mappings.",
-            "查看固定 Desktop 路由及其当前上游映射。"
+            "Shows the current Desktop catalog and model capabilities.",
+            "查看当前 Desktop 模型目录与模型能力。"
         ))
     }
 
@@ -885,7 +1026,11 @@ private struct ClaudeDesktopModelManagerSheet: View {
     @State private var enabled1M: Set<String> = []
 
     private var catalog: [ClaudeDesktopCatalogEntry] {
-        ClaudeDesktopProfileStore.catalog(for: node, supports1M: enabled1M)
+        ClaudeDesktopProfileStore.catalog(
+            for: node,
+            mode: gateway.config.effectiveClaudeDesktopCatalogMode,
+            supports1M: enabled1M
+        )
     }
 
     private var filteredCatalog: [ClaudeDesktopCatalogEntry] {
@@ -925,7 +1070,9 @@ private struct ClaudeDesktopModelManagerSheet: View {
                         .fill(ClaudeDesktopIntegrationView.brand.opacity(0.12))
                 )
             VStack(alignment: .leading, spacing: 4) {
-                Text(L("Desktop Gateway routes", "Desktop Gateway 路由"))
+                Text(gateway.config.effectiveClaudeDesktopCatalogMode == .smartRoutes
+                    ? L("Desktop hot-switch tiers", "Desktop 热切换三档")
+                    : L("All node models", "节点全部模型"))
                     .font(.title3.weight(.bold))
                 Text(node.name)
                     .font(.callout)
@@ -941,8 +1088,12 @@ private struct ClaudeDesktopModelManagerSheet: View {
     private var searchBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(L(
-                "Claude Desktop keeps these three route IDs. AIUsage remaps each route to the selected node inside the Gateway, so ordinary node switches do not require a Desktop restart.",
-                "Claude Desktop 始终使用这三个固定路由；AIUsage 在 Gateway 内把它们映射到当前节点，普通切换无需重启 Desktop。"
+                gateway.config.effectiveClaudeDesktopCatalogMode == .smartRoutes
+                    ? "Claude Desktop keeps three stable route IDs. AIUsage remaps them inside the Gateway, so ordinary node switches do not require a Desktop restart."
+                    : "Claude Desktop publishes every model from this node with its real display name. A visible catalog change reloads Desktop automatically.",
+                gateway.config.effectiveClaudeDesktopCatalogMode == .smartRoutes
+                    ? "Claude Desktop 始终使用三条固定路由；AIUsage 在 Gateway 内完成映射，普通切换无需重启 Desktop。"
+                    : "Claude Desktop 会发布此节点的全部模型并显示真实名称；可见目录变化时会自动重载 Desktop。"
             ))
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -969,11 +1120,13 @@ private struct ClaudeDesktopModelManagerSheet: View {
                             Text(model.displayName)
                                 .font(.callout.weight(.semibold))
                                 .lineLimit(1)
-                            Text(L("Current target · \(model.upstreamModel)", "当前目标 · \(model.upstreamModel)"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .textSelection(.enabled)
+                            if model.displayName != model.upstreamModel {
+                                Text(L("Current target · \(model.upstreamModel)", "当前目标 · \(model.upstreamModel)"))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .textSelection(.enabled)
+                            }
                             Text("Model ID · \(model.id)")
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.secondary)
@@ -1033,8 +1186,12 @@ private struct ClaudeDesktopModelManagerSheet: View {
             Image(systemName: "info.circle")
                 .foregroundStyle(.secondary)
             Text(L(
-                "Enable 1M only when the current upstream really supports it. Changing visible capability metadata reloads a running Desktop; switching only the upstream route does not.",
-                "仅在当前上游确实支持 1M 时开启。可见能力变化会重新加载正在运行的 Desktop；仅切换上游路由不会。"
+                gateway.config.effectiveClaudeDesktopCatalogMode == .smartRoutes
+                    ? "Enable 1M only when the current target really supports it. Capability changes reload Desktop; ordinary node switches do not."
+                    : "Enable 1M only when the model really supports it. Model or capability changes reload a running Desktop so its picker stays current.",
+                gateway.config.effectiveClaudeDesktopCatalogMode == .smartRoutes
+                    ? "仅在当前目标确实支持 1M 时开启。能力变化会重载 Desktop；普通切节点不会。"
+                    : "仅在模型确实支持 1M 时开启。模型或能力变化会重载正在运行的 Desktop，保证列表保持最新。"
             ))
             .font(.caption)
             .foregroundStyle(.secondary)

@@ -149,6 +149,38 @@ final class GlobalProxyManager: ObservableObject {
         await reapplyActiveUpstream()
     }
 
+    /// Changes the public model surface exposed to Claude Desktop while
+    /// preserving the shared Gateway endpoint and active node. The subsequent
+    /// upstream reapply drives the same profile refresh path as a node switch:
+    /// smart routes normally remain live, while a changed full catalog reloads
+    /// a running Desktop so its picker cannot become stale.
+    func updateClaudeDesktopCatalogMode(_ mode: ClaudeDesktopCatalogMode) async {
+        guard track == .claude,
+              !isBusy,
+              config.effectiveClaudeDesktopCatalogMode != mode else { return }
+        let previousMode = config.claudeDesktopCatalogMode
+        config.claudeDesktopCatalogMode = mode
+        guard persist() else {
+            config.claudeDesktopCatalogMode = previousMode
+            operationError = AppSettings.shared.t(
+                "Could not save the Desktop model mode.",
+                "无法保存 Desktop 模型模式。"
+            )
+            return
+        }
+
+        guard config.effectiveClaudeDesktopEnabled,
+              config.activeNodeId != nil,
+              runtime.isProcessRunning else { return }
+        await reapplyActiveUpstream()
+        if let failure = operationError {
+            config.claudeDesktopCatalogMode = previousMode
+            _ = persist()
+            await reapplyActiveUpstream()
+            operationError = failure
+        }
+    }
+
     // MARK: - Enable / Disable / Switch
 
     func enable(activeNodeId nodeId: String) async {
@@ -605,21 +637,19 @@ final class GlobalProxyManager: ObservableObject {
         guard let node = ProxyViewModel.shared.configurations.first(where: {
             $0.id == nodeId && ProxyNodeFamily.claude.contains($0.nodeType)
         }) else { return env }
-        let catalog = ClaudeDesktopProfileStore.catalog(
+        let projection = ClaudeDesktopProfileStore.gatewayProjection(
             for: node,
+            mode: config.effectiveClaudeDesktopCatalogMode,
             supports1M: config.claudeDesktopSupports1MModels(for: node.id)
         )
-        let publicRoutes = catalog.map(\.id)
-        if let data = try? JSONEncoder().encode(publicRoutes),
+        if let data = try? JSONEncoder().encode(projection.availableModels),
            let json = String(data: data, encoding: .utf8) {
             env["AIUSAGE_CLAUDE_MODELS_JSON"] = json
         }
-        if let defaultRoute = catalog.first(where: { $0.id == ClaudeDesktopProfileStore.sonnetRouteID })?.id
-            ?? catalog.first?.id {
-            env["AIUSAGE_CLAUDE_DEFAULT_MODEL"] = defaultRoute
+        if let defaultModel = projection.defaultModel {
+            env["AIUSAGE_CLAUDE_DEFAULT_MODEL"] = defaultModel
         }
-        let supports1M = catalog.filter(\.supports1M).map(\.id)
-        if let data = try? JSONEncoder().encode(supports1M),
+        if let data = try? JSONEncoder().encode(projection.supports1MModels),
            let json = String(data: data, encoding: .utf8) {
             env["AIUSAGE_CLAUDE_SUPPORTS_1M_JSON"] = json
         }

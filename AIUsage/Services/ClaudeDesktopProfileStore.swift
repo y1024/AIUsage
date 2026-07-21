@@ -14,6 +14,15 @@ struct ClaudeDesktopCatalogEntry: Equatable, Identifiable {
     let supports1M: Bool
 }
 
+/// The exact model values passed into QuotaServer. Smart routes are already
+/// public route IDs; a full catalog passes real upstream IDs so the backend can
+/// derive the same safe Desktop aliases as the profile store.
+struct ClaudeDesktopGatewayCatalogProjection {
+    let availableModels: [String]
+    let defaultModel: String?
+    let supports1MModels: [String]
+}
+
 struct ClaudeDesktopInstallation: Equatable {
     let appURL: URL?
     let version: String?
@@ -164,25 +173,78 @@ final class ClaudeDesktopProfileStore {
     #if canImport(QuotaBackend)
     static func catalog(
         for node: ProxyConfiguration,
+        mode: ClaudeDesktopCatalogMode = .fullNodeCatalog,
         supports1M: Set<String> = []
     ) -> [ClaudeDesktopCatalogEntry] {
-        // Desktop keeps these public identities for the lifetime of the
-        // integration. Only the Gateway's big/middle/small projection changes
-        // on a node switch, so existing Desktop sessions never depend on a
-        // node-specific model ID or a profile-file hot reload.
-        let routes: [(id: String, upstream: String, label: String)] = [
-            (Self.opusRouteID, node.modelMapping.bigModel.name, "AIUsage Opus"),
-            (Self.sonnetRouteID, node.modelMapping.middleModel.name, "AIUsage Sonnet"),
-            (Self.haikuRouteID, node.modelMapping.smallModel.name, "AIUsage Haiku"),
-        ]
-        return routes.compactMap { route in
-            let upstream = route.upstream.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !upstream.isEmpty else { return nil }
-            return ClaudeDesktopCatalogEntry(
-                id: route.id,
-                upstreamModel: upstream,
-                displayName: route.label,
-                supports1M: supports1M.contains(upstream)
+        switch mode {
+        case .smartRoutes:
+            // Desktop keeps these identities for the lifetime of the
+            // integration. Only the Gateway tier projection changes.
+            let routes: [(id: String, upstream: String, label: String)] = [
+                (Self.opusRouteID, node.modelMapping.bigModel.name, "AIUsage Opus"),
+                (Self.sonnetRouteID, node.modelMapping.middleModel.name, "AIUsage Sonnet"),
+                (Self.haikuRouteID, node.modelMapping.smallModel.name, "AIUsage Haiku"),
+            ]
+            return routes.compactMap { route in
+                let upstream = route.upstream.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !upstream.isEmpty else { return nil }
+                return ClaudeDesktopCatalogEntry(
+                    id: route.id,
+                    upstreamModel: upstream,
+                    displayName: route.label,
+                    supports1M: supports1M.contains(upstream)
+                )
+            }
+
+        case .fullNodeCatalog:
+            var upstreamModels = node.modelLibrary.map(\.name)
+            if upstreamModels.isEmpty {
+                upstreamModels = [
+                    node.defaultModel,
+                    node.modelMapping.bigModel.name,
+                    node.modelMapping.middleModel.name,
+                    node.modelMapping.smallModel.name,
+                ]
+            }
+            let protocolCatalog = ScienceModelProtocolAdapter(
+                upstreamModels: upstreamModels,
+                requestedDefault: node.defaultModel,
+                routeStyle: .desktop,
+                supports1MUpstreamModels: supports1M
+            )
+            return protocolCatalog.models.map {
+                ClaudeDesktopCatalogEntry(
+                    id: $0.id,
+                    upstreamModel: $0.upstreamModel,
+                    displayName: $0.displayName,
+                    supports1M: $0.supports1M
+                )
+            }
+        }
+    }
+
+    static func gatewayProjection(
+        for node: ProxyConfiguration,
+        mode: ClaudeDesktopCatalogMode,
+        supports1M: Set<String> = []
+    ) -> ClaudeDesktopGatewayCatalogProjection {
+        let entries = catalog(for: node, mode: mode, supports1M: supports1M)
+        switch mode {
+        case .smartRoutes:
+            return ClaudeDesktopGatewayCatalogProjection(
+                availableModels: entries.map(\.id),
+                defaultModel: entries.first(where: {
+                    $0.id == Self.sonnetRouteID
+                })?.id ?? entries.first?.id,
+                supports1MModels: entries.filter(\.supports1M).map(\.id)
+            )
+        case .fullNodeCatalog:
+            return ClaudeDesktopGatewayCatalogProjection(
+                availableModels: entries.map(\.upstreamModel),
+                defaultModel: entries.first(where: {
+                    $0.upstreamModel == node.defaultModel
+                })?.upstreamModel ?? entries.first?.upstreamModel,
+                supports1MModels: entries.filter(\.supports1M).map(\.upstreamModel)
             )
         }
     }

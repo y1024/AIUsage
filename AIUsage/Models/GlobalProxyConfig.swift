@@ -23,6 +23,17 @@ enum ClaudeGatewayConsumer: String, Codable, CaseIterable, Hashable {
     case desktop
 }
 
+/// The model surface published to Claude Desktop. This is independent from
+/// whether Claude Code is attached to the shared Gateway.
+enum ClaudeDesktopCatalogMode: String, Codable, CaseIterable, Identifiable {
+    /// Fixed Opus/Sonnet/Haiku identities; node switches only remap tiers.
+    case smartRoutes
+    /// Every model in the selected node, with its real display name.
+    case fullNodeCatalog
+
+    var id: String { rawValue }
+}
+
 // MARK: - Global Proxy Config
 // 全局统一代理：给某条轨一个「固定入口」——固定端口 + 固定 client key + 固定虚拟模型名，
 // CLI 一次性指向它即可。切换激活节点只在常驻代理进程内热替换上游（base_url/key/model），
@@ -68,6 +79,8 @@ struct GlobalProxyConfig: Codable, Equatable {
     var claudeCodeEnabled: Bool? = nil
     /// Claude Desktop 官方 3P profile consumer；与 Code 配置/鉴权独立。
     var claudeDesktopEnabled: Bool? = nil
+    /// 缺省保持 0.15 的完整节点目录行为，避免升级后静默隐藏模型。
+    var claudeDesktopCatalogMode: ClaudeDesktopCatalogMode? = nil
     /// Claude Desktop 专用 HTTPS listener，默认 14403。
     var claudeDesktopHTTPSPort: Int? = nil
     /// 只供本地 Desktop profile 使用的独立随机 key（配置文件本身为 0600）。
@@ -213,6 +226,7 @@ struct GlobalProxyConfig: Codable, Equatable {
             claudeCodeEnabled = isEnabled
         }
         claudeDesktopEnabled = claudeDesktopEnabled ?? false
+        claudeDesktopCatalogMode = claudeDesktopCatalogMode ?? .fullNodeCatalog
 
         let requestedPort = claudeDesktopHTTPSPort ?? Self.defaultClaudeDesktopHTTPSPort
         let validPort = (1_024...65_535).contains(requestedPort)
@@ -240,6 +254,9 @@ struct GlobalProxyConfig: Codable, Equatable {
 
     var effectiveClaudeCodeEnabled: Bool { claudeCodeEnabled ?? (isEnabled && claudeDesktopEnabled != true) }
     var effectiveClaudeDesktopEnabled: Bool { claudeDesktopEnabled ?? false }
+    var effectiveClaudeDesktopCatalogMode: ClaudeDesktopCatalogMode {
+        claudeDesktopCatalogMode ?? .fullNodeCatalog
+    }
     var hasClaudeConsumers: Bool { effectiveClaudeCodeEnabled || effectiveClaudeDesktopEnabled }
     var claudeConsumers: Set<ClaudeGatewayConsumer> {
         var result = Set<ClaudeGatewayConsumer>()
