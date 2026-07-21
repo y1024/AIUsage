@@ -414,8 +414,6 @@ struct ProxyConfigEditorView: View {
                 }
                 .toggleStyle(.switch)
 
-                httpsToggle
-
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle.fill").foregroundStyle(.teal)
                     Text(L("ANTHROPIC_BASE_URL will point to the local proxy. Requests are forwarded to the upstream API as-is.",
@@ -468,7 +466,6 @@ struct ProxyConfigEditorView: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
             }
 
-            httpsToggle
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
@@ -566,52 +563,6 @@ struct ProxyConfigEditorView: View {
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
-    }
-
-    // MARK: - HTTPS Toggle
-
-    private var httpsToggle: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Divider()
-
-            Toggle(isOn: Binding(
-                get: { profile.metadata.proxy.enableHTTPS ?? false },
-                set: { profile.metadata.proxy.enableHTTPS = $0 }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("HTTPS")
-                        .font(.subheadline.weight(.semibold))
-                    Text(L("Enable HTTPS listener with a self-signed certificate. Clients that require HTTPS can connect via the HTTPS port.",
-                           "启用 HTTPS 监听（自签名证书）。要求 HTTPS 的客户端可通过 HTTPS 端口连接。"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.switch)
-
-            if profile.metadata.proxy.enableHTTPS ?? false {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(L("HTTPS Port", "HTTPS 端口")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        TextField("\(profile.metadata.proxy.port + 1)",
-                                  value: Binding(
-                                    get: { profile.metadata.proxy.httpsPort ?? (profile.metadata.proxy.port + 1) },
-                                    set: { profile.metadata.proxy.httpsPort = $0 }
-                                  ),
-                                  format: .number.grouping(.never))
-                            .textFieldStyle(.roundedBorder).frame(width: 100)
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(L("HTTPS URL", "HTTPS 地址")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                        let httpsPort = profile.metadata.proxy.httpsPort ?? (profile.metadata.proxy.port + 1)
-                        Text(verbatim: "https://\(profile.metadata.proxy.host):\(httpsPort)")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-        }
     }
 
     private func modelSlotRow(label: String, binding: Binding<String>, placeholder: String) -> some View {
@@ -727,6 +678,11 @@ struct ProxyConfigEditorView: View {
         }
         profile.metadata.proxy.expectedClientKey = profile.metadata.proxy.expectedClientKey
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Claude Desktop now owns one stable HTTPS gateway endpoint. Per-node
+        // HTTPS remains decodable for old profiles, but editing a node migrates
+        // it to the simpler HTTP-only local-node contract used by Code.
+        profile.metadata.proxy.enableHTTPS = false
+        profile.metadata.proxy.httpsPort = nil
         profile.metadata.proxy.syncSlotPricingFromLibrary()
         // 链接节点：与主配置比对，标记本次编辑产生的本地覆盖（未链接则清空）。
         profile = APIProviderDistributor.shared.stampOverrides(profile)

@@ -172,8 +172,8 @@ struct ContentView: View {
                     CallAnalyticsView()
                         .navigationTitle(L("Call Analytics", "调用分析"))
                 case .proxyManagement:
-                    ProxyManagementView()
-                        .navigationTitle(L("Claude Code Proxy", "Claude Code 代理"))
+                    ClaudeHubView()
+                        .navigationTitle("Claude")
                 case .codexProxyManagement:
                     CodexProxyManagementView()
                         .navigationTitle(L("Codex Proxy", "Codex 代理"))
@@ -181,8 +181,8 @@ struct ContentView: View {
                     OpenCodeManagementView()
                         .navigationTitle(L("OpenCode Proxy", "OpenCode 代理"))
                 case .scienceProxyManagement:
-                    ScienceProxyManagementView()
-                        .navigationTitle(L("Claude Science Proxy", "Claude Science 代理"))
+                    ClaudeHubView(initialTab: .science)
+                        .navigationTitle("Claude")
                 case .inbox:
                     InboxView()
                         .navigationTitle(L("Inbox", "消息"))

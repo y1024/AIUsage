@@ -14,14 +14,14 @@ extension QuotaHTTPServer {
             return
         }
 
-        if let expectedKey = config.expectedClientKey, !expectedKey.isEmpty {
-            let clientKey = request.headers["x-api-key"] ?? request.headers["authorization"]?.replacingOccurrences(of: "Bearer ", with: "")
-            if clientKey != expectedKey {
-                let resp = claudeErrorResponse(type: "authentication_error", message: "Invalid API key", status: 401, headers: [:])
-                await sendResponse(connection, response: resp)
-                connection.cancel()
-                return
-            }
+        guard config.authenticatedSurface(
+            headers: request.headers,
+            hintedSurface: request.clientSurface
+        ) != nil else {
+            let resp = claudeErrorResponse(type: "authentication_error", message: "Invalid API key", status: 401, headers: [:])
+            await sendResponse(connection, response: resp)
+            connection.cancel()
+            return
         }
 
         let startTime = Date()
@@ -128,9 +128,23 @@ extension QuotaHTTPServer {
         }
 
         if isStreaming {
-            await handlePassthroughStreaming(connection, upstreamRequest: upstreamReq, requestModel: requestModel, upstreamModel: upstreamModel, startTime: startTime)
+            await handlePassthroughStreaming(
+                connection,
+                upstreamRequest: upstreamReq,
+                requestModel: requestModel,
+                upstreamModel: upstreamModel,
+                clientSurface: resolvedClaudeSurface(for: request),
+                startTime: startTime
+            )
         } else {
-            await handlePassthroughNonStreaming(connection, upstreamRequest: upstreamReq, requestModel: requestModel, upstreamModel: upstreamModel, startTime: startTime)
+            await handlePassthroughNonStreaming(
+                connection,
+                upstreamRequest: upstreamReq,
+                requestModel: requestModel,
+                upstreamModel: upstreamModel,
+                clientSurface: resolvedClaudeSurface(for: request),
+                startTime: startTime
+            )
         }
     }
 
@@ -138,7 +152,14 @@ extension QuotaHTTPServer {
         "content-length", "transfer-encoding", "content-encoding",
     ]
 
-    func handlePassthroughNonStreaming(_ connection: NWConnection, upstreamRequest: URLRequest, requestModel: String, upstreamModel: String, startTime: Date) async {
+    func handlePassthroughNonStreaming(
+        _ connection: NWConnection,
+        upstreamRequest: URLRequest,
+        requestModel: String,
+        upstreamModel: String,
+        clientSurface: ClaudeClientSurface,
+        startTime: Date
+    ) async {
         do {
             let (data, response) = try await URLSession.shared.data(for: upstreamRequest)
             let httpResp = response as? HTTPURLResponse
@@ -207,7 +228,8 @@ extension QuotaHTTPServer {
                 success: isSuccess,
                 errorType: errorType,
                 errorMessage: errorMessage,
-                statusCode: !isSuccess ? statusCode : nil
+                statusCode: !isSuccess ? statusCode : nil,
+                clientSurface: clientSurface
             )
 
             let resp = HTTPResponse(status: statusCode, headers: respHeaders, bodyData: data)
@@ -223,7 +245,8 @@ extension QuotaHTTPServer {
                 success: false,
                 errorType: "network_error",
                 errorMessage: error.localizedDescription,
-                statusCode: nil
+                statusCode: nil,
+                clientSurface: clientSurface
             )
             let escaped = escapeJSON("Upstream error: \(error.localizedDescription)")
             let resp = HTTPResponse(status: 502, headers: ["Content-Type": "application/json"], body: "{\"error\":\(escaped)}")
@@ -236,7 +259,14 @@ extension QuotaHTTPServer {
         "content-length", "transfer-encoding", "connection", "content-encoding",
     ]
 
-    func handlePassthroughStreaming(_ connection: NWConnection, upstreamRequest: URLRequest, requestModel: String, upstreamModel: String, startTime: Date) async {
+    func handlePassthroughStreaming(
+        _ connection: NWConnection,
+        upstreamRequest: URLRequest,
+        requestModel: String,
+        upstreamModel: String,
+        clientSurface: ClaudeClientSurface,
+        startTime: Date
+    ) async {
         let streamer = StreamingResponse(connection: connection)
         var firstTokenAt: Date?
 
@@ -368,7 +398,8 @@ extension QuotaHTTPServer {
                 success: isSuccess,
                 errorType: !isSuccess ? passthroughErrorType(forHTTPStatus: statusCode) : nil,
                 errorMessage: !isSuccess ? "HTTP \(statusCode)" : nil,
-                statusCode: !isSuccess ? statusCode : nil
+                statusCode: !isSuccess ? statusCode : nil,
+                clientSurface: clientSurface
             )
 
             await streamer.finish()
@@ -384,7 +415,8 @@ extension QuotaHTTPServer {
                 success: false,
                 errorType: "network_error",
                 errorMessage: error.localizedDescription,
-                statusCode: nil
+                statusCode: nil,
+                clientSurface: clientSurface
             )
             let escaped = escapeJSON(error.localizedDescription)
             await streamer.sendChunk("event: error\ndata: {\"error\":\(escaped)}\n\n")
@@ -441,7 +473,8 @@ extension QuotaHTTPServer {
         success: Bool,
         errorType: String? = nil,
         errorMessage: String? = nil,
-        statusCode: Int? = nil
+        statusCode: Int? = nil,
+        clientSurface: ClaudeClientSurface = .unknown
     ) {
         let inputTokens = usage["input_tokens"] as? Int ?? 0
         let outputTokens = usage["output_tokens"] as? Int ?? 0
@@ -459,6 +492,7 @@ extension QuotaHTTPServer {
             "cache_creation_tokens": cacheCreation,
             "cache_read_tokens": cacheRead,
             "cache_tokens": cacheCreation + cacheRead,
+            "client_surface": clientSurface.rawValue,
         ]
         if let firstTokenMs { log["first_token_ms"] = firstTokenMs }
         if let errorType { log["error_type"] = errorType }

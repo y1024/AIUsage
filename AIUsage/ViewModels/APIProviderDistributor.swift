@@ -32,6 +32,22 @@ final class APIProviderDistributor {
         return result
     }
 
+    /// Used by the CPA credential repair path to detect a partially completed
+    /// rotation. Missing targets are ignored; every linked local child must use
+    /// the current runtime-owned client key.
+    func linkedChildrenUseAPIKey(providerId: String, apiKey: String) -> Bool {
+        if let child = codexChild(for: providerId),
+           child.metadata.proxy.upstreamAPIKey != apiKey { return false }
+        if let child = claudeChild(for: providerId) {
+            let childKey = child.metadata.nodeType == .anthropicDirect
+                ? child.metadata.proxy.anthropicAPIKey
+                : child.metadata.proxy.upstreamAPIKey
+            if childKey != apiKey { return false }
+        }
+        if let child = openCodeChild(for: providerId), child.apiKey != apiKey { return false }
+        return true
+    }
+
     // MARK: - Reconcile (distribute / undistribute)
 
     /// 把主配置的分发集合对齐到 `targets`：被选中且兼容的目标 upsert 链接节点（已存在则同步），
@@ -134,7 +150,7 @@ final class APIProviderDistributor {
             await science.reapplyActiveUpstream()
         }
         let claude = GlobalProxyManager.claude
-        if claude.isEnabled, claude.isProxyRunning, claude.activeNodeId == nodeId {
+        if claude.isRuntimeEnabled, claude.isProxyRunning, claude.activeNodeId == nodeId {
             await claude.reapplyActiveUpstream()
         }
     }
@@ -208,7 +224,9 @@ final class APIProviderDistributor {
     // MARK: - Mapping: APIProvider → Codex/Claude NodeProfile
 
     private func makeProfile(_ provider: APIProvider, family: ProxyNodeFamily, existing: NodeProfile?) -> NodeProfile {
-        let overridden = existing?.metadata.overriddenKeys ?? []
+        let isCPAManagedProvider = provider.id == CLIProxyGatewayManager.managedProviderID
+        var overridden = existing?.metadata.overriddenKeys ?? []
+        if isCPAManagedProvider { overridden.remove(APIProviderSharedKey.apiKey) }
         func wins(_ key: String) -> Bool { !overridden.contains(key) }
 
         // CPA 一键网关主配置固定为 OpenAI Responses（Codex 必需）；Claude Code（含 Science）
@@ -233,7 +251,9 @@ final class APIProviderDistributor {
         var proxy = existing?.metadata.proxy ?? defaultProxy(for: nodeType)
 
         // 共享字段：API Key / baseURL（按节点类型落到不同字段）。
-        if wins(APIProviderSharedKey.apiKey) {
+        // CPA's client key is runtime-owned and may rotate. A linked node must
+        // never pin an old local key through an inherited override marker.
+        if isCPAManagedProvider || wins(APIProviderSharedKey.apiKey) {
             switch nodeType {
             case .anthropicDirect: proxy.anthropicAPIKey = provider.apiKey
             case .openaiProxy, .codexProxy: proxy.upstreamAPIKey = provider.apiKey
@@ -331,10 +351,11 @@ final class APIProviderDistributor {
     // MARK: - Mapping: APIProvider → OpenCodeNode
 
     private func makeOpenCodeNode(_ provider: APIProvider, existing: OpenCodeNode?) -> OpenCodeNode {
-        let overridden = existing?.overriddenKeys ?? []
+        let isCPAManaged = provider.id == CLIProxyGatewayManager.managedProviderID
+        var overridden = existing?.overriddenKeys ?? []
+        if isCPAManaged { overridden.remove(APIProviderSharedKey.apiKey) }
         func wins(_ key: String) -> Bool { !overridden.contains(key) }
 
-        let isCPAManaged = provider.id == CLIProxyGatewayManager.managedProviderID
         let protocolType: OpenCodeProtocol = isCPAManaged
             ? CLIProxyGatewayManager.shared.managedOpenCodeProtocol
             : provider.format.openCodeProtocol
@@ -352,7 +373,7 @@ final class APIProviderDistributor {
                 ? Self.stripTrailingV1Path(provider.baseURL)
                 : provider.baseURL
         }
-        if wins(APIProviderSharedKey.apiKey) { node.apiKey = provider.apiKey }
+        if isCPAManaged || wins(APIProviderSharedKey.apiKey) { node.apiKey = provider.apiKey }
         if wins(APIProviderSharedKey.models) {
             let entries = Self.openCodeEntries(from: provider.models)
             node.modelEntries = entries
@@ -408,7 +429,8 @@ final class APIProviderDistributor {
         case .openaiProxy, .codexProxy: childBaseURL = proxy.upstreamBaseURL; childKey = proxy.upstreamAPIKey
         }
         if trimmed(childBaseURL) != trimmed(master.baseURL) { overridden.insert(APIProviderSharedKey.baseURL) }
-        if childKey != master.apiKey { overridden.insert(APIProviderSharedKey.apiKey) }
+        if masterId != CLIProxyGatewayManager.managedProviderID,
+           childKey != master.apiKey { overridden.insert(APIProviderSharedKey.apiKey) }
         if (proxy.modelLibrary ?? []) != master.models { overridden.insert(APIProviderSharedKey.models) }
         if proxy.defaultModel != master.effectiveDefaultModel { overridden.insert(APIProviderSharedKey.defaultModel) }
         p.metadata.overriddenKeys = overridden.isEmpty ? nil : overridden
@@ -425,7 +447,8 @@ final class APIProviderDistributor {
         var overridden = Set<String>()
         if n.name != master.displayName { overridden.insert(APIProviderSharedKey.name) }
         if trimmed(n.baseURL) != trimmed(master.baseURL) { overridden.insert(APIProviderSharedKey.baseURL) }
-        if n.apiKey != master.apiKey { overridden.insert(APIProviderSharedKey.apiKey) }
+        if masterId != CLIProxyGatewayManager.managedProviderID,
+           n.apiKey != master.apiKey { overridden.insert(APIProviderSharedKey.apiKey) }
         let masterFingerprints = Self.openCodeEntries(from: master.models).map(Self.fingerprint)
         if n.modelEntries.map(Self.fingerprint) != masterFingerprints { overridden.insert(APIProviderSharedKey.models) }
         if n.defaultModel != master.effectiveDefaultModel { overridden.insert(APIProviderSharedKey.defaultModel) }

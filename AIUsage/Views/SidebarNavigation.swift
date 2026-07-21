@@ -54,15 +54,12 @@ enum SidebarNavigation {
         SidebarNavItem(section: .codexProxyManagement, titleEn: "Codex", titleZh: "Codex",
                        localizationKey: "nav.codex_proxy_management", icon: .providerAsset("codex"),
                        tint: .primary, isHideable: true),
-        SidebarNavItem(section: .opencodeManagement, titleEn: "OpenCode", titleZh: "OpenCode",
-                       localizationKey: "nav.opencode_management", icon: .providerAsset("opencode"),
-                       tint: .primary, isHideable: true),
-        SidebarNavItem(section: .proxyManagement, titleEn: "Claude Code", titleZh: "Claude Code",
+        SidebarNavItem(section: .proxyManagement, titleEn: "Claude", titleZh: "Claude",
                        localizationKey: "nav.proxy_management", icon: .providerAsset("claude"),
                        tint: .primary, isHideable: true),
-        SidebarNavItem(section: .scienceProxyManagement, titleEn: "Claude Science", titleZh: "Claude Science",
-                       localizationKey: "nav.science_proxy_management", icon: .system("atom"),
-                       tint: .purple, isHideable: true)
+        SidebarNavItem(section: .opencodeManagement, titleEn: "OpenCode", titleZh: "OpenCode",
+                       localizationKey: "nav.opencode_management", icon: .providerAsset("opencode"),
+                       tint: .primary, isHideable: true)
     ]
 
     /// 代理分组下方的主条目。

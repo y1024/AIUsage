@@ -78,6 +78,8 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
     var modelLibrary: [MappedModel]
     var maxOutputTokens: Int // 0 = no cap, pass through original value
     var enableModelAliasMapping: Bool
+    /// Legacy per-node HTTPS contract retained for imported profiles and
+    /// standalone compatibility. It is not used to configure Claude Desktop.
     var enableHTTPS: Bool
     var httpsPort: Int?
     var createdAt: Date

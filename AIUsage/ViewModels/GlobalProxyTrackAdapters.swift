@@ -162,7 +162,11 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
     func switchPayload(config: GlobalProxyConfig, nodeId: String) -> [String: Any]? {
         guard let node = node(nodeId) else { return nil }
         let passthrough = isPassthrough(node)
-        return [
+        let desktopCatalog = ClaudeDesktopProfileStore.catalog(
+            for: node,
+            supports1M: config.claudeDesktopSupports1MModels(for: node.id)
+        )
+        var payload: [String: Any] = [
             "nodeId": node.id,
             "mode": passthrough ? "passthrough" : "convert",
             "baseURL": passthrough ? node.anthropicBaseURL : node.normalizedUpstreamBaseURL,
@@ -173,7 +177,14 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
             "smallModel": node.modelMapping.smallModel.name,
             "maxOutputTokens": node.maxOutputTokens,
             "enableModelAliasMapping": passthrough,
+            "availableModels": desktopCatalog.map(\.upstreamModel),
+            "defaultModel": node.defaultModel,
         ]
+        if config.effectiveClaudeDesktopEnabled {
+            payload["catalogRouteStyle"] = "desktop"
+            payload["catalogSupports1M"] = desktopCatalog.filter(\.supports1M).map(\.upstreamModel)
+        }
+        return payload
     }
 
     func adminPath(config: GlobalProxyConfig) -> String { "/__aiusage/admin/claude-upstream" }

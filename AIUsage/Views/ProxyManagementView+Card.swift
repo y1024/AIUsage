@@ -523,9 +523,6 @@ struct ConfigurationCardView: View, Equatable {
                 detailItem(label: "Base URL", value: config.anthropicBaseURL)
                 if config.usePassthroughProxy {
                     detailItem(label: L("Local Proxy", "本地代理"), value: "http://\(config.host):\(config.port)")
-                    if config.enableHTTPS {
-                        detailItem(label: "HTTPS", value: "https://\(config.host):\(config.effectiveHTTPSPort)")
-                    }
                     detailItem(label: L("LAN Access", "局域网访问"), value: config.allowLAN ? L("Enabled", "已启用") : L("Disabled", "已禁用"))
                 }
             case .openaiProxy:
@@ -536,9 +533,6 @@ struct ConfigurationCardView: View, Equatable {
                     value: "Opus\u{2192}\(config.modelMapping.bigModel.name), Sonnet\u{2192}\(config.modelMapping.middleModel.name), Haiku\u{2192}\(config.modelMapping.smallModel.name)"
                 )
                 detailItem(label: L("Local Proxy", "本地代理"), value: "http://\(config.host):\(config.port)")
-                if config.enableHTTPS {
-                    detailItem(label: "HTTPS", value: "https://\(config.host):\(config.effectiveHTTPSPort)")
-                }
                 detailItem(label: L("LAN Access", "局域网访问"), value: config.allowLAN ? L("Enabled", "已启用") : L("Disabled", "已禁用"))
             case .codexProxy:
                 detailItem(label: L("Upstream", "上游"), value: config.normalizedUpstreamBaseURL)

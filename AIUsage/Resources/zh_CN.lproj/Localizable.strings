@@ -1266,7 +1266,7 @@
 "nav.opencode_management" = "OpenCode";
 
 /* Views/SidebarNavigation.swift */
-"nav.proxy_management" = "Claude Code";
+"nav.proxy_management" = "Claude";
 
 /* Views/SidebarNavigation.swift */
 "nav.science_proxy_management" = "Claude Science";

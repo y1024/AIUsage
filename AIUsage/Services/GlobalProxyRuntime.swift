@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import os.log
 import Darwin
+import QuotaBackend
 
 // MARK: - Global Proxy Runtime
 // 管理某条轨「全局统一代理」的常驻 QuotaServer 进程。与每节点独立进程不同：本进程在固定端口长期存活，
@@ -84,10 +85,15 @@ final class GlobalProxyRuntime: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var activeNodeId: String?
     @Published private(set) var activeNodeName: String?
+    /// Event-driven count of authenticated Desktop traffic observed by the
+    /// owned QuotaServer process. This avoids a permanent one-request-per-
+    /// second admin polling loop in the host app.
+    @Published private(set) var claudeDesktopObservedTrafficCount: UInt64 = 0
 
     private var process: Process?
     private var adminKey: String?
     private var listenPort = GlobalProxyConfig.defaultCodexPort
+    private var httpsListenPort: Int?
     private var startGeneration: UInt64 = 0
 
     private static let startupTimeout: TimeInterval = 6
@@ -103,40 +109,65 @@ final class GlobalProxyRuntime: ObservableObject {
     /// 跨轨仲裁聚合用：本轨全局代理运行时占用的端口所有者（仅在确实运行时上报）。
     func runningPortOwners() -> [ProxyPortArbiter.Owner] {
         guard isProcessRunning else { return [] }
-        return [ProxyPortArbiter.Owner(id: ownerId, ports: [listenPort], track: trackLabel, label: activeNodeName ?? "")]
+        let ports = [listenPort] + (httpsListenPort.map { [$0] } ?? [])
+        return [ProxyPortArbiter.Owner(id: ownerId, ports: ports, track: trackLabel, label: activeNodeName ?? "")]
     }
 
     // MARK: - Lifecycle
 
     /// 启动常驻全局代理进程。`env` 由各轨适配器构造（上游 / client key / PROXY_TARGET 等）；
     /// 本类注入 admin key 与初始 node_id。端口冲突走跨轨仲裁 fail-loud；启动后等待 /health 就绪。
-    func start(port: Int, bindHost: String, env baseEnv: [String: String], nodeId: String, nodeName: String) async throws {
+    func start(
+        port: Int,
+        bindHost: String,
+        env baseEnv: [String: String],
+        nodeId: String,
+        nodeName: String,
+        httpsPort: Int? = nil,
+        tlsIdentityPath: String? = nil
+    ) async throws {
         startGeneration &+= 1
         let generation = startGeneration
         if isProcessRunning { await stopAndWaitForExit() }
         guard generation == startGeneration else { throw CancellationError() }
+        claudeDesktopObservedTrafficCount = 0
 
-        if let conflict = ProxyPortArbiter.conflict(forPorts: [port], excluding: ownerId) {
+        let requestedPorts = [port] + (httpsPort.map { [$0] } ?? [])
+        if Set(requestedPorts).count != requestedPorts.count {
+            throw GlobalProxyRuntimeError.portInUse(port)
+        }
+        if let conflict = ProxyPortArbiter.conflict(forPorts: requestedPorts, excluding: ownerId) {
             throw GlobalProxyRuntimeError.portInUseByNode(conflict.port, conflict.track, conflict.label)
         }
 
         // 仲裁只知道当前 App 管理的实例；外部进程或上次崩溃遗留 helper 还需要系统级复核。
-        do {
-            try await ProxyProcessInspector.shared.killStaleProcesses(
-                port: port,
-                currentProcessIdentifier: ProcessInfo.processInfo.processIdentifier
-            )
-        } catch {
-            globalProxyRuntimeLog.error("Failed to inspect stale QuotaServer processes on port \(port, privacy: .public): \(String(describing: error), privacy: .public)")
-        }
-        if await ProxyProcessInspector.shared.isPortOccupied(port) {
-            throw GlobalProxyRuntimeError.portInUse(port)
+        for requestedPort in requestedPorts {
+            do {
+                try await ProxyProcessInspector.shared.killStaleProcesses(
+                    port: requestedPort,
+                    currentProcessIdentifier: ProcessInfo.processInfo.processIdentifier
+                )
+            } catch {
+                globalProxyRuntimeLog.error("Failed to inspect stale QuotaServer processes on port \(requestedPort, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+            if await ProxyProcessInspector.shared.isPortOccupied(requestedPort) {
+                throw GlobalProxyRuntimeError.portInUse(requestedPort)
+            }
         }
         guard generation == startGeneration else { throw CancellationError() }
 
         let admin = UUID().uuidString
         var environment = ProcessInfo.processInfo.environment
         for (key, value) in baseEnv { environment[key] = value }
+        if let httpsPort, let tlsIdentityPath {
+            environment["ENABLE_HTTPS"] = "1"
+            environment["HTTPS_PORT"] = "\(httpsPort)"
+            environment["TLS_IDENTITY_PATH"] = tlsIdentityPath
+        } else {
+            environment.removeValue(forKey: "ENABLE_HTTPS")
+            environment.removeValue(forKey: "HTTPS_PORT")
+            environment.removeValue(forKey: "TLS_IDENTITY_PATH")
+        }
         environment["GLOBAL_PROXY_ADMIN_KEY"] = admin
         environment["GLOBAL_PROXY_NODE_ID"] = nodeId
 
@@ -154,9 +185,19 @@ final class GlobalProxyRuntime: ObservableObject {
                 startupTimeout: Self.startupTimeout,
                 probeIntervalNanos: Self.probeIntervalNanos
             ) { line in
-                guard line.hasPrefix("PROXY_LOG:"),
-                      let jsonStart = line.firstIndex(of: Character("{")) else { return }
+                guard let jsonStart = line.firstIndex(of: Character("{")) else { return }
                 let jsonStr = String(line[jsonStart...])
+                if line.hasPrefix("PROXY_STATUS:"),
+                   let data = jsonStr.data(using: .utf8),
+                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   object["client_surface"] as? String == ClaudeClientSurface.desktop.rawValue {
+                    Task { @MainActor in
+                        let runtime = GlobalProxyRuntime.instance(for: capturedTrack)
+                        runtime.claudeDesktopObservedTrafficCount &+= 1
+                    }
+                    return
+                }
+                guard line.hasPrefix("PROXY_LOG:") else { return }
                 Task { @MainActor in
                     // OpenCode 轨：归因到 OpenCodeProxyRuntime（节点卡片/统计/热力图同源、按节点定价算成本）。
                     // Codex/Claude 轨：仍走 ProxyViewModel（其节点在 configurations 里，统计/归档复用既有链路）。
@@ -196,6 +237,7 @@ final class GlobalProxyRuntime: ObservableObject {
         self.process = proc
         self.adminKey = admin
         self.listenPort = port
+        self.httpsListenPort = httpsPort
         self.activeNodeId = nodeId
         self.activeNodeName = nodeName
 
@@ -214,6 +256,7 @@ final class GlobalProxyRuntime: ObservableObject {
         }
         process = nil
         adminKey = nil
+        httpsListenPort = nil
         isRunning = false
         globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) stopped")
     }
@@ -277,6 +320,24 @@ final class GlobalProxyRuntime: ObservableObject {
         self.activeNodeId = nodeId
         self.activeNodeName = nodeName
         globalProxyRuntimeLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) hot-switched to node \(nodeId, privacy: .public)")
+    }
+
+    func claudeDesktopTrafficCount() async throws -> UInt64 {
+        guard isProcessRunning, let adminKey else {
+            throw GlobalProxyRuntimeError.notRunning
+        }
+        guard let url = URL(string: "http://127.0.0.1:\(listenPort)/__aiusage/admin/claude-status") else {
+            throw GlobalProxyRuntimeError.adminUnreachable("invalid url")
+        }
+        var request = URLRequest(url: url, timeoutInterval: 3)
+        request.setValue("Bearer \(adminKey)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw GlobalProxyRuntimeError.adminRejected((response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let traffic = object?["traffic"] as? [String: Any]
+        return (traffic?[ClaudeClientSurface.desktop.rawValue] as? NSNumber)?.uint64Value ?? 0
     }
 
 }

@@ -1,0 +1,29 @@
+{
+  "deploymentMode": "3p",
+  "enterpriseConfig": {},
+  "preferences": {
+    "coworkScheduledTasksEnabled": true,
+    "ccdScheduledTasksEnabled": false,
+    "sidebarMode": "default",
+    "coworkWebSearchEnabled": true,
+    "remoteToolsDeviceName": "<redacted-device-name>",
+    "epitaxyPrefs": {
+      "starred-local-code-sessions": [],
+      "starred-cowork-spaces": [],
+      "starred-session-groups": [],
+      "dframe-local-slice": {
+        "pinnedOrder": [],
+        "customGroupAssignments": {},
+        "customGroupOrder": {}
+      }
+    },
+    "coworkHipaaRestricted": false,
+    "coworkModelAutoFallbackByAccount": {
+      "<redacted-account-id>": true
+    },
+    "bypassPermissionsGateByAccount": {
+      "<redacted-account-id>": false
+    }
+  },
+  "coworkUserFilesPath": "<redacted-user-files-path>"
+}

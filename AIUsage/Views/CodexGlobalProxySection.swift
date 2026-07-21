@@ -24,6 +24,7 @@ struct CodexGlobalProxySection: View {
             subtitle: L("One stable endpoint; choose a node and start.", "一个固定入口，选择节点即可启动。"),
             isEnabled: isEnabled,
             isRunning: runtime.isRunning,
+            isRuntimeOwnedByAnotherConsumer: false,
             isBusy: manager.isBusy,
             port: manager.config.port,
             bindHost: manager.config.displayBindHost,

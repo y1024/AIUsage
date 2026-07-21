@@ -7,6 +7,16 @@ public enum ProxyMode: String, Sendable {
     case anthropicPassthrough
 }
 
+/// Claude family clients sharing the same inference gateway.  The value is
+/// emitted in privacy-safe request logs and is never accepted from a client
+/// supplied header.
+public enum ClaudeClientSurface: String, Sendable, Codable, Equatable {
+    case code = "claude_code"
+    case desktop = "claude_desktop"
+    case science = "claude_science"
+    case unknown
+}
+
 public enum OpenAIUpstreamAPI: String, Sendable, Codable, CaseIterable {
     case chatCompletions = "chat_completions"
     case responses
@@ -30,6 +40,9 @@ public struct ClaudeProxyConfiguration: Sendable {
     public let openAIUpstreamAPI: OpenAIUpstreamAPI
     public let upstreamAPIKey: String
     public let expectedClientKey: String?
+    /// Claude Desktop owns a separate local credential even though it shares
+    /// the same upstream/runtime with Claude Code.
+    public let expectedDesktopClientKey: String?
     public let bigModel: String
     public let middleModel: String
     public let smallModel: String
@@ -43,6 +56,13 @@ public struct ClaudeProxyConfiguration: Sendable {
     /// Science may retain a raw model id in browser storage. When enabled, an
     /// exact active-catalog id wins over the legacy opus/sonnet/haiku mapping.
     public let preferExactCatalogModels: Bool
+    /// The catalog transport is shared, but Science and Desktop intentionally
+    /// use different public model identities. Desktop requires role-shaped
+    /// Anthropic routes while Science keeps its compatibility selection IDs.
+    public let catalogRouteStyle: ScienceModelProtocolAdapter.RouteStyle
+    /// Real upstream model IDs explicitly advertised with a 1M-context picker
+    /// variant. The route adapter projects this onto the public catalog rows.
+    public let catalogSupports1M: Set<String>
     private let scienceModelProtocol: ScienceModelProtocolAdapter
     /// 全局统一代理（OpenCode anthropic 接口）模式下，把入站请求体的 `model` 无条件改写为该真实上游模型名，
     /// 优先于三层别名映射。nil = 不强制（普通 Claude Code 轨）。
@@ -59,6 +79,7 @@ public struct ClaudeProxyConfiguration: Sendable {
         openAIUpstreamAPI: OpenAIUpstreamAPI = .chatCompletions,
         upstreamAPIKey: String,
         expectedClientKey: String? = nil,
+        expectedDesktopClientKey: String? = nil,
         bigModel: String = "gpt-4o",
         middleModel: String = "gpt-4o-mini",
         smallModel: String = "gpt-3.5-turbo",
@@ -68,6 +89,8 @@ public struct ClaudeProxyConfiguration: Sendable {
         defaultModel: String? = nil,
         exposeScienceModelCatalog: Bool = false,
         preferExactCatalogModels: Bool = false,
+        catalogRouteStyle: ScienceModelProtocolAdapter.RouteStyle = .science,
+        catalogSupports1M: Set<String> = [],
         forcedModel: String? = nil,
         requestTimeout: TimeInterval = 60,
         customHeaders: [String: String] = [:],
@@ -81,7 +104,8 @@ public struct ClaudeProxyConfiguration: Sendable {
             : upstreamBaseURL
         self.openAIUpstreamAPI = openAIUpstreamAPI
         self.upstreamAPIKey = upstreamAPIKey
-        self.expectedClientKey = expectedClientKey
+        self.expectedClientKey = Self.nonBlank(expectedClientKey)
+        self.expectedDesktopClientKey = Self.nonBlank(expectedDesktopClientKey)
         self.bigModel = bigModel
         self.middleModel = middleModel
         self.smallModel = smallModel
@@ -89,7 +113,9 @@ public struct ClaudeProxyConfiguration: Sendable {
         self.enableModelAliasMapping = enableModelAliasMapping
         let scienceModelProtocol = ScienceModelProtocolAdapter(
             upstreamModels: availableModels,
-            requestedDefault: defaultModel
+            requestedDefault: defaultModel,
+            routeStyle: catalogRouteStyle,
+            supports1MUpstreamModels: catalogSupports1M
         )
         self.scienceModelProtocol = scienceModelProtocol
         self.availableModels = scienceModelProtocol.models.map(\.upstreamModel)
@@ -97,6 +123,8 @@ public struct ClaudeProxyConfiguration: Sendable {
         self.defaultModel = (trimmedDefault?.isEmpty == false) ? trimmedDefault : nil
         self.exposeScienceModelCatalog = exposeScienceModelCatalog && !self.availableModels.isEmpty
         self.preferExactCatalogModels = preferExactCatalogModels
+        self.catalogRouteStyle = catalogRouteStyle
+        self.catalogSupports1M = catalogSupports1M
         let trimmedForced = forcedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.forcedModel = (trimmedForced?.isEmpty == false) ? trimmedForced : nil
         self.requestTimeout = requestTimeout
@@ -206,15 +234,73 @@ public struct ClaudeProxyConfiguration: Sendable {
         return expectedClientKey
     }
 
+    /// Resolve authentication and surface without trusting client metadata.
+    /// A prefixed Desktop route is intentionally strict: a Claude Code key is
+    /// not interchangeable with the Desktop profile key.
+    public func authenticatedSurface(
+        headers: [String: String],
+        hintedSurface: ClaudeClientSurface = .unknown
+    ) -> ClaudeClientSurface? {
+        let supplied = [
+            headers["x-api-key"],
+            Self.bearerToken(from: headers["authorization"]),
+        ].compactMap { $0 }
+
+        if hintedSurface == .desktop {
+            guard let expectedDesktopClientKey else { return nil }
+            return supplied.contains(expectedDesktopClientKey) ? .desktop : nil
+        }
+
+        if let expectedDesktopClientKey, supplied.contains(expectedDesktopClientKey) {
+            return .desktop
+        }
+        if let expectedClientKey, supplied.contains(expectedClientKey) {
+            return .code
+        }
+        if expectedClientKey == nil, expectedDesktopClientKey == nil {
+            return .science
+        }
+        return nil
+    }
+
+    private static func bearerToken(from authorization: String?) -> String? {
+        guard let authorization else { return nil }
+        let parts = authorization.split(maxSplits: 1, whereSeparator: \.isWhitespace)
+        guard parts.count == 2,
+              String(parts[0]).caseInsensitiveCompare("Bearer") == .orderedSame else { return nil }
+        return String(parts[1])
+    }
+
+    private static func nonBlank(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     public static func loadFromEnvironment() -> ClaudeProxyConfiguration? {
         let environment = ProcessInfo.processInfo.environment
-        let catalogModels: [String] = environment["AIUSAGE_SCIENCE_MODELS_JSON"]
+        let catalogModelsJSON = environment["AIUSAGE_CLAUDE_MODELS_JSON"]
+            ?? environment["AIUSAGE_SCIENCE_MODELS_JSON"]
+        let catalogModels: [String] = catalogModelsJSON
             .flatMap { $0.data(using: .utf8) }
             .flatMap { try? JSONDecoder().decode([String].self, from: $0) }
             ?? []
-        let catalogDefault = environment["AIUSAGE_SCIENCE_DEFAULT_MODEL"]
-        let exposeCatalog = environment["AIUSAGE_SCIENCE_MODEL_CATALOG"] == "1"
-        let preferExactCatalog = environment["AIUSAGE_SCIENCE_EXACT_MODELS"] == "1"
+        let catalogDefault = environment["AIUSAGE_CLAUDE_DEFAULT_MODEL"]
+            ?? environment["AIUSAGE_SCIENCE_DEFAULT_MODEL"]
+        let exposeCatalog = environment["AIUSAGE_CLAUDE_MODEL_CATALOG"] == "1"
+            || environment["AIUSAGE_SCIENCE_MODEL_CATALOG"] == "1"
+        let preferExactCatalog = environment["AIUSAGE_CLAUDE_EXACT_MODELS"] == "1"
+            || environment["AIUSAGE_SCIENCE_EXACT_MODELS"] == "1"
+        let catalogRouteStyle = ScienceModelProtocolAdapter.RouteStyle(
+            rawValue: environment["AIUSAGE_CLAUDE_ROUTE_STYLE"] ?? "science"
+        ) ?? .science
+        let catalogSupports1M: Set<String> = Set(
+            environment["AIUSAGE_CLAUDE_SUPPORTS_1M_JSON"]
+                .flatMap { $0.data(using: .utf8) }
+                .flatMap { try? JSONDecoder().decode([String].self, from: $0) }
+                ?? []
+        )
+        let desktopClientKey = environment["ANTHROPIC_DESKTOP_API_KEY"]
         let proxyModeStr = ProcessInfo.processInfo.environment["PROXY_MODE"] ?? "openai"
         let proxyMode: ProxyMode = proxyModeStr == "passthrough" ? .anthropicPassthrough : .openaiConvert
 
@@ -239,6 +325,7 @@ public struct ClaudeProxyConfiguration: Sendable {
                 upstreamBaseURL: baseURL,
                 upstreamAPIKey: apiKey,
                 expectedClientKey: clientKey,
+                expectedDesktopClientKey: desktopClientKey,
                 bigModel: bigModel,
                 middleModel: middleModel,
                 smallModel: smallModel,
@@ -247,6 +334,8 @@ public struct ClaudeProxyConfiguration: Sendable {
                 defaultModel: catalogDefault,
                 exposeScienceModelCatalog: exposeCatalog,
                 preferExactCatalogModels: preferExactCatalog,
+                catalogRouteStyle: catalogRouteStyle,
+                catalogSupports1M: catalogSupports1M,
                 forcedModel: forcedModel,
                 interceptor: enableRewrite ? AnyRouterInterceptor() : nil
             )
@@ -273,6 +362,7 @@ public struct ClaudeProxyConfiguration: Sendable {
             openAIUpstreamAPI: openAIUpstreamAPI,
             upstreamAPIKey: apiKey,
             expectedClientKey: clientKey,
+            expectedDesktopClientKey: desktopClientKey,
             bigModel: bigModel,
             middleModel: middleModel,
             smallModel: smallModel,
@@ -280,7 +370,9 @@ public struct ClaudeProxyConfiguration: Sendable {
             availableModels: catalogModels,
             defaultModel: catalogDefault,
             exposeScienceModelCatalog: exposeCatalog,
-            preferExactCatalogModels: preferExactCatalog
+            preferExactCatalogModels: preferExactCatalog,
+            catalogRouteStyle: catalogRouteStyle,
+            catalogSupports1M: catalogSupports1M
         )
     }
 }

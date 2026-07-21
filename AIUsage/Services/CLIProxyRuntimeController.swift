@@ -65,6 +65,33 @@ final class CLIProxyRuntimeController: ObservableObject {
     var clientAPIKey: String? { cachedSecrets?.clientAPIKey }
     var managementKey: String? { cachedSecrets?.managementKey }
 
+    /// Credential for clients of the CPA process that is actually running.
+    /// Prefer this bundle's Keychain key when the loaded config contains it;
+    /// otherwise use the managed key from that config. Production and Debug
+    /// intentionally use separate Keychain vaults but can observe one shared
+    /// CPA runtime, so the Keychain value alone is not authoritative here.
+    var managedProviderClientAPIKey: String? {
+        let configured: [String]?
+        do {
+            configured = try configStore.runtimeClientAPIKeys()
+        } catch {
+            // An unfamiliar shared config must not be overwritten from this
+            // bundle's isolated Keychain. Leave the provider unchanged until
+            // the runtime config can be read without guessing.
+            return nil
+        }
+        guard let configured else { return cachedSecrets?.clientAPIKey }
+        guard !configured.isEmpty else { return nil }
+        if let managed = CLIProxyManagedAPIKeyNamespace.ownedKey(
+            in: configured,
+            preferred: cachedSecrets?.clientAPIKey
+        ) { return managed }
+        // Never redistribute an arbitrary external key merely because it is
+        // first in a shared CPA config. Without a recognizable AIUsage-owned
+        // credential there is no safe automatic repair target.
+        return nil
+    }
+
     /// 用于 UI 展示的短指纹（末 4 位），避免整钥暴露。
     var clientAPIKeyFingerprint: String? {
         guard let key = cachedSecrets?.clientAPIKey, key.count >= 4 else { return nil }
@@ -493,6 +520,22 @@ final class CLIProxyRuntimeController: ObservableObject {
     }
 
     private func clearPIDRecord() {
+        // Production and Debug builds share the CPA runtime directory. Never
+        // erase the live owner's record merely because this bundle has no
+        // local `Process` handle for it.
+        if let data = FileManager.default.contents(atPath: pidURL.path),
+           let record = try? JSONDecoder().decode(PIDRecord.self, from: data),
+           record.pid > 1,
+           Darwin.kill(record.pid, 0) == 0 {
+            guard let parent = Self.parentPID(record.pid) else {
+                // Inspection failure is not proof of staleness. Preserve the
+                // only ownership record for a live process.
+                return
+            }
+            if parent > 1, parent != ProcessInfo.processInfo.processIdentifier {
+                return
+            }
+        }
         try? FileManager.default.removeItem(at: pidURL)
     }
 
@@ -502,8 +545,18 @@ final class CLIProxyRuntimeController: ObservableObject {
             clearPIDRecord()
             return
         }
+        guard record.pid > 1, Darwin.kill(record.pid, 0) == 0 else {
+            clearPIDRecord()
+            return
+        }
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        guard let parent = Self.parentPID(record.pid),
+              parent == 1 || parent == currentPID else {
+            // A live production/Debug sibling owns this CPA. It is not an
+            // orphan and its PID record must remain intact.
+            return
+        }
         defer { clearPIDRecord() }
-        guard record.pid > 1, Darwin.kill(record.pid, 0) == 0 else { return }
 
         let matchesConfig = record.configPath == paths.configURL.path
             || Self.processCommand(record.pid).contains(paths.configURL.path)
@@ -527,6 +580,9 @@ final class CLIProxyRuntimeController: ObservableObject {
             pid > 1 && pid != ProcessInfo.processInfo.processIdentifier
         }
         for pid in candidates {
+            let currentPID = ProcessInfo.processInfo.processIdentifier
+            guard let parent = Self.parentPID(pid),
+                  parent == 1 || parent == currentPID else { continue }
             let command = Self.processCommand(pid)
             let path = Self.processPath(pid) ?? ""
             let looksLikeCPA = path.localizedCaseInsensitiveContains("cliproxy")
@@ -584,6 +640,14 @@ final class CLIProxyRuntimeController: ObservableObject {
         let count = proc_pidpath(pid, &buffer, UInt32(buffer.count))
         guard count > 0 else { return nil }
         return String(cString: buffer)
+    }
+
+    private static func parentPID(_ pid: Int32) -> Int32? {
+        var info = proc_bsdinfo()
+        let expected = Int32(MemoryLayout<proc_bsdinfo>.stride)
+        let actual = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, expected)
+        guard actual == expected else { return nil }
+        return Int32(info.pbi_ppid)
     }
 
     private static func processCommand(_ pid: Int32) -> String {

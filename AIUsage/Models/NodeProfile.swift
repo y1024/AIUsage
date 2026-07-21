@@ -324,6 +324,9 @@ struct ProxySettings: Codable, Equatable {
     var anthropicAPIKey: String
     var usePassthroughProxy: Bool
     var enableModelAliasMapping: Bool?
+    /// Legacy per-node listener fields. Claude Desktop uses the single
+    /// `GlobalProxyConfig.claudeDesktopHTTPSPort`; keep these optional values
+    /// decodable until the profile schema has a dedicated migration.
     var enableHTTPS: Bool?
     var httpsPort: Int?
     var commonConfigMode: CommonConfigMode?
@@ -345,7 +348,7 @@ struct ProxySettings: Codable, Equatable {
             anthropicBaseURL: "https://api.anthropic.com",
             anthropicAPIKey: "", usePassthroughProxy: false,
             enableModelAliasMapping: false,
-            enableHTTPS: true, httpsPort: nil
+            enableHTTPS: false, httpsPort: nil
         )
     }
 
@@ -360,7 +363,7 @@ struct ProxySettings: Codable, Equatable {
             anthropicBaseURL: "https://api.anthropic.com",
             anthropicAPIKey: "", usePassthroughProxy: false,
             enableModelAliasMapping: false,
-            enableHTTPS: true, httpsPort: nil
+            enableHTTPS: false, httpsPort: nil
         )
     }
 

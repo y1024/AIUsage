@@ -20,6 +20,7 @@ struct ClaudeGlobalProxySection: View {
 
     private var nodes: [GlobalProxyNodeRef] { manager.availableNodes() }
     private var isEnabled: Bool { manager.isEnabled }
+    private var isRuntimeOwnedByDesktop: Bool { manager.isRuntimeEnabled && !isEnabled }
 
     var body: some View {
         GlobalProxySectionScaffold(
@@ -27,9 +28,11 @@ struct ClaudeGlobalProxySection: View {
             subtitle: L("One stable endpoint with three model tiers.", "一个固定入口，自动映射三档模型。"),
             isEnabled: isEnabled,
             isRunning: runtime.isRunning,
+            isRuntimeOwnedByAnotherConsumer: isRuntimeOwnedByDesktop,
             isBusy: manager.isBusy,
             port: manager.config.port,
-            bindHost: manager.config.displayBindHost,
+            bindHost: manager.config.effectiveClaudeDesktopEnabled
+                ? "127.0.0.1" : manager.config.displayBindHost,
             allowLAN: allowLANBinding,
             hasNodes: !nodes.isEmpty,
             emptyHint: L("Create a Claude node first to use the global proxy.", "请先创建 Claude 节点后再使用全局代理。"),
@@ -111,7 +114,10 @@ struct ClaudeGlobalProxySection: View {
 
     private var allowLANBinding: Binding<Bool> {
         Binding(
-            get: { manager.config.effectiveAllowLAN },
+            get: {
+                manager.config.effectiveClaudeDesktopEnabled
+                    ? false : manager.config.effectiveAllowLAN
+            },
             set: { manager.updateAllowLAN($0) }
         )
     }
@@ -147,10 +153,10 @@ struct ClaudeGlobalProxySection: View {
 
     private var nodeBinding: Binding<String> {
         Binding(
-            get: { isEnabled ? (manager.activeNodeId ?? resolvedSelection) : resolvedSelection },
+            get: { manager.isRuntimeEnabled ? (manager.activeNodeId ?? resolvedSelection) : resolvedSelection },
             set: { newId in
                 selectedNodeId = newId
-                if isEnabled {
+                if manager.isRuntimeEnabled {
                     Task { await manager.switchActiveNode(to: newId) }
                 }
             }
@@ -175,7 +181,7 @@ struct ClaudeGlobalProxySection: View {
     }
 
     private func commitSettings() {
-        guard !isEnabled else { return }
+        guard !manager.isRuntimeEnabled else { return }
         manager.updateClaudeModels(
             port: manager.config.port,
             opus: opusModel,

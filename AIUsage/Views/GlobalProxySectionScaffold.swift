@@ -14,6 +14,9 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
     let subtitle: String
     let isEnabled: Bool
     let isRunning: Bool
+    /// True when another consumer owns this shared runtime. The visible track
+    /// toggle remains off, but connection settings must stay locked.
+    let isRuntimeOwnedByAnotherConsumer: Bool
     let isBusy: Bool
     let port: Int
     let bindHost: String
@@ -37,7 +40,7 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
                 emptyStateHint
             }
 
-            if isConfigurationExpanded, !isEnabled {
+            if isConfigurationExpanded, !isConfigurationLocked {
                 Divider()
                     .opacity(0.55)
                     .padding(.top, 12)
@@ -57,12 +60,15 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(isEnabled ? brand.opacity(0.45) : Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke((isEnabled || isRuntimeOwnedByAnotherConsumer) ? brand.opacity(0.45) : Color.primary.opacity(0.06), lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.2), value: isEnabled)
         .animation(.easeInOut(duration: 0.18), value: isConfigurationExpanded)
         .onChange(of: isEnabled) { _, enabled in
             if enabled { isConfigurationExpanded = false }
+        }
+        .onChange(of: isRuntimeOwnedByAnotherConsumer) { _, owned in
+            if owned { isConfigurationExpanded = false }
         }
     }
 
@@ -132,6 +138,8 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
         if isBusy { return .orange }
         if isEnabled, isRunning { return .green }
         if isEnabled { return .orange }
+        if isRuntimeOwnedByAnotherConsumer, isRunning { return brand }
+        if isRuntimeOwnedByAnotherConsumer { return .orange }
         return .secondary
     }
 
@@ -139,7 +147,13 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
         if isBusy { return L("Working", "处理中") }
         if isEnabled, isRunning { return L("Running", "运行中") }
         if isEnabled { return L("Waiting", "等待启动") }
+        if isRuntimeOwnedByAnotherConsumer, isRunning { return L("Shared", "共享中") }
+        if isRuntimeOwnedByAnotherConsumer { return L("Waiting", "等待启动") }
         return L("Off", "未启用")
+    }
+
+    private var isConfigurationLocked: Bool {
+        isEnabled || isRuntimeOwnedByAnotherConsumer
     }
 
     private var configurationButton: some View {
@@ -147,26 +161,27 @@ struct GlobalProxySectionScaffold<NodeControl: View, Config: View, Summary: View
             isConfigurationExpanded.toggle()
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: isEnabled ? "lock.fill" : "slider.horizontal.3")
+                Image(systemName: isConfigurationLocked ? "lock.fill" : "slider.horizontal.3")
                     .font(.system(size: 10, weight: .semibold))
                 Text(isConfigurationExpanded ? L("Done", "完成") : L("Configure", "配置"))
                     .font(.system(size: 11, weight: .semibold))
-                if !isEnabled {
+                if !isConfigurationLocked {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .bold))
                         .rotationEffect(.degrees(isConfigurationExpanded ? 180 : 0))
                 }
             }
-            .foregroundStyle(isEnabled ? Color.secondary : brand)
+            .foregroundStyle(isConfigurationLocked ? Color.secondary : brand)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
             .background(Capsule().fill(Color.primary.opacity(0.045)))
             .overlay(Capsule().stroke(Color.primary.opacity(0.07), lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .disabled(isEnabled || isBusy)
-        .help(isEnabled
-              ? L("Turn off the proxy to edit its connection settings", "请先停用代理，再修改连接设置")
+        .disabled(isConfigurationLocked || isBusy)
+        .help(isConfigurationLocked
+              ? L("Disconnect every consumer of this runtime before editing connection settings",
+                  "请先断开此运行时的所有消费者，再修改连接设置")
               : L("Edit connection settings", "编辑连接设置"))
         .accessibilityLabel(isConfigurationExpanded
                             ? L("Collapse global proxy settings", "收起全局代理设置")

@@ -1,0 +1,20 @@
+{
+  "disableDeploymentModeChooser": true,
+  "inferenceProvider": "gateway",
+  "inferenceGatewayBaseUrl": "https://localhost:14403/claude-desktop",
+  "inferenceGatewayApiKey": "<redacted-api-key>",
+  "inferenceModels": [
+    {
+      "name": "claude-sonnet-4-6",
+      "labelOverride": "provider/model-large",
+      "supports1m": true
+    },
+    {
+      "name": "claude-haiku-4-5",
+      "labelOverride": "provider/model-fast"
+    }
+  ],
+  "futureProfileField": {
+    "must": "survive"
+  }
+}

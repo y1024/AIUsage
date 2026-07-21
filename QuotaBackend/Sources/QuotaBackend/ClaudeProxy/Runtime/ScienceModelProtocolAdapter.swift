@@ -6,10 +6,23 @@ import Foundation
 /// Raw upstream IDs stay in `upstreamModel`; only `id` is sent back by Science
 /// in requests, and only `displayName` contains presentation workarounds.
 public struct ScienceModelProtocolAdapter: Sendable {
+    public enum RouteStyle: String, Sendable, Codable {
+        case science
+        case desktop
+    }
+
     public struct Model: Sendable, Equatable {
         public let id: String
         public let upstreamModel: String
         public let displayName: String
+        public let supports1M: Bool
+
+        public init(id: String, upstreamModel: String, displayName: String, supports1M: Bool = false) {
+            self.id = id
+            self.upstreamModel = upstreamModel
+            self.displayName = displayName
+            self.supports1M = supports1M
+        }
     }
 
     /// Science wrote this built-in selection ID into existing session frames.
@@ -31,25 +44,40 @@ public struct ScienceModelProtocolAdapter: Sendable {
     private let upstreamBySelectionID: [String: String]
     private let upstreamModels: Set<String>
 
-    public init(upstreamModels: [String], requestedDefault: String?) {
+    public init(
+        upstreamModels: [String],
+        requestedDefault: String?,
+        routeStyle: RouteStyle = .science,
+        supports1MUpstreamModels: Set<String> = []
+    ) {
         let normalized = Self.normalize(upstreamModels)
         let requested = requestedDefault?.trimmingCharacters(in: .whitespacesAndNewlines)
         let preferred = requested.flatMap { normalized.contains($0) ? $0 : nil }
             ?? normalized.first
 
         var routing: [String: String] = [:]
-        self.models = normalized.map { upstream in
-            let id = upstream == preferred
-                ? Self.persistentDefaultSelectionID
-                : Self.generatedSelectionID(for: upstream)
+        let builtModels = normalized.map { upstream in
+            let id: String
+            switch routeStyle {
+            case .science:
+                id = upstream == preferred
+                    ? Self.persistentDefaultSelectionID
+                    : Self.generatedSelectionID(for: upstream)
+            case .desktop:
+                id = Self.desktopSelectionID(for: upstream)
+            }
             routing[id] = upstream
             return Model(
                 id: id,
                 upstreamModel: upstream,
-                displayName: Self.presentationName(for: upstream)
+                displayName: routeStyle == .science ? Self.presentationName(for: upstream) : upstream,
+                supports1M: supports1MUpstreamModels.contains(upstream)
             )
         }
-        self.defaultModelID = preferred == nil ? nil : Self.persistentDefaultSelectionID
+        self.models = builtModels
+        self.defaultModelID = preferred.flatMap { selected in
+            builtModels.first(where: { $0.upstreamModel == selected })?.id
+        }
         self.defaultUpstreamModel = preferred
         self.upstreamBySelectionID = routing
         self.upstreamModels = Set(normalized)
@@ -69,7 +97,8 @@ public struct ScienceModelProtocolAdapter: Sendable {
         if acceptingRawUpstreamIDs, upstreamModels.contains(requestModel) {
             return requestModel
         }
-        if requestModel.hasPrefix(Self.generatedIDPrefix) {
+        if requestModel.hasPrefix(Self.generatedIDPrefix)
+            || requestModel.contains("-aiusage-v1-") {
             return defaultUpstreamModel
         }
         return nil
@@ -116,6 +145,68 @@ public struct ScienceModelProtocolAdapter: Sendable {
         slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         if slug.isEmpty { slug = "model" }
         return "\(generatedIDPrefix)\(slug)-\(String(hash, radix: 16))"
+    }
+
+    /// Claude Desktop validates the complete model list and accepts only
+    /// Anthropic-shaped role routes. Preserve an already valid route;
+    /// otherwise create a stable role-shaped identity while keeping the real
+    /// upstream model exclusively in the gateway mapping.
+    public static func desktopSelectionID(for upstreamModel: String) -> String {
+        let trimmed = upstreamModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if shouldPreserveDesktopModelID(trimmed) { return trimmed }
+
+        let lower = trimmed.lowercased()
+        let role: String
+        if lower.contains("haiku") {
+            role = "haiku"
+        } else if lower.contains("opus") {
+            role = "opus"
+        } else {
+            role = "sonnet"
+        }
+        // Claude Desktop 1.12603.1 rejects a route before checking its
+        // Claude-shaped prefix when the route contains a known third-party
+        // marker such as `codex`, `gpt`, `gemini`, `glm`, or `qwen`. Never
+        // leak the upstream slug into the public identity. Decimal digits are
+        // deterministic and cannot accidentally spell one of those markers.
+        return "claude-\(role)-4-6-aiusage-v1-\(stableHashDecimal(trimmed))"
+    }
+
+    private static func shouldPreserveDesktopModelID(_ model: String) -> Bool {
+        guard isDesktopSafeModelID(model) else { return false }
+        let normalized = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.hasPrefix("claude-")
+            || normalized.hasPrefix("anthropic/claude-")
+            || normalized.range(
+                of: #"^(sonnet|opus|haiku|fable|mythos)(-[\d.]+)?$"#,
+                options: .regularExpression
+            ) != nil
+    }
+
+    public static func isDesktopSafeModelID(_ model: String) -> Bool {
+        let normalized = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.contains("[1m]") else { return false }
+        let thirdPartyMarkers = #"ark-code|astron|command-r|deepseek|doubao|gemini|gemma|glm|gpt|grok|hermes|hy3|kimi|lfm|\bling\b|llama|longcat|mimo|minimax|mistral|mixtral|moonshot|nemotron|openai|phi-|qianfan|qwen|tc-code|\bunic\b|yi-|stepfun|step-3|seed-|bytedance|hunyuan|granite|amazon\.nova|nova-|devstral|ministral|ernie|codex|arcee|trinity|abab|phi\d|\bk2\.|\bm2\.|jamba|arctic|solar|mercury|zamba|kat-coder|\bds-|dpsk"#
+        guard normalized.range(of: thirdPartyMarkers, options: .regularExpression) == nil else {
+            return false
+        }
+        if normalized.range(
+            of: #"^(sonnet|opus|haiku|fable|mythos)(-[\d.]+)?$"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+        return ["claude", "sonnet", "opus", "haiku", "fable", "mythos", "anthropic"]
+            .contains(where: normalized.contains)
+    }
+
+    private static func stableHashDecimal(_ value: String) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash)
     }
 
     static func presentationName(for upstreamModel: String) -> String {

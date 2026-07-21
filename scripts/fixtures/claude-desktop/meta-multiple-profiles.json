@@ -1,0 +1,21 @@
+{
+  "appliedId": "profile-mapped",
+  "entries": [
+    {
+      "id": "profile-official",
+      "name": "Official"
+    },
+    {
+      "id": "profile-mapped",
+      "name": "Mapped Gateway"
+    },
+    {
+      "id": "profile-external",
+      "name": "External Tool",
+      "futureField": "must-survive"
+    }
+  ],
+  "futureTopLevelField": {
+    "must": "survive"
+  }
+}

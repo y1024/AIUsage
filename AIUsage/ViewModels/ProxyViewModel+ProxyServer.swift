@@ -48,6 +48,7 @@ extension ProxyViewModel {
             // 随后的每节点恢复会因对应轨全局启用而跳过。
             await GlobalProxyManager.codex.restoreOnLaunch()
             await GlobalProxyManager.claude.restoreOnLaunch()
+            await ClaudeDesktopIntegrationManager.shared.restoreOnLaunch()
             await GlobalProxyManager.opencode.restoreOnLaunch()
             await ScienceProxyManager.shared.restoreOnLaunch()
             await restoreActivatedNodeAsync()

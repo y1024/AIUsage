@@ -59,6 +59,7 @@
 | **多账号管理** | 同一服务商多个账号独立刷新，一键切换 CLI 活跃账号 |
 | **用量统计** | 统一汇总 Claude/Codex 代理归档、仅统计 Token 的 Codex 非代理会话，以及 OpenCode 本地会话账本：按模型拆分费用与 Token，趋势曲线、多时段分析，可按来源聚合查看 |
 | **Claude Code 代理** | 用 Claude Code 跑 DeepSeek、GPT、Ollama 等任意 OpenAI 兼容模型；Anthropic 透传模式记录用量 |
+| **Claude Desktop 网关** | 将同一套 Claude 节点一键接入 Desktop 官方第三方模式，提供安全模型路由、真实显示名称、逐模型 1M 开关、本机 HTTPS、精确恢复和真实连接验证 |
 | **Codex 代理** | 把 Codex CLI 指向任意 OpenAI 兼容上游；订阅账号与 API 节点统一切换器，外科式合并 `config.toml` |
 | **OpenCode 代理** | 通过受管 `opencode.json` 块切换 OpenCode 上游——支持 OpenAI 兼容、Anthropic、Responses 三种协议，节点级用量归因、每模型定价、可选请求日志 |
 | **Claude Science 代理** | 免订阅启动本地 Claude Science，推理经代理走任意第三方模型；本地虚拟登录、独立沙箱，可选接管让双击桌面 app 也免登录，全程不碰真实凭证 |
@@ -137,7 +138,7 @@ CPA 网关把订阅账号汇聚成一套受管本地 API。由官方 [CLIProxyAP
 | 能力 | 说明 |
 | --- | --- |
 | **统一账号池** | 添加 CPA 原生 OAuth 账号、安装官方 Provider 插件、配置兼容 API Key 上游、将支持的 AIUsage 账号（Codex、Antigravity）复制到 CPA，或通过可识别、可去重的批量导入迁移认证文件 |
-| **托管四个应用** | 通过现有代理轨接入 Codex、OpenCode、Claude Code 与 Claude Science，完整保留各代理原有能力 |
+| **托管五个产品面** | 通过 AIUsage 现有代理轨接入 Codex、OpenCode、Claude Code、Claude Desktop 与 Claude Science，完整保留各自原有能力 |
 | **原生客户端 API** | 在接入详情中完整查看并复制 OpenAI Responses / Chat、Anthropic Messages 与 Gemini 接口，并在支持路由列表中查看 legacy 与高级路径 |
 | **统一模型目录** | 将已知 CPA 协议别名归并为一个逻辑模型，显示可识别厂商 Logo，并在模型详情中提供 OpenAI、Anthropic、Gemini 客户端各自需要的准确模型 ID |
 | **独立更新** | 在 AIUsage 内安装、校验、试运行、提升或回滚官方 CPA 版本，同时保留运行数据与配置 |
@@ -147,7 +148,7 @@ CPA 网关把订阅账号汇聚成一套受管本地 API。由官方 [CLIProxyAP
 
 ## 代理
 
-AIUsage 内置四套相互独立的代理 —— 分别面向 **Claude Code**、**Codex（Codex CLI）**、**OpenCode** 与 **Claude Science**，各自支持节点管理、用量记录与统一切换器。CPA 网关可以作为它们共同消费的受管上游，不会替代任何原生代理能力。
+AIUsage 为 **Claude**、**Codex（Codex CLI）** 与 **OpenCode** 提供原生代理轨。Claude 中的 Code、Desktop、Science 共用一套节点库，同时保留各自不同的生命周期与安全边界。CPA 网关可以作为受管上游，不会替代任何原生代理能力。
 
 ### Claude Code 代理
 
@@ -159,6 +160,21 @@ AIUsage 内置四套相互独立的代理 —— 分别面向 **Claude Code**、
 | **Anthropic 透传** | 请求原样转发，记录输入/输出/缓存 Token，精确追踪费用 |
 
 **快速开始：** 打开 AIUsage → Claude Code 代理 → 新建节点 → 配置 → 激活。`~/.claude/settings.json` 自动更新。
+
+### Claude Desktop 网关
+
+把任意现有 Claude 节点（包括第三方模型和 CPA 节点）接入 Claude Desktop 官方 3P Gateway，无需重新录入上游地址、模型或密钥。
+
+| 能力 | 说明 |
+|------|------|
+| **共享路由** | Claude Code 与 Desktop 共用当前节点并同步热切换；任一消费者断开都不会影响仍在使用的一方 |
+| **Desktop 安全目录** | 使用 Desktop 接受的 Anthropic 形态路由 ID，同时通过显示名称呈现真实上游模型 |
+| **逐模型 1M 开关** | 只为用户明确开启的模型声明可选 1M 上下文版本 |
+| **本机安全边界** | 独立客户端密钥与 localhost HTTPS 监听，Desktop profile 不保存真实上游凭证 |
+| **事务式恢复** | 保存接入前的 3P 配置、检测外部修改，断开时精确恢复原状态 |
+| **可信状态** | 区分 profile/端口已经就绪与真实 Desktop 请求已经到达 |
+
+**快速开始：** 打开 AIUsage → Claude → Desktop → 选择共享节点 → 一键接入 Desktop。模型名称、端口、恢复与排障见 [Claude Desktop 使用指南](docs/CLAUDE_DESKTOP_USER_GUIDE.md)。
 
 ### Codex 代理
 

@@ -73,6 +73,54 @@ final class QuotaHTTPServerProxyIntegrationTests: XCTestCase {
         XCTAssertEqual(pagedJSON["has_more"] as? Bool, true)
     }
 
+    func testDesktopModelsEndpointAcceptsOnlyDesktopKeyOnDedicatedPrefix() async throws {
+        let proxyPort = try findFreePort()
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            bindPort: proxyPort,
+            mode: .openaiConvert,
+            upstreamBaseURL: "http://127.0.0.1:9",
+            upstreamAPIKey: "upstream-key",
+            expectedClientKey: "code-key",
+            expectedDesktopClientKey: "desktop-key",
+            availableModels: ["third-party-large", "third-party-fast"],
+            defaultModel: "third-party-large",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .desktop,
+            catalogSupports1M: ["third-party-large"]
+        )
+        let server = QuotaHTTPServer(host: "127.0.0.1", port: proxyPort, proxyConfig: config)
+        try await server.start()
+        defer { server.stop() }
+
+        let prefixedURL = URL(string: "http://127.0.0.1:\(proxyPort)/claude-desktop/v1/models?limit=1000")!
+        var codeRequest = URLRequest(url: prefixedURL)
+        codeRequest.setValue("Bearer code-key", forHTTPHeaderField: "Authorization")
+        let (_, codeResponse) = try await URLSession.shared.data(for: codeRequest)
+        XCTAssertEqual((codeResponse as? HTTPURLResponse)?.statusCode, 401)
+
+        var desktopRequest = URLRequest(url: prefixedURL)
+        desktopRequest.setValue("Bearer desktop-key", forHTTPHeaderField: "Authorization")
+        let (desktopData, desktopResponse) = try await URLSession.shared.data(for: desktopRequest)
+        XCTAssertEqual((desktopResponse as? HTTPURLResponse)?.statusCode, 200)
+        let desktopJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: desktopData) as? [String: Any])
+        let desktopModels = try XCTUnwrap(desktopJSON["data"] as? [[String: Any]])
+        XCTAssertEqual(desktopModels.count, 2)
+        XCTAssertEqual(desktopModels[0]["display_name"] as? String, "third-party-large")
+        XCTAssertEqual(desktopModels[0]["supports1m"] as? Bool, true)
+        XCTAssertTrue(
+            ScienceModelProtocolAdapter.isDesktopSafeModelID(desktopModels[0]["id"] as? String ?? "")
+        )
+
+        // Current Desktop builds may also call the root route. The matching
+        // Desktop credential still classifies the request without a client header.
+        var rootRequest = URLRequest(url: URL(string: "http://127.0.0.1:\(proxyPort)/v1/models")!)
+        rootRequest.setValue("desktop-key", forHTTPHeaderField: "x-api-key")
+        let (_, rootResponse) = try await URLSession.shared.data(for: rootRequest)
+        XCTAssertEqual((rootResponse as? HTTPURLResponse)?.statusCode, 200)
+    }
+
     func testScienceCatalogHotSwitchReplacesAliasesAndContainsStaleSelection() throws {
         let initial = ClaudeProxyConfiguration(
             enabled: true,
@@ -102,6 +150,8 @@ final class QuotaHTTPServerProxyIntegrationTests: XCTestCase {
             enableModelAliasMapping: false,
             availableModels: ["new-default", "new-extra"],
             defaultModel: "new-default",
+            catalogRouteStyle: nil,
+            catalogSupports1M: nil,
             forcedModel: nil
         )
 

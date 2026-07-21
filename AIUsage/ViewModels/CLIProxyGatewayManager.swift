@@ -138,6 +138,7 @@ final class CLIProxyGatewayManager: ObservableObject {
     private var modelCatalogRefreshTask: Task<Void, Never>?
     private var modelCatalogRefreshID: UUID?
     private var modelCatalogRuntimePID: Int32?
+    private var managedProviderCredentialRefreshTask: Task<Void, Never>?
 
     static let maxAuthFileImportBytes = 5 * 1_048_576
 
@@ -203,6 +204,7 @@ final class CLIProxyGatewayManager: ObservableObject {
                     isRunning: state.isRunning,
                     settings: settings.normalized
                 )
+                self?.refreshDistributionState()
             }
             .store(in: &accountProbeCancellables)
     }
@@ -1350,7 +1352,7 @@ final class CLIProxyGatewayManager: ObservableObject {
     func upsertManagedProvider(targets: Set<ProxyTarget>) async {
         guard runtime.state.isRunning,
               !isApplyingDistribution,
-              let clientKey = runtime.clientAPIKey else { return }
+              let clientKey = runtime.managedProviderClientAPIKey else { return }
         isApplyingDistribution = true
         defer { isApplyingDistribution = false }
         lastError = nil
@@ -1391,6 +1393,35 @@ final class CLIProxyGatewayManager: ObservableObject {
         currentDistributionTargets = managedProviderExists
             ? APIProviderDistributor.shared.currentTargets(for: Self.managedProviderID)
             : []
+        reconcileManagedProviderCredentialIfNeeded()
+    }
+
+    /// CPA owns this credential. When Keychain is rebuilt or the managed client
+    /// key rotates, refresh the master provider and every linked child without
+    /// making the user repeat the one-click distribution flow.
+    private func reconcileManagedProviderCredentialIfNeeded() {
+        guard managedProviderCredentialRefreshTask == nil,
+              let clientKey = runtime.managedProviderClientAPIKey,
+              !clientKey.isEmpty,
+              var provider = APIProviderStore.shared.provider(id: Self.managedProviderID) else { return }
+
+        let childrenAreCurrent = APIProviderDistributor.shared.linkedChildrenUseAPIKey(
+            providerId: Self.managedProviderID,
+            apiKey: clientKey
+        )
+        guard provider.apiKey != clientKey || !childrenAreCurrent else { return }
+
+        provider.apiKey = clientKey
+        let saved = APIProviderStore.shared.upsert(provider)
+        managedProviderCredentialRefreshTask = Task { @MainActor [weak self] in
+            _ = await APIProviderDistributor.shared.syncFromMaster(saved)
+            guard let self else { return }
+            self.managedProviderCredentialRefreshTask = nil
+            self.managedProviderExists = true
+            self.currentDistributionTargets = APIProviderDistributor.shared.currentTargets(
+                for: Self.managedProviderID
+            )
+        }
     }
 
     func loadAuthPool(using client: CLIProxyManagementClient) async throws -> [CLIProxyAuthFile] {

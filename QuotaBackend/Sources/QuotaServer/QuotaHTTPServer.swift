@@ -132,6 +132,9 @@ public final class QuotaHTTPServer: @unchecked Sendable {
     private var _codexConfig: CodexProxyConfiguration?
     private var _activeNodeId: String?
 
+    private let claudeTrafficLock = NSLock()
+    private var claudeTrafficCounts: [ClaudeClientSurface: UInt64] = [:]
+
     /// 当前 Codex 代理服务（全局模式下可被 admin 热替换）。
     var codexProxyService: CodexProxyService? {
         get { codexStateLock.withLock { _codexProxyService } }
@@ -149,12 +152,35 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         set { codexStateLock.withLock { _activeNodeId = newValue } }
     }
 
+    func recordClaudeTraffic(_ surface: ClaudeClientSurface) {
+        guard surface != .unknown else { return }
+        let isFirstForSurface = claudeTrafficLock.withLock {
+            claudeTrafficCounts[surface, default: 0] &+= 1
+            return claudeTrafficCounts[surface] == 1
+        }
+        // The host only needs an edge-trigger to light the connection state.
+        // Emit once per process/surface instead of making the UI poll an admin
+        // endpoint forever while no Desktop traffic exists.
+        if surface == .desktop, isFirstForSurface {
+            print("PROXY_STATUS:{\"client_surface\":\(escapeJSON(surface.rawValue))}")
+        }
+    }
+
+    func claudeTrafficSnapshot() -> [String: UInt64] {
+        claudeTrafficLock.withLock {
+            Dictionary(uniqueKeysWithValues: claudeTrafficCounts.map { ($0.key.rawValue, $0.value) })
+        }
+    }
+
     /// 全局代理 admin 端点的 Bearer token（仅全局模式下由启动环境注入；为 nil 时 admin 端点关闭）。
     let globalProxyAdminKey: String?
     /// 全局模式下对客户端固定不变的 client key（热切换只换上游，绝不换 client key，保证 CLI 配置无需重写）。
     let fixedCodexClientKey: String?
     /// Claude 全局模式下对客户端固定不变的 client key（写入 settings.json 的 ANTHROPIC_AUTH_TOKEN）。
     let fixedClaudeClientKey: String?
+    /// Desktop keeps its own local key so disconnecting/reconfiguring the app
+    /// never changes Claude Code credentials.
+    let fixedClaudeDesktopClientKey: String?
     /// OpenCode 全局模式下对客户端固定不变的 client key（写入 opencode.json 受管块的 apiKey 占位）。
     let fixedOpenCodeClientKey: String?
 
@@ -199,6 +225,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             openAIUpstreamAPI: OpenAIUpstreamAPI.fromEnvironment(update.apiMode),
             upstreamAPIKey: update.apiKey,
             expectedClientKey: fixedClaudeClientKey,
+            expectedDesktopClientKey: fixedClaudeDesktopClientKey,
             bigModel: update.bigModel.isEmpty ? "gpt-4o" : update.bigModel,
             middleModel: update.middleModel.isEmpty ? "gpt-4o-mini" : update.middleModel,
             smallModel: update.smallModel.isEmpty ? "gpt-3.5-turbo" : update.smallModel,
@@ -208,6 +235,11 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             defaultModel: update.defaultModel ?? currentConfig?.defaultModel,
             exposeScienceModelCatalog: currentConfig?.exposeScienceModelCatalog ?? false,
             preferExactCatalogModels: currentConfig?.preferExactCatalogModels ?? false,
+            catalogRouteStyle: update.catalogRouteStyle
+                .flatMap(ScienceModelProtocolAdapter.RouteStyle.init(rawValue:))
+                ?? currentConfig?.catalogRouteStyle
+                ?? .science,
+            catalogSupports1M: Set(update.catalogSupports1M ?? Array(currentConfig?.catalogSupports1M ?? [])),
             forcedModel: mode == .anthropicPassthrough ? update.forcedModel : nil
         )
 
@@ -277,6 +309,7 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         self.globalProxyAdminKey = env["GLOBAL_PROXY_ADMIN_KEY"].flatMap { $0.isEmpty ? nil : $0 }
         self.fixedCodexClientKey = codexConfig?.expectedClientKey
         self.fixedClaudeClientKey = proxyConfig?.expectedClientKey
+        self.fixedClaudeDesktopClientKey = proxyConfig?.expectedDesktopClientKey
         self.fixedOpenCodeClientKey = openCodeConfig?.expectedClientKey
         self._activeNodeId = env["GLOBAL_PROXY_NODE_ID"].flatMap { $0.isEmpty ? nil : $0 }
         self._codexConfig = codexConfig
@@ -480,8 +513,30 @@ public final class QuotaHTTPServer: @unchecked Sendable {
             return
         }
 
-        let request = parseHTTPRequest(requestData)
+        let request = normalizeClaudeRoute(parseHTTPRequest(requestData))
         let cleanPath = request.path.split(separator: "?").first.map(String.init) ?? request.path
+
+        // The dedicated Desktop prefix is also an authentication boundary.
+        // Root routes remain compatible with current Desktop releases and are
+        // classified by their matching credential inside the handlers.
+        if request.clientSurface == .desktop,
+           proxyConfig?.authenticatedSurface(
+               headers: request.headers,
+               hintedSurface: .desktop
+           ) != .desktop {
+            let response = claudeErrorResponse(
+                type: "authentication_error",
+                message: "Invalid API key",
+                status: 401,
+                headers: Self.corsHeaders
+            )
+            await sendResponse(connection, response: response)
+            connection.cancel()
+            return
+        }
+        if let surface = authenticatedClaudeSurface(for: request) {
+            recordClaudeTraffic(surface)
+        }
 
         if request.method == "POST",
            cleanPath == "/v1/messages" || cleanPath.hasPrefix("/v1/messages/") {
@@ -574,6 +629,9 @@ public final class QuotaHTTPServer: @unchecked Sendable {
 
         case ("POST", "/__aiusage/admin/claude-upstream"):
             return handleClaudeUpstreamAdmin(request: request, headers: corsHeaders)
+
+        case ("GET", "/__aiusage/admin/claude-status"):
+            return handleClaudeStatusAdmin(request: request, headers: corsHeaders)
 
         case ("POST", "/__aiusage/admin/opencode-upstream"):
             return handleOpenCodeUpstreamAdmin(request: request, headers: corsHeaders)
@@ -676,10 +734,57 @@ public final class QuotaHTTPServer: @unchecked Sendable {
         let path: String
         let headers: [String: String]
         let body: Data
+        let clientSurface: ClaudeClientSurface
+
+        init(
+            method: String,
+            path: String,
+            headers: [String: String],
+            body: Data,
+            clientSurface: ClaudeClientSurface = .unknown
+        ) {
+            self.method = method
+            self.path = path
+            self.headers = headers
+            self.body = body
+            self.clientSurface = clientSurface
+        }
 
         var bodyString: String {
             String(data: body, encoding: .utf8) ?? ""
         }
+    }
+
+    /// Claude Desktop has used both root base URLs and a tool-owned prefix in
+    /// the ecosystem.  Normalize only the pathname and preserve the query
+    /// byte-for-byte so endpoint behavior is identical in both forms.
+    func normalizeClaudeRoute(_ request: HTTPRequest) -> HTTPRequest {
+        let prefix = "/claude-desktop"
+        let components = request.path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        let pathname = String(components.first ?? "")
+        guard pathname == prefix || pathname.hasPrefix(prefix + "/") else { return request }
+
+        let stripped = String(pathname.dropFirst(prefix.count))
+        let canonicalPath = stripped.isEmpty ? "/" : stripped
+        let query = components.count == 2 ? "?" + components[1] : ""
+        return HTTPRequest(
+            method: request.method,
+            path: canonicalPath + query,
+            headers: request.headers,
+            body: request.body,
+            clientSurface: .desktop
+        )
+    }
+
+    func authenticatedClaudeSurface(for request: HTTPRequest) -> ClaudeClientSurface? {
+        proxyConfig?.authenticatedSurface(
+            headers: request.headers,
+            hintedSurface: request.clientSurface
+        )
+    }
+
+    func resolvedClaudeSurface(for request: HTTPRequest) -> ClaudeClientSurface {
+        authenticatedClaudeSurface(for: request) ?? request.clientSurface
     }
 
     struct HTTPResponse {

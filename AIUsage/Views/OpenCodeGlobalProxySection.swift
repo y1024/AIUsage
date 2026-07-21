@@ -29,6 +29,7 @@ struct OpenCodeGlobalProxySection: View {
             subtitle: L("One stable endpoint; switch nodes within the selected interface.", "一个固定入口，可在同接口节点间切换。"),
             isEnabled: isEnabled,
             isRunning: runtime.isRunning,
+            isRuntimeOwnedByAnotherConsumer: false,
             isBusy: manager.isBusy,
             port: manager.config.port,
             bindHost: manager.config.displayBindHost,

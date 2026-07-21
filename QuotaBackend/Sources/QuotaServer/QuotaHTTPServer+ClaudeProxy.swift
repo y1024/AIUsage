@@ -42,17 +42,13 @@ extension QuotaHTTPServer {
             return jsonResponse(["error": "Not found"], status: 404, headers: headers)
         }
 
-        if let expectedKey = config.expectedClientKey, !expectedKey.isEmpty {
-            let supplied = request.headers["x-api-key"]
-                ?? request.headers["authorization"]?.replacingOccurrences(of: "Bearer ", with: "")
-            guard supplied == expectedKey else {
-                return claudeErrorResponse(
-                    type: "authentication_error",
-                    message: "Invalid API key",
-                    status: 401,
-                    headers: headers
-                )
-            }
+        guard authenticatedClaudeSurface(for: request) != nil else {
+            return claudeErrorResponse(
+                type: "authentication_error",
+                message: "Invalid API key",
+                status: 401,
+                headers: headers
+            )
         }
 
         let allModels = config.scienceCatalogModels
@@ -72,12 +68,14 @@ extension QuotaHTTPServer {
         let limit = max(1, min(1_000, requestedLimit))
         let models = Array(candidates.prefix(limit))
         let data: [[String: Any]] = models.map { model in
-            [
+            var row: [String: Any] = [
                 "id": model.id,
                 "type": "model",
                 "display_name": model.displayName,
                 "created_at": "1970-01-01T00:00:00Z",
             ]
+            if model.supports1M { row["supports1m"] = true }
+            return row
         }
         var payload: [String: Any] = [
             "data": data,
@@ -120,7 +118,7 @@ extension QuotaHTTPServer {
         }
 
         // Authenticate
-        guard await proxy.authenticate(headers: request.headers) else {
+        guard authenticatedClaudeSurface(for: request) != nil else {
             return claudeErrorResponse(
                 type: "authentication_error",
                 message: "Invalid API key",
@@ -165,7 +163,8 @@ extension QuotaHTTPServer {
                 outputTokens: response.usage.outputTokens,
                 cacheCreationTokens: response.usage.cacheCreationInputTokens ?? 0,
                 cacheReadTokens: response.usage.cacheReadInputTokens ?? 0,
-                nodeId: activeNodeId
+                nodeId: activeNodeId,
+                clientSurface: resolvedClaudeSurface(for: request)
             )
             return jsonResponse(encodable: response, headers: headers)
         } catch {
@@ -180,7 +179,8 @@ extension QuotaHTTPServer {
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
                 statusCode: errorResult.statusCode,
-                nodeId: activeNodeId
+                nodeId: activeNodeId,
+                clientSurface: resolvedClaudeSurface(for: request)
             )
             httpLog.error("  ✗ Proxy error: \(error.localizedDescription)")
             var responseHeaders = headers
@@ -196,27 +196,13 @@ extension QuotaHTTPServer {
     }
 
     func handleCountTokensEndpoint(request: HTTPRequest, headers: [String: String]) async -> HTTPResponse {
-        // Authenticate: OpenAI Convert mode uses proxyService, Passthrough mode uses proxyConfig key
-        if let proxy = proxyService {
-            guard await proxy.authenticate(headers: request.headers) else {
-                return claudeErrorResponse(
-                    type: "authentication_error",
-                    message: "Invalid API key",
-                    status: 401,
-                    headers: headers
-                )
-            }
-        } else if let config = proxyConfig, let expectedKey = config.expectedClientKey, !expectedKey.isEmpty {
-            let clientKey = request.headers["x-api-key"]
-                ?? request.headers["authorization"]?.replacingOccurrences(of: "Bearer ", with: "")
-            if clientKey != expectedKey {
-                return claudeErrorResponse(
-                    type: "authentication_error",
-                    message: "Invalid API key",
-                    status: 401,
-                    headers: headers
-                )
-            }
+        guard authenticatedClaudeSurface(for: request) != nil else {
+            return claudeErrorResponse(
+                type: "authentication_error",
+                message: "Invalid API key",
+                status: 401,
+                headers: headers
+            )
         }
 
         guard let tokenRequest = try? Self.requestDecoder.decode(ClaudeTokenCountRequest.self, from: request.body) else {
@@ -331,7 +317,7 @@ extension QuotaHTTPServer {
             )
         }
 
-        guard await proxy.authenticate(headers: request.headers) else {
+        guard authenticatedClaudeSurface(for: request) != nil else {
             return claudeErrorResponse(
                 type: "authentication_error",
                 message: "Invalid API key",
@@ -386,7 +372,7 @@ extension QuotaHTTPServer {
             )
         }
 
-        guard await proxy.authenticate(headers: request.headers) else {
+        guard authenticatedClaudeSurface(for: request) != nil else {
             return claudeErrorResponse(
                 type: "authentication_error",
                 message: "Invalid API key",
@@ -437,7 +423,7 @@ extension QuotaHTTPServer {
             )
         }
 
-        guard await proxy.authenticate(headers: request.headers) else {
+        guard authenticatedClaudeSurface(for: request) != nil else {
             return claudeErrorResponse(
                 type: "authentication_error",
                 message: "Invalid API key",
@@ -489,7 +475,7 @@ extension QuotaHTTPServer {
             )
         }
 
-        guard await proxy.authenticate(headers: request.headers) else {
+        guard authenticatedClaudeSurface(for: request) != nil else {
             return claudeErrorResponse(
                 type: "authentication_error",
                 message: "Invalid API key",
@@ -633,7 +619,7 @@ extension QuotaHTTPServer {
         }
 
         // Authenticate
-        guard await proxy.authenticate(headers: request.headers) else {
+        guard authenticatedClaudeSurface(for: request) != nil else {
             let response = claudeErrorResponse(
                 type: "authentication_error",
                 message: "Invalid API key",
@@ -783,7 +769,8 @@ extension QuotaHTTPServer {
                 outputTokens: finalOutputTokens,
                 cacheCreationTokens: reportedCacheCreation ?? 0,
                 cacheReadTokens: reportedCacheRead ?? 0,
-                nodeId: activeNodeId
+                nodeId: activeNodeId,
+                clientSurface: resolvedClaudeSurface(for: request)
             )
 
         } catch {
@@ -806,7 +793,8 @@ extension QuotaHTTPServer {
                 errorMessage: errorResult.response.error.message,
                 errorType: errorResult.response.error.type,
                 statusCode: errorResult.statusCode,
-                nodeId: activeNodeId
+                nodeId: activeNodeId,
+                clientSurface: resolvedClaudeSurface(for: request)
             )
         }
 
@@ -826,7 +814,8 @@ extension QuotaHTTPServer {
         errorMessage: String? = nil,
         errorType: String? = nil,
         statusCode: Int? = nil,
-        nodeId: String? = nil
+        nodeId: String? = nil,
+        clientSurface: ClaudeClientSurface = .unknown
     ) {
         var parts = [
             "\"type\":\"proxy_request_log\"",
@@ -857,6 +846,7 @@ extension QuotaHTTPServer {
         if let nodeId, !nodeId.isEmpty {
             parts.append("\"node_id\":\(escapeJSON(nodeId))")
         }
+        parts.append("\"client_surface\":\(escapeJSON(clientSurface.rawValue))")
         // stdout is parsed by the macOS host app for structured log ingestion
         print("PROXY_LOG:{\(parts.joined(separator: ","))}")
     }

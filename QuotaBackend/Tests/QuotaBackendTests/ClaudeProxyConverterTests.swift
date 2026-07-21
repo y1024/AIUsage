@@ -3,6 +3,46 @@ import XCTest
 
 final class ClaudeProxyConverterTests: XCTestCase {
 
+    func testDesktopAndCodeUseIndependentClientKeys() {
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://example.com",
+            upstreamAPIKey: "upstream",
+            expectedClientKey: "code-key",
+            expectedDesktopClientKey: "desktop-key"
+        )
+
+        XCTAssertEqual(
+            config.authenticatedSurface(headers: ["authorization": "Bearer code-key"]),
+            .code
+        )
+        XCTAssertEqual(
+            config.authenticatedSurface(headers: [
+                "x-api-key": "stale-key",
+                "authorization": "bearer code-key",
+            ]),
+            .code,
+            "a stale secondary header must not mask a valid credential"
+        )
+        XCTAssertEqual(
+            config.authenticatedSurface(headers: ["x-api-key": "desktop-key"]),
+            .desktop
+        )
+        XCTAssertEqual(
+            config.authenticatedSurface(
+                headers: ["authorization": "Bearer desktop-key"],
+                hintedSurface: .desktop
+            ),
+            .desktop
+        )
+        XCTAssertNil(
+            config.authenticatedSurface(
+                headers: ["authorization": "Bearer code-key"],
+                hintedSurface: .desktop
+            )
+        )
+    }
+
     // MARK: - Configuration Tests
 
     func testModelNormalization() {
@@ -137,6 +177,44 @@ final class ClaudeProxyConverterTests: XCTestCase {
             ScienceModelProtocolAdapter.generatedSelectionID(for: "glm-5.2"),
             ScienceModelProtocolAdapter.generatedSelectionID(for: "GLM-5.2")
         )
+    }
+
+    func testDesktopCatalogUsesSafeRoutesDisplayNamesAndPerModel1M() throws {
+        XCTAssertFalse(ScienceModelProtocolAdapter.isDesktopSafeModelID(
+            "claude-sonnet-aiusage-v1-codex-auto-review-d9cd0070df74"
+        ))
+        let upstreams = [
+            "gpt-5.4",
+            "anthropic/claude-opus-4-8",
+            "provider/speed-haiku",
+            "codex-auto-review",
+        ]
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.example.com",
+            upstreamAPIKey: "test-key",
+            availableModels: upstreams,
+            defaultModel: "gpt-5.4",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .desktop,
+            catalogSupports1M: ["gpt-5.4"]
+        )
+
+        XCTAssertEqual(config.scienceCatalogModels.map(\.displayName), upstreams)
+        XCTAssertTrue(config.scienceCatalogModels.allSatisfy {
+            ScienceModelProtocolAdapter.isDesktopSafeModelID($0.id)
+        })
+        XCTAssertTrue(config.scienceCatalogModels[0].id.hasPrefix("claude-sonnet-4-6-aiusage-v1-"))
+        XCTAssertEqual(config.scienceCatalogModels[1].id, "anthropic/claude-opus-4-8")
+        XCTAssertTrue(config.scienceCatalogModels[2].id.hasPrefix("claude-haiku-4-6-aiusage-v1-"))
+        XCTAssertTrue(config.scienceCatalogModels[3].id.hasPrefix("claude-sonnet-4-6-aiusage-v1-"))
+        XCTAssertFalse(config.scienceCatalogModels[3].id.contains("codex"))
+        XCTAssertTrue(config.scienceCatalogModels[0].supports1M)
+        XCTAssertFalse(config.scienceCatalogModels[1].supports1M)
+
+        let generatedRoute = try XCTUnwrap(config.scienceCatalogModels.first?.id)
+        XCTAssertEqual(config.mapToUpstreamModel(generatedRoute), "gpt-5.4")
     }
 
     func testRawCatalogIDThatLooksGeneratedStillRoutesExactly() {

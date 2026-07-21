@@ -59,6 +59,7 @@
 | **Multi-account** | Multiple accounts per provider, independent refresh, one-click CLI switching |
 | **Usage Stats** | Unified cost & token breakdown from Claude/Codex proxy archives, token-only non-proxy Codex sessions, and OpenCode's local session ledger — per-model trends, time-period analysis, source-aware aggregation |
 | **Claude Code Proxy** | Use Claude Code with DeepSeek, GPT, Ollama or any OpenAI-compatible model; Anthropic passthrough for usage logging |
+| **Claude Desktop Gateway** | Connect the same Claude node pool to Claude Desktop's official third-party mode in one click, with safe model routes, per-model display names and 1M controls, localhost HTTPS, exact rollback, and verified connection state |
 | **Codex Proxy** | Point Codex CLI at any OpenAI-compatible upstream; unified switcher across subscription accounts and API nodes, surgical `config.toml` merge |
 | **OpenCode Proxy** | Switch OpenCode across upstreams via a managed `opencode.json` block — OpenAI-compatible, Anthropic and Responses protocols, per-node usage attribution, per-model pricing and optional request logging |
 | **Claude Science Proxy** | Launch local Claude Science without a Claude subscription and route its inference to any third-party model; local virtual login and an isolated sandbox, with optional adoption so the double-clicked desktop app is login-free too — never touching your real credentials |
@@ -137,7 +138,7 @@ CPA Gateway turns subscription accounts into one managed local API surface. Powe
 | Capability | What it does |
 | --- | --- |
 | **Unified account pool** | Add CPA-native OAuth accounts, install official provider plugins, configure compatible API-key upstreams, copy supported AIUsage accounts (Codex, Antigravity) into CPA, or migrate auth files with a recognized, deduplicated batch import |
-| **Four managed apps** | Connect Codex, OpenCode, Claude Code, and Claude Science through the existing AIUsage proxy tracks without replacing their native capabilities |
+| **Five managed surfaces** | Connect Codex, OpenCode, Claude Code, Claude Desktop, and Claude Science through AIUsage's existing proxy tracks without replacing their native capabilities |
 | **Native client APIs** | Copy complete OpenAI Responses / Chat, Anthropic Messages, and Gemini endpoints from setup sheets, with legacy and advanced paths in the supported-route list |
 | **Unified model catalog** | Collapse known CPA protocol aliases into one logical model, show recognized vendor logos, and expose the exact model ID required by each OpenAI, Anthropic, or Gemini client in model details |
 | **Independent updates** | Install, verify, dry-run, promote, and roll back official CPA builds inside AIUsage while preserving runtime data and configuration |
@@ -147,7 +148,7 @@ CPA Gateway turns subscription accounts into one managed local API surface. Powe
 
 ## Proxies
 
-AIUsage ships four independent proxies — for **Claude Code**, **Codex (Codex CLI)**, **OpenCode** and **Claude Science** — each with node management, usage logging and a unified switcher. CPA Gateway can be selected as their shared managed upstream without replacing any native proxy capability.
+AIUsage provides native proxy tracks for **Claude**, **Codex (Codex CLI)**, and **OpenCode**. The Claude hub keeps one node pool across Code, Desktop, and Science while preserving the different lifecycle and security boundary of each surface. CPA Gateway can be selected as a managed upstream without replacing any native proxy capability.
 
 ### Claude Code Proxy
 
@@ -159,6 +160,21 @@ Use Claude Code CLI with any OpenAI-compatible model, or transparently log Anthr
 | **Anthropic Passthrough** | Forwards requests as-is, logs input/output/cache tokens for cost tracking |
 
 **Quick start:** Open AIUsage → Claude Code Proxy → New Node → Configure → Activate. Settings are written to `~/.claude/settings.json` automatically.
+
+### Claude Desktop Gateway
+
+Connect any existing Claude node—including third-party and CPA-backed models—to Claude Desktop's official 3P Gateway without entering the upstream endpoint, model, or key again.
+
+| Capability | What it does |
+|------------|-------------|
+| **One shared route** | Claude Code and Desktop use the same active node and hot-switch together; either consumer can remain connected independently |
+| **Desktop-safe catalog** | Uses Anthropic-shaped route IDs accepted by Desktop while showing the real upstream model through its display name |
+| **Per-model 1M control** | Advertises the optional 1M-context variant only for models you explicitly enable |
+| **Local security boundary** | A dedicated client key and localhost HTTPS listener keep the upstream credential out of the Desktop profile |
+| **Transactional restore** | Snapshots the pre-existing 3P configuration, detects external edits, and restores the exact prior state when disconnected |
+| **Truthful status** | Distinguishes a prepared profile and listener from a connection proven by a real Desktop request |
+
+**Quick start:** Open AIUsage → Claude → Desktop → choose a shared node → Connect Claude Desktop. See the [Claude Desktop guide](docs/CLAUDE_DESKTOP_USER_GUIDE.md) for model naming, port settings, recovery, and troubleshooting.
 
 ### Codex Proxy
 

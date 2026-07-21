@@ -20,7 +20,8 @@ extension MenuBarView {
         let track: GlobalProxyTrack = family.isCodex ? .codex : .claude
         let manager = family.isCodex ? globalCodex : globalClaude
         let globalEnabled = manager.isEnabled
-        let globalActiveNode = globalEnabled ? manager.node(for: manager.activeNodeId) : nil
+        let routeManaged = family.isCodex ? globalEnabled : manager.isRuntimeEnabled
+        let globalActiveNode = routeManaged ? manager.node(for: manager.activeNodeId) : nil
 
         let activeId = proxyVM.activatedId(isCodex: family.isCodex)
         let activeNode = proxyVM.configurations.first { $0.id == activeId }
@@ -30,12 +31,12 @@ extension MenuBarView {
 
         // Codex 订阅账号也算「已生效」，用于 chip 文案。
         let subEntries = codexSubscriptionEntries(family: family)
-        let activeSub = (activeNode == nil && !globalEnabled)
+        let activeSub = (activeNode == nil && !routeManaged)
             ? subEntries.first { ProviderActivationManager.shared.isActiveAccount($0) }
             : nil
-        let isOn = activeNode != nil || activeSub != nil || globalEnabled
+        let isOn = activeNode != nil || activeSub != nil || routeManaged
         let activeLabel: String = {
-            if globalEnabled { return globalActiveNode?.name ?? L("Global proxy", "全局代理") }
+            if routeManaged { return globalActiveNode?.name ?? L("Global proxy", "全局代理") }
             return activeNode?.name ?? activeSub?.accountPrimaryLabel ?? L("Off", "未启用")
         }()
 
@@ -126,6 +127,7 @@ extension MenuBarView {
     private func codexClaudePanel(family: ProxyNodeFamily) -> some View {
         let manager = family.isCodex ? globalCodex : globalClaude
         let globalEnabled = manager.isEnabled
+        let routeManaged = family.isCodex ? globalEnabled : manager.isRuntimeEnabled
         let globalNodes = manager.availableNodes()
         let activeId = proxyVM.activatedId(isCodex: family.isCodex)
         let familyNodes = proxyVM.configurations.filter { family.contains($0.nodeType) }
@@ -136,7 +138,7 @@ extension MenuBarView {
         var sections: [MenuBarTrackPanelSection] = []
         var onDeactivate: (() -> Void)?
 
-        if globalEnabled {
+        if routeManaged {
             sections = [hotSwapSection(manager: manager, nodes: globalNodes)]
         } else if family.isCodex {
             let subEntries = codexSubscriptionEntries(family: family)

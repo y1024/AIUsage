@@ -21,6 +21,22 @@ public struct HTTPSConfig: Sendable {
 extension QuotaHTTPServer {
 
     func startHTTPSListener(config: HTTPSConfig, host: NWEndpoint.Host) async throws -> NWListener {
+        final class ListenerStartState: @unchecked Sendable {
+            private let lock = NSLock()
+            private var hasResolved = false
+
+            func resolve(
+                continuation: CheckedContinuation<Void, Error>,
+                result: Result<Void, Error>
+            ) {
+                lock.lock()
+                defer { lock.unlock() }
+                guard !hasResolved else { return }
+                hasResolved = true
+                continuation.resume(with: result)
+            }
+        }
+
         let (identity, chain) = try loadTLSIdentity(from: config.identityPath)
 
         let tlsOptions = NWProtocolTLS.Options()
@@ -54,22 +70,15 @@ extension QuotaHTTPServer {
         }
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let lock = NSLock()
-            var resolved = false
+            let startState = ListenerStartState()
             listener.stateUpdateHandler = { state in
-                lock.lock()
-                defer { lock.unlock() }
-                guard !resolved else { return }
                 switch state {
                 case .ready:
-                    resolved = true
-                    continuation.resume()
+                    startState.resolve(continuation: continuation, result: .success(()))
                 case .failed(let error):
-                    resolved = true
-                    continuation.resume(throwing: error)
+                    startState.resolve(continuation: continuation, result: .failure(error))
                 case .cancelled:
-                    resolved = true
-                    continuation.resume(throwing: CancellationError())
+                    startState.resolve(continuation: continuation, result: .failure(CancellationError()))
                 default:
                     break
                 }

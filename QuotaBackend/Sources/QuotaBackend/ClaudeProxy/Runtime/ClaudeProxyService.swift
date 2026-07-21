@@ -25,28 +25,7 @@ public actor ClaudeProxyService {
     // MARK: - Authentication
 
     public func authenticate(headers: [String: String]) -> Bool {
-        guard let expectedKey = configuration.expectedClientAPIKey else {
-            // No authentication required
-            return true
-        }
-
-        // Check x-api-key header
-        if let apiKey = headers["x-api-key"], apiKey == expectedKey {
-            return true
-        }
-
-        // Check Authorization: Bearer header
-        if let auth = headers["authorization"] {
-            let bearer = "Bearer "
-            if auth.hasPrefix(bearer) {
-                let token = String(auth.dropFirst(bearer.count))
-                if token == expectedKey {
-                    return true
-                }
-            }
-        }
-
-        return false
+        configuration.authenticatedSurface(headers: headers) != nil
     }
 
     // MARK: - Non-Streaming Messages

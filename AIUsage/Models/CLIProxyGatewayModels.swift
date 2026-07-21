@@ -343,6 +343,16 @@ nonisolated struct CLIProxyGatewaySettings: Codable, Equatable, Sendable {
 /// 配置同步时只回收这些前缀下、且不在当前启用列表中的值；其它 key 原样保留。
 nonisolated enum CLIProxyManagedAPIKeyNamespace: Sendable {
     static let prefixes = ["cpa-client-", "cpa-key-"]
+
+    /// Select only a key AIUsage can prove it owns. Arbitrary preserved keys
+    /// in a shared CPA config may belong to another client and must never be
+    /// copied into AIUsage-managed providers.
+    static func ownedKey(in configured: [String], preferred: String?) -> String? {
+        if let preferred, configured.contains(preferred) { return preferred }
+        return configured.first { candidate in
+            prefixes.contains(where: candidate.hasPrefix)
+        }
+    }
 }
 
 nonisolated struct CLIProxySecrets: Sendable, Equatable {

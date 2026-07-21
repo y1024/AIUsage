@@ -54,6 +54,19 @@ struct GlobalProxyConfig: Codable, Equatable {
     var openCodeInterface: OpenCodeProtocol?
     /// 当前激活的参与节点 id；nil 表示未选定。
     var activeNodeId: String?
+    /// Claude Code 与 Desktop 是同一 Claude Gateway 的两个消费者。旧配置
+    /// 缺少该字段时由 `isEnabled` 迁移为 Code consumer。
+    var claudeCodeEnabled: Bool? = nil
+    /// Claude Desktop 官方 3P profile consumer；与 Code 配置/鉴权独立。
+    var claudeDesktopEnabled: Bool? = nil
+    /// Claude Desktop 专用 HTTPS listener，默认 14403。
+    var claudeDesktopHTTPSPort: Int? = nil
+    /// 只供本地 Desktop profile 使用的独立随机 key（配置文件本身为 0600）。
+    var claudeDesktopClientKey: String? = nil
+    /// Per-node Desktop catalog preferences keyed by the real upstream model
+    /// ID. Keeping the preference on the upstream identity means a stable
+    /// route rename never silently moves the 1M capability to another model.
+    var claudeDesktopSupports1MByNode: [String: [String: Bool]]? = nil
     /// Science 沙箱监听端口（仅 Science 轨；即 `claude-science serve --port`）。缺省 14410（AIUsage 端口族）。
     var sciencePort: Int? = nil
     /// 遗留：旧版可编辑假邮箱。现由 `activeScienceWorkspaceId` 派生 `…@cslocal.invalid`，读档后会被覆盖。
@@ -74,6 +87,7 @@ struct GlobalProxyConfig: Codable, Equatable {
     // 全局代理端口提到 1 万段（避开常用低端口、降低与其他本地服务冲突概率）。
     static let defaultCodexPort = 14399
     static let defaultClaudePort = 14400
+    static let defaultClaudeDesktopHTTPSPort = 14403
     static let defaultOpenCodePort = 14401
     // Science 轨端口全部落在 AIUsage 自有的 144xx 端口族（区别于其它同类工具，避免撞常用端口）：
     // 代理端口 14402、沙箱公开入口 14410、接管内部 daemon 14411、沙箱内部 daemon 14412；
@@ -122,6 +136,10 @@ struct GlobalProxyConfig: Codable, Equatable {
         "aiusage-global-\(UUID().uuidString.prefix(8))"
     }
 
+    static func freshDesktopClientKey() -> String {
+        "aiusage-desktop-\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+    }
+
     static func makeDefault(track: GlobalProxyTrack) -> GlobalProxyConfig {
         switch track {
         case .codex:
@@ -131,11 +149,16 @@ struct GlobalProxyConfig: Codable, Equatable {
                 openCodeInterface: nil, activeNodeId: nil
             )
         case .claude:
-            return GlobalProxyConfig(
+            var config = GlobalProxyConfig(
                 isEnabled: false, port: defaultClaudePort, clientKey: freshClientKey(),
                 virtualModel: defaultClaudeOpus, sonnetModel: defaultClaudeSonnet,
                 haikuModel: defaultClaudeHaiku, openCodeInterface: nil, activeNodeId: nil
             )
+            config.claudeCodeEnabled = false
+            config.claudeDesktopEnabled = false
+            config.claudeDesktopHTTPSPort = defaultClaudeDesktopHTTPSPort
+            config.claudeDesktopClientKey = freshDesktopClientKey()
+            return config
         case .opencode:
             return GlobalProxyConfig(
                 isEnabled: false, port: defaultOpenCodePort, clientKey: freshClientKey(),
@@ -173,12 +196,64 @@ struct GlobalProxyConfig: Codable, Equatable {
         sandboxEmail = Self.sandboxEmail(forWorkspaceId: activeScienceWorkspaceId ?? Self.defaultScienceWorkspaceId)
     }
 
+    /// Normalize every persisted Claude Desktop invariant in one place.  This
+    /// keeps the profile key stable across reads and prevents a damaged config
+    /// from trying to bind a privileged port or reuse the Code listener.
+    mutating func ensureClaudeDesktopDefaults() {
+        if claudeCodeEnabled == nil {
+            claudeCodeEnabled = isEnabled
+        }
+        claudeDesktopEnabled = claudeDesktopEnabled ?? false
+
+        let requestedPort = claudeDesktopHTTPSPort ?? Self.defaultClaudeDesktopHTTPSPort
+        let validPort = (1_024...65_535).contains(requestedPort)
+            ? requestedPort
+            : Self.defaultClaudeDesktopHTTPSPort
+        if validPort == port {
+            claudeDesktopHTTPSPort = port == 65_535 ? 65_534 : max(1_024, port + 1)
+        } else {
+            claudeDesktopHTTPSPort = validPort
+        }
+
+        if claudeDesktopClientKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            claudeDesktopClientKey = Self.freshDesktopClientKey()
+        }
+        isEnabled = hasClaudeConsumers
+    }
+
     // MARK: Derived
 
     /// client key 兜底：空则用稳定占位，避免 admin/CLI 鉴权两端空值不一致。
     var effectiveClientKey: String {
         let trimmed = clientKey.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "aiusage-global-key" : trimmed
+    }
+
+    var effectiveClaudeCodeEnabled: Bool { claudeCodeEnabled ?? (isEnabled && claudeDesktopEnabled != true) }
+    var effectiveClaudeDesktopEnabled: Bool { claudeDesktopEnabled ?? false }
+    var hasClaudeConsumers: Bool { effectiveClaudeCodeEnabled || effectiveClaudeDesktopEnabled }
+    var effectiveClaudeDesktopHTTPSPort: Int {
+        let requested = claudeDesktopHTTPSPort ?? Self.defaultClaudeDesktopHTTPSPort
+        guard (1_024...65_535).contains(requested), requested != port else {
+            return port == 65_535 ? 65_534 : max(1_024, port + 1)
+        }
+        return requested
+    }
+    var effectiveClaudeDesktopClientKey: String {
+        let value = claudeDesktopClientKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Loaded/default Claude configs are normalized before use. Returning
+        // an empty value here fails closed if an unnormalized in-memory config
+        // is ever constructed; generating in a getter would create a new key
+        // on every read and desynchronize the runtime from the profile.
+        return value
+    }
+    var claudeDesktopBaseURL: String {
+        "https://localhost:\(effectiveClaudeDesktopHTTPSPort)/claude-desktop"
+    }
+    func claudeDesktopSupports1MModels(for nodeID: String) -> Set<String> {
+        Set((claudeDesktopSupports1MByNode?[nodeID] ?? [:]).compactMap { model, enabled in
+            enabled ? model : nil
+        })
     }
 
     /// 含 /v1 的本地地址（Codex 在其后拼 /responses）。
@@ -262,6 +337,10 @@ enum GlobalProxyStore {
             var config = try JSONDecoder().decode(GlobalProxyConfig.self, from: data)
             if track == .science {
                 config.ensureScienceWorkspaceDefaults()
+            } else if track == .claude {
+                let decoded = config
+                config.ensureClaudeDesktopDefaults()
+                if config != decoded { _ = save(config, track: track) }
             }
             return config
         } catch {
@@ -270,10 +349,13 @@ enum GlobalProxyStore {
         }
     }
 
-    static func save(_ config: GlobalProxyConfig, track: GlobalProxyTrack) {
+    @discardableResult
+    static func save(_ config: GlobalProxyConfig, track: GlobalProxyTrack) -> Bool {
         var toSave = config
         if track == .science {
             toSave.ensureScienceWorkspaceDefaults()
+        } else if track == .claude {
+            toSave.ensureClaudeDesktopDefaults()
         }
         let path = configPath(track: track)
         let dir = (path as NSString).deletingLastPathComponent
@@ -282,8 +364,10 @@ enum GlobalProxyStore {
             let data = try JSONEncoder().encode(toSave)
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+            return true
         } catch {
             globalProxyLog.error("Failed to persist global proxy config (\(track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
+            return false
         }
     }
 }

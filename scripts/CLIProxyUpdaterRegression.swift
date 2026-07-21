@@ -424,6 +424,25 @@ struct CLIProxyUpdaterRegression {
             occurrences(of: "cpa-client-current", in: merged) == 1,
             "the AIUsage client key was duplicated"
         )
+        let runtimeKeys = try store.runtimeClientAPIKeys() ?? []
+        try expect(runtimeKeys.contains("external-client-key"), "runtime client keys lost an external key")
+        try expect(runtimeKeys.contains("client-secret"), "runtime client keys lost an unowned key")
+        try expect(runtimeKeys.contains("cpa-client-current"), "runtime client keys lost the managed key")
+        try expect(!runtimeKeys.contains("cpa-client-obsolete"), "runtime client keys returned a retired key")
+        try expect(
+            CLIProxyManagedAPIKeyNamespace.ownedKey(
+                in: ["external-client-key", "cpa-client-current"],
+                preferred: "debug-only-key"
+            ) == "cpa-client-current",
+            "runtime credential selection did not prefer an AIUsage-owned key"
+        )
+        try expect(
+            CLIProxyManagedAPIKeyNamespace.ownedKey(
+                in: ["external-client-key"],
+                preferred: "debug-only-key"
+            ) == nil,
+            "runtime credential selection exposed an unowned external key"
+        )
         try expect(merged.contains("ws-auth: true"), "an existing ws-auth false value was not tightened")
         try expect(!merged.contains("ws-auth: false"), "WebSocket authentication remained disabled")
         let migratedPluginFile = paths.pluginsDirectory

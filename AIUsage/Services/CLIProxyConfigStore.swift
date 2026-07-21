@@ -32,6 +32,15 @@ nonisolated struct CLIProxyConfigStore {
         }
     }
 
+    /// Returns the inference keys from the configuration the CPA process
+    /// actually loads. This matters when production and Debug builds coexist:
+    /// their Keychain vaults are intentionally isolated, while a running CPA
+    /// process and its config file are shared.
+    func runtimeClientAPIKeys() throws -> [String]? {
+        guard let existing = try existingRuntimeConfig() else { return nil }
+        return try RuntimeYAMLDocument(existing).topLevelStringSequence("api-keys")
+    }
+
     func writeRuntimeConfig(
         settings: CLIProxyGatewaySettings,
         secrets: CLIProxySecrets,
@@ -261,6 +270,31 @@ nonisolated private struct RuntimeYAMLDocument {
 
         let replacement = ["\(key):"] + kept
         lines.replaceSubrange(contentRange(range), with: replacement)
+    }
+
+    func topLevelStringSequence(_ key: String) throws -> [String] {
+        guard let range = topLevelRange(key) else { return [] }
+        guard !hasInlineValue(at: range.lowerBound) else {
+            throw CLIProxyGatewayError.configuration(
+                "CPA config uses an unsupported inline sequence for '\(key)'"
+            )
+        }
+
+        var values: [String] = []
+        for index in range.dropFirst() {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            guard leadingSpaces(in: lines[index]) == 2,
+                  trimmed.first == "-",
+                  trimmed.dropFirst().first?.isWhitespace == true else {
+                throw CLIProxyGatewayError.configuration(
+                    "CPA config uses an unsupported complex sequence for '\(key)'"
+                )
+            }
+            let item = String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)
+            values.append(try parseSimpleStringScalar(item, context: key))
+        }
+        return values
     }
 
     private func yamlQuoteIfNeeded(_ value: String) -> String {

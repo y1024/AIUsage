@@ -59,6 +59,11 @@ extension QuotaHTTPServer {
         /// and the normal Claude Code hot-switch contract compatible.
         let availableModels: [String]?
         let defaultModel: String?
+        /// "science" or "desktop". Desktop requires Anthropic role-shaped
+        /// route IDs even when the real upstream is Gemini/GPT/GLM.
+        let catalogRouteStyle: String?
+        /// Real upstream IDs whose catalog entries should offer a 1M variant.
+        let catalogSupports1M: [String]?
         /// passthrough 模式下无条件改写入站 model 为该真实模型（OpenCode anthropic 接口用）。
         let forcedModel: String?
     }
@@ -83,6 +88,20 @@ extension QuotaHTTPServer {
 
         httpLog.info("Global proxy hot-swapped Claude upstream → node \(update.nodeId, privacy: .public)")
         return jsonResponse(["ok": true, "activeNodeId": update.nodeId], headers: headers)
+    }
+
+    func handleClaudeStatusAdmin(request: HTTPRequest, headers: [String: String]) -> HTTPResponse {
+        guard let adminKey = globalProxyAdminKey, !adminKey.isEmpty else {
+            return jsonResponse(["error": "Not found"], status: 404, headers: headers)
+        }
+        guard let provided = bearerToken(from: request.headers), provided == adminKey else {
+            return jsonResponse(["error": "Unauthorized"], status: 401, headers: headers)
+        }
+        return jsonResponse([
+            "ok": true,
+            "activeNodeId": activeNodeId ?? "",
+            "traffic": claudeTrafficSnapshot(),
+        ], headers: headers)
     }
 
     /// OpenCode 轨（chat/completions 透传）热切换请求体：宿主 App 下发的「当前激活节点上游」。

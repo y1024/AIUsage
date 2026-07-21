@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import os.log
+import QuotaBackend
 
 // MARK: - Global Proxy Manager (track-generic)
 // 编排某条轨的「全局统一代理」：把激活节点投影为上游、驱动 GlobalProxyRuntime 启停/热切换、
@@ -36,7 +37,17 @@ final class GlobalProxyManager: ObservableObject {
         self.config = GlobalProxyStore.load(track: track)
     }
 
-    var isEnabled: Bool { config.isEnabled }
+    /// For the Claude page this remains the Claude Code consumer state; the
+    /// shared runtime may continue running for Desktop after Code disconnects.
+    var isEnabled: Bool {
+        track == .claude ? config.effectiveClaudeCodeEnabled : config.isEnabled
+    }
+    /// Runtime ownership is broader than the visible Code connection state.
+    /// Claude Desktop can be the only active consumer while `isEnabled` is
+    /// intentionally false on the Code tab.
+    var isRuntimeEnabled: Bool {
+        track == .claude ? config.hasClaudeConsumers : config.isEnabled
+    }
     var activeNodeId: String? { config.activeNodeId }
     var isProxyRunning: Bool { runtime.isProcessRunning }
 
@@ -86,6 +97,52 @@ final class GlobalProxyManager: ObservableObject {
         persist()
     }
 
+    /// Stores the single localhost HTTPS endpoint used by Claude Desktop.
+    /// It is intentionally independent from every upstream node: switching
+    /// nodes changes only the gateway's upstream projection, never Desktop's
+    /// endpoint. Active Desktop sessions must disconnect before this changes.
+    @discardableResult
+    func updateClaudeDesktopHTTPSPort(_ port: Int) -> Bool {
+        guard track == .claude,
+              !isBusy,
+              !config.effectiveClaudeDesktopEnabled,
+              (1_024...65_535).contains(port),
+              port != config.port else { return false }
+        config.claudeDesktopHTTPSPort = port
+        persist()
+        return true
+    }
+
+    /// Updates one Desktop picker capability without changing the public route
+    /// identity. The active gateway and selected profile are refreshed through
+    /// the same hot-switch notification used for node changes.
+    func updateClaudeDesktopSupports1M(
+        nodeID: String,
+        modelID: String,
+        enabled: Bool
+    ) async {
+        guard track == .claude else { return }
+        var byNode = config.claudeDesktopSupports1MByNode ?? [:]
+        var models = byNode[nodeID] ?? [:]
+        if enabled {
+            models[modelID] = true
+        } else {
+            models.removeValue(forKey: modelID)
+        }
+        if models.isEmpty {
+            byNode.removeValue(forKey: nodeID)
+        } else {
+            byNode[nodeID] = models
+        }
+        config.claudeDesktopSupports1MByNode = byNode
+        persist()
+
+        guard config.effectiveClaudeDesktopEnabled,
+              config.activeNodeId == nodeID,
+              runtime.isProcessRunning else { return }
+        await reapplyActiveUpstream()
+    }
+
     // MARK: - Enable / Disable / Switch
 
     func enable(activeNodeId nodeId: String) async {
@@ -94,7 +151,8 @@ final class GlobalProxyManager: ObservableObject {
         operationError = nil
         defer { isBusy = false }
 
-        guard let node = node(for: nodeId), let env = adapter.startEnv(config: config, nodeId: nodeId) else {
+        guard let node = node(for: nodeId),
+              let env = runtimeEnvironment(nodeId: nodeId) else {
             operationError = AppSettings.shared.t("Selected node not found.", "未找到所选节点。")
             return
         }
@@ -107,22 +165,32 @@ final class GlobalProxyManager: ObservableObject {
         do {
             try await runtime.start(
                 port: config.port,
-                bindHost: config.bindAddress,
+                bindHost: runtimeBindAddress,
                 env: env,
                 nodeId: node.id,
-                nodeName: node.name
+                nodeName: node.name,
+                httpsPort: track == .claude && config.effectiveClaudeDesktopEnabled
+                    ? config.effectiveClaudeDesktopHTTPSPort : nil,
+                tlsIdentityPath: track == .claude && config.effectiveClaudeDesktopEnabled
+                    ? TLSCertificateManager.shared.identityFilePath : nil
             )
             try adapter.activateCLIConfig(config)
-            config.isEnabled = true
+            if track == .claude { config.claudeCodeEnabled = true }
+            config.isEnabled = track == .claude ? config.hasClaudeConsumers : true
             config.activeNodeId = nodeId
             persist()
+            if track == .claude, config.effectiveClaudeDesktopEnabled {
+                NotificationCenter.default.post(name: .claudeGatewayActiveNodeDidChange, object: nodeId)
+            }
             globalProxyManagerLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) enabled with node \(nodeId, privacy: .public)")
         } catch is CancellationError {
             // Superseded by a newer lifecycle operation on this runtime; the
             // newer owner controls the process, so exit without a raw error.
             return
         } catch {
-            runtime.stop()
+            if track != .claude || !config.effectiveClaudeDesktopEnabled {
+                runtime.stop()
+            }
             operationError = error.localizedDescription
             globalProxyManagerLog.error("Failed to enable global proxy (\(self.track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
         }
@@ -131,6 +199,20 @@ final class GlobalProxyManager: ObservableObject {
     func switchActiveNode(to nodeId: String) async {
         guard !isBusy else { return }
         guard config.isEnabled, runtime.isProcessRunning else {
+            if track == .claude, config.effectiveClaudeDesktopEnabled {
+                do {
+                    try await attachClaudeDesktop(
+                        activeNodeId: nodeId,
+                        httpsPort: config.effectiveClaudeDesktopHTTPSPort,
+                        clientKey: config.effectiveClaudeDesktopClientKey,
+                        tlsIdentityPath: TLSCertificateManager.shared.identityFilePath
+                    )
+                    NotificationCenter.default.post(name: .claudeGatewayActiveNodeDidChange, object: nodeId)
+                } catch {
+                    operationError = error.localizedDescription
+                }
+                return
+            }
             await enable(activeNodeId: nodeId)
             return
         }
@@ -153,6 +235,9 @@ final class GlobalProxyManager: ObservableObject {
             )
             config.activeNodeId = nodeId
             persist()
+            if track == .claude, config.effectiveClaudeDesktopEnabled {
+                NotificationCenter.default.post(name: .claudeGatewayActiveNodeDidChange, object: nodeId)
+            }
         } catch {
             operationError = error.localizedDescription
             globalProxyManagerLog.error("Failed to switch global proxy node (\(self.track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
@@ -162,7 +247,7 @@ final class GlobalProxyManager: ObservableObject {
     /// 节点配置已变（例如 CPA 从 convert 切到 Anthropic 透传）时，对当前激活节点强制再推上游。
     func reapplyActiveUpstream() async {
         guard !isBusy else { return }
-        guard config.isEnabled, runtime.isProcessRunning,
+        guard isRuntimeEnabled, runtime.isProcessRunning,
               let nodeId = config.activeNodeId else { return }
         isBusy = true
         operationError = nil
@@ -177,6 +262,9 @@ final class GlobalProxyManager: ObservableObject {
                 nodeId: node.id,
                 nodeName: node.name
             )
+            if track == .claude, config.effectiveClaudeDesktopEnabled {
+                NotificationCenter.default.post(name: .claudeGatewayActiveNodeDidChange, object: nodeId)
+            }
         } catch {
             operationError = error.localizedDescription
             globalProxyManagerLog.error(
@@ -191,13 +279,19 @@ final class GlobalProxyManager: ObservableObject {
         operationError = nil
         defer { isBusy = false }
 
-        runtime.stop()
         do {
             try adapter.restoreCLIConfig()
         } catch {
             globalProxyManagerLog.error("Failed to restore CLI config on global proxy disable (\(self.track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
         }
-        config.isEnabled = false
+        if track == .claude {
+            config.claudeCodeEnabled = false
+            config.isEnabled = config.hasClaudeConsumers
+            if !config.effectiveClaudeDesktopEnabled { runtime.stop() }
+        } else {
+            runtime.stop()
+            config.isEnabled = false
+        }
         persist()
         globalProxyManagerLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) disabled")
     }
@@ -206,12 +300,36 @@ final class GlobalProxyManager: ObservableObject {
 
     /// 启动时恢复：持久化为启用且激活节点仍存在 → 重新拉起进程；否则优雅停用并清理 CLI 配置。
     func restoreOnLaunch() async {
-        guard config.isEnabled else { return }
-        guard AppSettings.shared.proxyAutoRestoreOnLaunch else { return }
+        let shouldRestore = track == .claude ? config.hasClaudeConsumers : config.isEnabled
+        guard shouldRestore else { return }
+        // An attached Desktop profile permanently points at this localhost
+        // endpoint. Leaving that profile selected while skipping its listener
+        // produces a broken provider after every app restart, so Desktop is a
+        // required restore independent of the optional CLI auto-restore switch.
+        let desktopRequiresRuntime = track == .claude && config.effectiveClaudeDesktopEnabled
+        guard desktopRequiresRuntime || AppSettings.shared.proxyAutoRestoreOnLaunch else { return }
 
         guard let node = node(for: config.activeNodeId),
-              let env = adapter.startEnv(config: config, nodeId: node.id) else {
-            globalProxyManagerLog.notice("Global proxy (\(self.track.rawValue, privacy: .public)) active node missing on launch; disabling")
+              let env = runtimeEnvironment(nodeId: node.id) else {
+            let message = AppSettings.shared.t(
+                "The previously selected node no longer exists. Choose another node to reconnect.",
+                "之前选择的节点已不存在，请选择其它节点重新连接。"
+            )
+            globalProxyManagerLog.notice("Global proxy (\(self.track.rawValue, privacy: .public)) active node missing on launch")
+            // Keep an attached Desktop profile recoverable. Calling the normal
+            // Claude `disable()` path here would only turn off Code while still
+            // leaving Desktop enabled, which hides the real restore failure.
+            if track == .claude, config.effectiveClaudeDesktopEnabled {
+                runtime.stop()
+                if config.effectiveClaudeCodeEnabled {
+                    try? adapter.restoreCLIConfig()
+                    config.claudeCodeEnabled = false
+                }
+                config.isEnabled = config.hasClaudeConsumers
+                _ = persist()
+                operationError = message
+                return
+            }
             await disable()
             return
         }
@@ -219,13 +337,20 @@ final class GlobalProxyManager: ObservableObject {
         do {
             try await runtime.start(
                 port: config.port,
-                bindHost: config.bindAddress,
+                bindHost: runtimeBindAddress,
                 env: env,
                 nodeId: node.id,
-                nodeName: node.name
+                nodeName: node.name,
+                httpsPort: track == .claude && config.effectiveClaudeDesktopEnabled
+                    ? config.effectiveClaudeDesktopHTTPSPort : nil,
+                tlsIdentityPath: track == .claude && config.effectiveClaudeDesktopEnabled
+                    ? TLSCertificateManager.shared.identityFilePath : nil
             )
-            // CLI 配置在上次会话已写入并指向同端口；幂等重注入确保仍然有效。
-            try adapter.activateCLIConfig(config)
+            // Only the Code consumer owns ~/.claude/settings.json. Desktop-only
+            // restore must never touch it.
+            if track != .claude || config.effectiveClaudeCodeEnabled {
+                try adapter.activateCLIConfig(config)
+            }
             globalProxyManagerLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) restored on launch with node \(node.id, privacy: .public)")
         } catch is CancellationError {
             return
@@ -237,7 +362,162 @@ final class GlobalProxyManager: ObservableObject {
 
     // MARK: - Helpers
 
-    private func persist() {
-        GlobalProxyStore.save(config, track: track)
+    /// Attach Claude Desktop as a second consumer of the Claude Gateway.  The
+    /// process is restarted only to add the HTTPS listener; Claude Code keeps
+    /// the same HTTP port/key throughout.
+    func attachClaudeDesktop(
+        activeNodeId nodeId: String,
+        httpsPort: Int,
+        clientKey: String,
+        tlsIdentityPath: String
+    ) async throws {
+        guard track == .claude else { return }
+        guard !isBusy else { throw GlobalProxyRuntimeError.startFailed("operation in progress") }
+        guard (1_024...65_535).contains(httpsPort), httpsPort != config.port else {
+            throw GlobalProxyRuntimeError.startFailed("invalid Claude Desktop HTTPS port")
+        }
+        let normalizedClientKey = clientKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedClientKey.isEmpty else {
+            throw GlobalProxyRuntimeError.startFailed("Claude Desktop client key is unavailable")
+        }
+        isBusy = true
+        operationError = nil
+        defer { isBusy = false }
+
+        let previousConfig = config
+        config.claudeDesktopEnabled = true
+        config.claudeDesktopHTTPSPort = httpsPort
+        config.claudeDesktopClientKey = normalizedClientKey
+        guard let node = node(for: nodeId), let env = runtimeEnvironment(nodeId: nodeId) else {
+            config = previousConfig
+            throw GlobalProxyRuntimeError.startFailed(AppSettings.shared.t("Selected node not found.", "未找到所选节点。"))
+        }
+
+        do {
+            try await runtime.start(
+                port: config.port,
+                bindHost: "127.0.0.1",
+                env: env,
+                nodeId: node.id,
+                nodeName: node.name,
+                httpsPort: config.effectiveClaudeDesktopHTTPSPort,
+                tlsIdentityPath: tlsIdentityPath
+            )
+            config.activeNodeId = nodeId
+            config.isEnabled = config.hasClaudeConsumers
+            guard persist() else {
+                throw GlobalProxyRuntimeError.startFailed("failed to save Claude Desktop runtime state")
+            }
+        } catch {
+            config = previousConfig
+            await restoreRuntimeBestEffort()
+            throw error
+        }
     }
+
+    func detachClaudeDesktop() async throws {
+        guard track == .claude else { return }
+        guard !isBusy else { throw GlobalProxyRuntimeError.startFailed("operation in progress") }
+        isBusy = true
+        defer { isBusy = false }
+
+        let previousConfig = config
+        config.claudeDesktopEnabled = false
+        config.isEnabled = config.hasClaudeConsumers
+        do {
+            if config.effectiveClaudeCodeEnabled,
+               let nodeId = config.activeNodeId,
+               let node = node(for: nodeId),
+               let env = runtimeEnvironment(nodeId: nodeId) {
+                try await runtime.start(
+                    port: config.port,
+                    bindHost: config.bindAddress,
+                    env: env,
+                    nodeId: node.id,
+                    nodeName: node.name
+                )
+            } else {
+                runtime.stop()
+            }
+            guard persist() else {
+                throw GlobalProxyRuntimeError.startFailed("failed to save Claude Desktop runtime state")
+            }
+        } catch {
+            config = previousConfig
+            await restoreRuntimeBestEffort()
+            throw error
+        }
+    }
+
+    /// Restore the exact consumer shape that existed before a failed attach or
+    /// detach transaction. This keeps Code available and never leaves the
+    /// persisted Desktop profile pointing at a listener with different keys.
+    private func restoreRuntimeBestEffort() async {
+        guard config.hasClaudeConsumers,
+              let nodeId = config.activeNodeId,
+              let node = node(for: nodeId),
+              let env = runtimeEnvironment(nodeId: nodeId) else {
+            runtime.stop()
+            return
+        }
+        try? await runtime.start(
+            port: config.port,
+            bindHost: runtimeBindAddress,
+            env: env,
+            nodeId: node.id,
+            nodeName: node.name,
+            httpsPort: config.effectiveClaudeDesktopEnabled ? config.effectiveClaudeDesktopHTTPSPort : nil,
+            tlsIdentityPath: config.effectiveClaudeDesktopEnabled
+                ? TLSCertificateManager.shared.identityFilePath : nil
+        )
+    }
+
+    private func runtimeEnvironment(nodeId: String) -> [String: String]? {
+        guard var env = adapter.startEnv(config: config, nodeId: nodeId) else { return nil }
+        guard track == .claude, config.effectiveClaudeDesktopEnabled else { return env }
+        env["ANTHROPIC_DESKTOP_API_KEY"] = config.effectiveClaudeDesktopClientKey
+
+        guard let node = ProxyViewModel.shared.configurations.first(where: {
+            $0.id == nodeId && ProxyNodeFamily.claude.contains($0.nodeType)
+        }) else { return env }
+        let catalog = ClaudeDesktopProfileStore.catalog(
+            for: node,
+            supports1M: config.claudeDesktopSupports1MModels(for: node.id)
+        )
+        let upstreamModels = catalog.map(\.upstreamModel)
+        if let data = try? JSONEncoder().encode(upstreamModels),
+           let json = String(data: data, encoding: .utf8) {
+            env["AIUSAGE_CLAUDE_MODELS_JSON"] = json
+        }
+        if let defaultModel = catalog.first(where: { $0.upstreamModel == node.defaultModel })?.upstreamModel
+            ?? catalog.first?.upstreamModel {
+            env["AIUSAGE_CLAUDE_DEFAULT_MODEL"] = defaultModel
+        }
+        let supports1M = catalog.filter(\.supports1M).map(\.upstreamModel)
+        if let data = try? JSONEncoder().encode(supports1M),
+           let json = String(data: data, encoding: .utf8) {
+            env["AIUSAGE_CLAUDE_SUPPORTS_1M_JSON"] = json
+        }
+        env["AIUSAGE_CLAUDE_ROUTE_STYLE"] = "desktop"
+        env["AIUSAGE_CLAUDE_MODEL_CATALOG"] = "1"
+        env["AIUSAGE_CLAUDE_EXACT_MODELS"] = "1"
+        return env
+    }
+
+    /// Desktop's official 3P endpoint is intentionally local-only. Because
+    /// Code and Desktop share one process, attaching Desktop narrows the shared
+    /// listener to loopback even if Code previously allowed LAN access.
+    private var runtimeBindAddress: String {
+        track == .claude && config.effectiveClaudeDesktopEnabled ? "127.0.0.1" : config.bindAddress
+    }
+
+    @discardableResult
+    private func persist() -> Bool {
+        if track == .claude { config.ensureClaudeDesktopDefaults() }
+        return GlobalProxyStore.save(config, track: track)
+    }
+}
+
+extension Notification.Name {
+    static let claudeGatewayActiveNodeDidChange = Notification.Name("AIUsage.ClaudeGatewayActiveNodeDidChange")
 }

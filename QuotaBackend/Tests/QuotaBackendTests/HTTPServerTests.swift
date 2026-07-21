@@ -96,6 +96,18 @@ final class HTTPServerTests: XCTestCase {
         XCTAssertEqual(parsed.body, body)
     }
 
+    func testClaudeDesktopPrefixNormalizationPreservesQueryBytesAndSurface() {
+        let requestData = Data(
+            "GET /claude-desktop/v1/models?limit=1&beta=true HTTP/1.1\r\nHost: localhost\r\n\r\n".utf8
+        )
+        let server = QuotaHTTPServer(host: "127.0.0.1", port: 0)
+
+        let normalized = server.normalizeClaudeRoute(server.parseHTTPRequest(requestData))
+
+        XCTAssertEqual(normalized.path, "/v1/models?limit=1&beta=true")
+        XCTAssertEqual(normalized.clientSurface, .desktop)
+    }
+
     // MARK: - SSE Event Formatting Tests
 
     func testSSEEventFormatting() {
