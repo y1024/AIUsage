@@ -489,7 +489,7 @@ extension ProxyTarget {
     var gatewayTitle: String {
         switch self {
         case .codex: "Codex"
-        case .claude: "Claude Code"
+        case .claude: "Claude"
         case .openCode: "OpenCode"
         case .cpa: "CPA"
         }
@@ -498,7 +498,7 @@ extension ProxyTarget {
     var gatewayDetail: String {
         switch self {
         case .codex: "Responses"
-        case .claude: "Anthropic"
+        case .claude: "Code · Desktop · Science"
         case .openCode: "Responses"
         case .cpa: L("OpenAI-compatible upstream", "OpenAI 兼容上游")
         }
