@@ -5,9 +5,9 @@
 | 项目 | 当前值 |
 |---|---|
 | 需求来源 | [Issue #50](https://github.com/sylearn/AIUsage/issues/50) 及维护者补充说明 |
-| 当前阶段 | `P1～P4 implemented / P5 hardening / P6 release` |
-| 当前里程碑 | `P6：0.15.0 发布` |
-| 当前进行中的任务 | `CD-604` — 0.15.0 release playbook |
+| 当前阶段 | `0.15.0 released / post-release compatibility follow-up` |
+| 当前里程碑 | `P6：0.15.0 已发布` |
+| 当前进行中的任务 | 无；下一项为 `CD-205` consumer 4-state 回归 |
 | 最后更新 | 2026-07-21 |
 | 支持平台首期 | macOS |
 
@@ -857,8 +857,8 @@ struct ClaudeDesktopIntegrationConfig: Codable, Equatable {
 | CD-601 | DONE | 将本文从规划态更新为实现态，补真实文件/端口/限制 | CD-509 | 2026-07-21 implementation update |
 | CD-602 | DONE | 新增用户指南与排障，解释 Ready/Connected 和安全恢复 | CD-509 | `CLAUDE_DESKTOP_USER_GUIDE.md` |
 | CD-603 | PARTIAL | 更新 README 截图和中英文功能说明 | CD-406, CD-602 | 中英文能力说明与用户指南已完成；新版截图待补 |
-| CD-604 | TODO | 按 `docs/RELEASE_PLAYBOOK.md` 完成版本、签名、发布与 appcast | CD-601～603 | release evidence |
-| CD-605 | TODO | 回复 Issue #50，说明正确需求边界、使用方式和兼容限制 | CD-604 | Issue comment/link |
+| CD-604 | DONE | 按 `docs/RELEASE_PLAYBOOK.md` 完成版本、签名、发布与 appcast | CD-601～603 | [v0.15.0](https://github.com/sylearn/AIUsage/releases/tag/v0.15.0) + CI 29828103912 + appcast `f0e9f08` |
+| CD-605 | DONE | 回复 Issue #50，说明正确需求边界、使用方式和兼容限制 | CD-604 | [issue comment](https://github.com/sylearn/AIUsage/issues/50#issuecomment-5033819333)，已按 completed 关闭 |
 
 ## 15. 验收标准
 
@@ -924,10 +924,10 @@ struct ClaudeDesktopIntegrationConfig: Codable, Equatable {
 ## 18. Current Focus
 
 ```text
-Milestone: P6 — 0.15.0 发布
-Doing:     CD-604 — release playbook、CI 产物与 appcast 核验
-Next:      CD-605 — 回复并关闭 Issue #50
-Then:      CD-205 — Code/Desktop consumer 4-state 回归
+Milestone: P6 — 0.15.0 已发布
+Doing:     none
+Next:      CD-205 — Code/Desktop consumer 4-state 回归
+Then:      CD-501 — OpenAI Chat 转换节点真实回复
 Blocked:   none
 ```
 
@@ -1012,6 +1012,15 @@ DeepSeek Anthropic passthrough 已取得真实回复；CPA 401 已覆盖 key 轮
 - 中英文 README 新增 Claude Desktop Gateway 能力与快速入口；用户指南同步 CPA key 所有权边界。
 - 预检通过：QuotaBackend 175 tests、Claude proxy、Science auth、CLIProxy 离线回归、CLIProxy v7.2.93 在线完整资产回归、Desktop fixtures、profile transaction、Xcode Debug/Release、Universal 本地打包、全仓 secret scan 与 `git diff --check`。
 - 本地打包确认 AIUsage 与 `Contents/Helpers/QuotaServer` 均为 `arm64 + x86_64`，嵌套 helper、Sparkle 工具与外层 App 签名结构通过；正式签名产物仍以 GitHub Actions 为准。
+
+### 2026-07-21 — CD-604 / CD-605 DONE · 0.15.0 RELEASED
+
+- 提交 `9d67b87`、标签 `v0.15.0` 已推送；Release Build [29828103912](https://github.com/sylearn/AIUsage/actions/runs/29828103912) 全步骤通过。
+- GitHub Release 已发布 `AIUsage-0.15.0-macOS.dmg` 与 `AIUsage-0.15.0-macOS.zip`，非 draft / prerelease，并补齐用户可读 Release Notes。
+- CI 回写 appcast 提交 `f0e9f08`；本地已 fast-forward，同步确认 version/shortVersion 均为 `0.15.0`、下载地址正确并包含 Sparkle EdDSA signature。
+- 独立下载正式 ZIP 复核：SHA-256 `4eebb88053cc52d8689ad9ce984fdeae68aa29616b060ba769acf17fea851b1b`；App 与 QuotaServer 都是 `x86_64 arm64`；没有旧 `Resources/Helpers/QuotaServer`。
+- 正式 App、`Contents/Helpers/QuotaServer` 与 Sparkle `Autoupdate` 的 leaf certificate SHA-256 均为 `568fd5eeba6b8e9eb373f9cee44ecc2da5f6bc767a413599d607a28468d2c930`，`codesign --deep --strict` 通过。
+- [Issue #50](https://github.com/sylearn/AIUsage/issues/50#issuecomment-5033819333) 已回复实现边界、快速使用、恢复策略与兼容限制，并按 completed 关闭。
 
 后续日志模板：
 
