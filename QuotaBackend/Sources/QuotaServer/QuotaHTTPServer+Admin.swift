@@ -62,6 +62,9 @@ extension QuotaHTTPServer {
         /// "science" or "desktop". Desktop requires Anthropic role-shaped
         /// route IDs even when the real upstream is Gemini/GPT/GLM.
         let catalogRouteStyle: String?
+        /// Desktop hot-switch mode maps its three stable route IDs through the
+        /// current node tiers. Full-catalog mode keeps exact upstream identity.
+        let mapDesktopTierRoutes: Bool?
         /// Real upstream IDs whose catalog entries should offer a 1M variant.
         let catalogSupports1M: [String]?
         /// passthrough 模式下无条件改写入站 model 为该真实模型（OpenCode anthropic 接口用）。

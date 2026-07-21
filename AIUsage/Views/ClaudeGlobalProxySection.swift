@@ -16,6 +16,7 @@ struct ClaudeGlobalProxySection: View {
     @State private var haikuModel: String = ""
     @State private var selectedNodeId: String = ""
     @State private var pendingSharedRouteNodeId: String?
+    @State private var showModelRoutingHelp = false
 
     private static let claudeBrand = Color(red: 0.85, green: 0.45, blue: 0.25)
 
@@ -117,26 +118,46 @@ struct ClaudeGlobalProxySection: View {
     // 三层模型并排一行，省纵向空间；端口/三模型仅停用态可改。
 
     private var configContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
-                GlobalProxyField(label: L("Port", "端口")) {
-                    TextField(
-                        "14400",
-                        value: portBinding,
-                        format: IntegerFormatStyle<Int>.number.grouping(.never)
-                    )
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 90)
-                }
-                modelColumn(L("Opus", "Opus"), placeholder: GlobalProxyConfig.defaultClaudeOpus, text: $opusModel)
-                modelColumn(L("Sonnet", "Sonnet"), placeholder: GlobalProxyConfig.defaultClaudeSonnet, text: $sonnetModel)
-                modelColumn(L("Haiku", "Haiku"), placeholder: GlobalProxyConfig.defaultClaudeHaiku, text: $haikuModel)
-                Spacer(minLength: 0)
+        HStack(alignment: .top, spacing: 10) {
+            GlobalProxyField(label: L("Port", "端口")) {
+                TextField(
+                    "14400",
+                    value: portBinding,
+                    format: IntegerFormatStyle<Int>.number.grouping(.never)
+                )
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
             }
-            GlobalProxyTip(text: L(
-                "These three names are just fixed tier entries Claude Code sends — name them anything. Each is rewritten to the active node's real big / middle / small upstream model.",
-                "三层模型名仅作 Claude Code 固定入口名，可任意取名；请求会按层改写为激活节点真实的 大 / 中 / 小 上游模型。"
-            ))
+            modelColumn(L("Opus", "Opus"), placeholder: GlobalProxyConfig.defaultClaudeOpus, text: $opusModel)
+            modelColumn(L("Sonnet", "Sonnet"), placeholder: GlobalProxyConfig.defaultClaudeSonnet, text: $sonnetModel)
+            modelColumn(L("Haiku", "Haiku"), placeholder: GlobalProxyConfig.defaultClaudeHaiku, text: $haikuModel)
+            Button {
+                showModelRoutingHelp.toggle()
+            } label: {
+                Image(systemName: "questionmark.circle")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L("Model routing", "模型路由说明"))
+            .popover(isPresented: $showModelRoutingHelp, arrowEdge: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L("Three stable routes", "三条固定路由"))
+                        .font(.headline)
+                    Text(L(
+                        "These names are the stable entries sent by Claude Code. Gateway rewrites them to the active node's big, middle and small models.",
+                        "这些名称是 Claude Code 使用的固定入口；Gateway 会把它们改写为当前节点的大、中、小模型。"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(16)
+                .frame(width: 320, alignment: .leading)
+            }
+            Spacer(minLength: 0)
         }
     }
 
@@ -227,19 +248,13 @@ struct ClaudeGlobalProxySection: View {
     private var gatewaySubtitle: String {
         switch (manager.config.effectiveClaudeCodeEnabled, manager.config.effectiveClaudeDesktopEnabled) {
         case (true, true):
-            return L(
-                "Code and Desktop share one stable route; switching affects both.",
-                "Code 与 Desktop 共享一条固定路由；切换会同时影响两端。"
-            )
+            return L("Code + Desktop · shared route", "Code + Desktop · 共享路由")
         case (true, false):
-            return L("Claude Code is attached to a stable local route.", "Claude Code 已接入固定本机路由。")
+            return L("Code · hot switch", "Code · 热切换")
         case (false, true):
-            return L(
-                "Desktop is using the Gateway; Code can stay direct or join this route.",
-                "Desktop 正在使用 Gateway；Code 可保持直连，也可加入此路由。"
-            )
+            return L("Desktop · Code independent", "Desktop · Code 独立")
         case (false, false):
-            return L("Attach Code to a stable route with hot node switching.", "让 Code 接入可热切换节点的固定路由。")
+            return L("Stable route · hot switch", "固定入口 · 热切换")
         }
     }
 

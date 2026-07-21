@@ -60,6 +60,10 @@ public struct ClaudeProxyConfiguration: Sendable {
     /// use different public model identities. Desktop requires role-shaped
     /// Anthropic routes while Science keeps its compatibility selection IDs.
     public let catalogRouteStyle: ScienceModelProtocolAdapter.RouteStyle
+    /// Only Desktop's hot-switch mode interprets its three stable public route
+    /// IDs as tier aliases. Full-catalog mode must route an identically named
+    /// real upstream model exactly instead of guessing from the string.
+    public let mapDesktopTierRoutes: Bool
     /// Real upstream model IDs explicitly advertised with a 1M-context picker
     /// variant. The route adapter projects this onto the public catalog rows.
     public let catalogSupports1M: Set<String>
@@ -90,6 +94,7 @@ public struct ClaudeProxyConfiguration: Sendable {
         exposeScienceModelCatalog: Bool = false,
         preferExactCatalogModels: Bool = false,
         catalogRouteStyle: ScienceModelProtocolAdapter.RouteStyle = .science,
+        mapDesktopTierRoutes: Bool = false,
         catalogSupports1M: Set<String> = [],
         forcedModel: String? = nil,
         requestTimeout: TimeInterval = 60,
@@ -124,6 +129,7 @@ public struct ClaudeProxyConfiguration: Sendable {
         self.exposeScienceModelCatalog = exposeScienceModelCatalog && !self.availableModels.isEmpty
         self.preferExactCatalogModels = preferExactCatalogModels
         self.catalogRouteStyle = catalogRouteStyle
+        self.mapDesktopTierRoutes = mapDesktopTierRoutes
         self.catalogSupports1M = catalogSupports1M
         let trimmedForced = forcedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.forcedModel = (trimmedForced?.isEmpty == false) ? trimmedForced : nil
@@ -155,14 +161,14 @@ public struct ClaudeProxyConfiguration: Sendable {
             // The route itself must pass through the current node's tier map;
             // returning it as a literal upstream model would couple Desktop to
             // one node and defeat Gateway hot switching.
-            if catalogRouteStyle == .desktop,
+            if mapDesktopTierRoutes,
                ScienceModelProtocolAdapter.isStableDesktopTierRoute(resolved) {
                 return mapTierRouteToUpstream(resolved)
             }
             return resolved
         }
         if preferExactCatalogModels, availableModels.contains(requestModel) {
-            if catalogRouteStyle == .desktop,
+            if mapDesktopTierRoutes,
                ScienceModelProtocolAdapter.isStableDesktopTierRoute(requestModel) {
                 return mapTierRouteToUpstream(requestModel)
             }
@@ -310,6 +316,7 @@ public struct ClaudeProxyConfiguration: Sendable {
         let catalogRouteStyle = ScienceModelProtocolAdapter.RouteStyle(
             rawValue: environment["AIUSAGE_CLAUDE_ROUTE_STYLE"] ?? "science"
         ) ?? .science
+        let mapDesktopTierRoutes = environment["AIUSAGE_CLAUDE_DESKTOP_TIER_ROUTES"] == "1"
         let catalogSupports1M: Set<String> = Set(
             environment["AIUSAGE_CLAUDE_SUPPORTS_1M_JSON"]
                 .flatMap { $0.data(using: .utf8) }
@@ -351,6 +358,7 @@ public struct ClaudeProxyConfiguration: Sendable {
                 exposeScienceModelCatalog: exposeCatalog,
                 preferExactCatalogModels: preferExactCatalog,
                 catalogRouteStyle: catalogRouteStyle,
+                mapDesktopTierRoutes: mapDesktopTierRoutes,
                 catalogSupports1M: catalogSupports1M,
                 forcedModel: forcedModel,
                 interceptor: enableRewrite ? AnyRouterInterceptor() : nil
@@ -388,6 +396,7 @@ public struct ClaudeProxyConfiguration: Sendable {
             exposeScienceModelCatalog: exposeCatalog,
             preferExactCatalogModels: preferExactCatalog,
             catalogRouteStyle: catalogRouteStyle,
+            mapDesktopTierRoutes: mapDesktopTierRoutes,
             catalogSupports1M: catalogSupports1M
         )
     }

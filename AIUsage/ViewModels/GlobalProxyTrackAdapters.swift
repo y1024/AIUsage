@@ -192,6 +192,8 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
         ]
         if config.effectiveClaudeDesktopEnabled {
             payload["catalogRouteStyle"] = "desktop"
+            payload["mapDesktopTierRoutes"] =
+                config.effectiveClaudeDesktopCatalogMode == .smartRoutes
             payload["catalogSupports1M"] = desktopProjection.supports1MModels
         }
         return payload

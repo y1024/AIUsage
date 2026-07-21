@@ -246,9 +246,6 @@ extension MenuBarView {
             title: L("Active node · hot-swap", "激活节点 · 热切换"),
             rows: nodes.map { node in
                 MenuBarTrackPanelRow(id: node.id, name: node.name,
-                                     subtitle: manager.track == .claude && manager.config.effectiveClaudeDesktopEnabled
-                                        ? L("Switches the shared Code + Desktop route", "将同时切换 Code + Desktop 共享路由")
-                                        : nil,
                                      isActive: manager.activeNodeId == node.id) {
                     Task { await manager.switchActiveNode(to: node.id) }
                     closePanel()

@@ -47,7 +47,7 @@ struct MenuBarTrackPanel: View {
             header
             if isGlobal {
                 Text(manager.track == .claude && manager.config.effectiveClaudeDesktopEnabled
-                     ? L("Shared with Desktop · switching changes both", "与 Desktop 共享 · 切换将同时影响两端")
+                     ? L("Desktop · shared route", "Desktop · 共享路由")
                      : L("Fixed port :\(manager.config.port) · hot-swap",
                          "固定端口 :\(manager.config.port) · 热切换"))
                     .font(.system(size: 10))
@@ -56,8 +56,8 @@ struct MenuBarTrackPanel: View {
                     .padding(.bottom, 8)
             } else if manager.track == .claude && manager.config.effectiveClaudeDesktopEnabled {
                 Text(L(
-                    "Desktop is using Claude Gateway; Code remains independent.",
-                    "Desktop 正在使用 Claude Gateway；Code 仍保持独立。"
+                    "Desktop · Code independent",
+                    "Desktop · Code 独立"
                 ))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)

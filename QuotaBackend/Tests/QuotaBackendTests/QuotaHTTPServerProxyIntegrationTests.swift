@@ -151,6 +151,7 @@ final class QuotaHTTPServerProxyIntegrationTests: XCTestCase {
             availableModels: ["new-default", "new-extra"],
             defaultModel: "new-default",
             catalogRouteStyle: nil,
+            mapDesktopTierRoutes: nil,
             catalogSupports1M: nil,
             forcedModel: nil
         )

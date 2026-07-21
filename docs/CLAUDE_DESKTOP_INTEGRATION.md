@@ -708,7 +708,6 @@ struct ClaudeDesktopIntegrationConfig: Codable, Equatable {
 | ADR-CD-002 | ACCEPTED | 侧边栏合并为 Claude Hub；Code/Desktop/Science 使用三个 Tab。 |
 | ADR-CD-003 | ACCEPTED | Code 与 Desktop 共享 Claude Gateway、活动节点和热切换。 |
 | ADR-CD-004 | ACCEPTED | Science 只共享节点池和 Hub，不共享 runtime/auth。 |
-| ADR-CD-005 | ACCEPTED | Desktop 提供智能三档路由与完整节点目录两种模型模式；前者跨节点无重载，后者在可见目录变化时自动重载。Science 始终使用独立的完整目录，切换后刷新网页取新列表。 |
 | ADR-CD-005 | ACCEPTED | Desktop 使用稳定 safe route；真实上游模型不进入 profile。 |
 | ADR-CD-006 | ACCEPTED | Desktop 配置使用稳定自有 profile + 精确快照 + durable journal。 |
 | ADR-CD-007 | ACCEPTED | 断开恢复连接前状态，不默认切 1P，不抢占外部修改。 |
@@ -719,6 +718,7 @@ struct ClaudeDesktopIntegrationConfig: Codable, Equatable {
 | ADR-CD-012 | PROVISIONAL | Cowork egress 默认最小 allowlist；无法确认最低集合前不写 `[*]`。 |
 | ADR-CD-013 | ACCEPTED | Desktop 使用一个产品级可编辑 HTTPS 端口；节点级 HTTPS 从 Claude 节点 UI 退役，旧字段只保留解码兼容。 |
 | ADR-CD-014 | ACCEPTED | 接入会重启 Desktop 以加载新 profile；断开会精确恢复、关闭 listener 并退出 Desktop，但不自动重新打开。 |
+| ADR-CD-015 | ACCEPTED | Desktop 提供智能三档路由与完整节点目录两种模型模式；前者跨节点无重载，后者在可见目录变化时自动重载。Science 始终使用独立的完整目录，切换后刷新网页取新列表。 |
 
 ## 13. 分阶段实施 Plan
 

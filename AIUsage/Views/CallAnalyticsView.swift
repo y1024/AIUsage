@@ -20,6 +20,7 @@ struct CallAnalyticsView: View {
     @State var expandedServers: Set<String> = []
     /// 自定义区间的日期选择弹层是否展开。
     @State private var showCustomPopover = false
+    @State private var showSourceHelp = false
 
     var window: CallWindow { CallWindow(rawValue: windowRaw) ?? .month }
 
@@ -546,14 +547,27 @@ struct CallAnalyticsView: View {
 
     private var sourceFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 7) {
                 Text(L("Data Sources", "数据来源", key: "calls.sources.title"))
                     .font(.subheadline.weight(.semibold))
-                Text(L("Directly scanned local CLI session logs — separate from the Gateway usage ledger.",
-                       "直接扫描各 CLI 的本地会话日志，与 Gateway 用量账本相互独立。",
-                       key: "calls.sources.sub"))
-                    .font(.caption2)
+                Text(L("Local CLI logs", "本地 CLI 日志"))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
+                Button {
+                    showSourceHelp.toggle()
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(L("About data sources", "数据来源说明"))
+                .popover(isPresented: $showSourceHelp, arrowEdge: .top) {
+                    sourceHelpPopover
+                }
+                Spacer()
             }
 
             ForEach(store.snapshot.sources.filter { !hiddenSources.contains($0.source) }, id: \.source) { status in
@@ -566,15 +580,32 @@ struct CallAnalyticsView: View {
                 }
                 .help(sourceHelp(status))
             }
-
-            Text(L("Rules-hit counts are not tracked: rules are injected as context, not discrete calls.",
-                   "不统计「规则命中」：规则是上下文注入，并非离散调用。",
-                   key: "calls.note.rules"))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var sourceHelpPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("About call data", "关于调用数据"))
+                .font(.headline)
+            Text(L(
+                "This page scans local Claude Code, Codex and OpenCode session logs. It is independent from Gateway usage statistics; Claude Desktop and Science traffic is not included.",
+                "本页扫描 Claude Code、Codex 与 OpenCode 的本地会话日志，与 Gateway 用量统计相互独立；不包含 Claude Desktop 与 Science 流量。"
+            ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            Text(L(
+                "Rules-hit counts are unavailable because rules are injected as context rather than recorded as discrete calls.",
+                "规则以上下文形式注入，并不会记录为独立调用，因此无法统计规则命中次数。"
+            ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(width: 350, alignment: .leading)
     }
 
     /// 单行简述：绿点正常时显示「扫 N 个会话 · M 次调用」。

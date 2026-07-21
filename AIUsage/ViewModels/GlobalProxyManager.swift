@@ -114,20 +114,32 @@ final class GlobalProxyManager: ObservableObject {
               !config.effectiveClaudeDesktopEnabled,
               (1_024...65_535).contains(port),
               port != config.port else { return false }
+        operationError = nil
+        let previousPort = config.claudeDesktopHTTPSPort
         config.claudeDesktopHTTPSPort = port
-        persist()
+        guard persist() else {
+            config.claudeDesktopHTTPSPort = previousPort
+            operationError = AppSettings.shared.t(
+                "Could not save the Desktop HTTPS port.",
+                "无法保存 Desktop HTTPS 端口。"
+            )
+            return false
+        }
         return true
     }
 
     /// Updates one Desktop picker capability without changing the public route
     /// identity. The active gateway and selected profile are refreshed through
     /// the same hot-switch notification used for node changes.
+    @discardableResult
     func updateClaudeDesktopSupports1M(
         nodeID: String,
         modelID: String,
         enabled: Bool
-    ) async {
-        guard track == .claude else { return }
+    ) async -> Bool {
+        guard track == .claude, !isBusy else { return false }
+        operationError = nil
+        let previousCapabilities = config.claudeDesktopSupports1MByNode
         var byNode = config.claudeDesktopSupports1MByNode ?? [:]
         var models = byNode[nodeID] ?? [:]
         if enabled {
@@ -141,12 +153,27 @@ final class GlobalProxyManager: ObservableObject {
             byNode[nodeID] = models
         }
         config.claudeDesktopSupports1MByNode = byNode
-        persist()
+        guard persist() else {
+            config.claudeDesktopSupports1MByNode = previousCapabilities
+            operationError = AppSettings.shared.t(
+                "Could not save the Desktop model capability.",
+                "无法保存 Desktop 模型能力。"
+            )
+            return false
+        }
 
         guard config.effectiveClaudeDesktopEnabled,
               config.activeNodeId == nodeID,
-              runtime.isProcessRunning else { return }
+              runtime.isProcessRunning else { return true }
         await reapplyActiveUpstream()
+        if let failure = operationError {
+            config.claudeDesktopSupports1MByNode = previousCapabilities
+            _ = persist()
+            await reapplyActiveUpstream()
+            operationError = failure
+            return false
+        }
+        return true
     }
 
     /// Changes the public model surface exposed to Claude Desktop while
@@ -264,11 +291,8 @@ final class GlobalProxyManager: ObservableObject {
                 NotificationCenter.default.post(name: .claudeGatewayActiveNodeDidChange, object: nodeId)
             }
             globalProxyManagerLog.info("Global proxy (\(self.track.rawValue, privacy: .public)) enabled with node \(nodeId, privacy: .public)")
-        } catch is CancellationError {
-            // Superseded by a newer lifecycle operation on this runtime; the
-            // newer owner controls the process, so exit without a raw error.
-            return
         } catch {
+            let wasCancelled = error is CancellationError
             config = previousConfig
             // A failed Code attach must not strand Desktop on a route that was
             // only selected for the failed transaction.
@@ -283,13 +307,20 @@ final class GlobalProxyManager: ObservableObject {
                     nodeName: previousNode.name
                 )
             }
-            if !canReuseClaudeRuntime && (track != .claude || !config.effectiveClaudeDesktopEnabled) {
+            // A cancelled start means another lifecycle owner already replaced
+            // this runtime generation. Never stop that newer process here.
+            if !wasCancelled,
+               !canReuseClaudeRuntime,
+               (track != .claude || !config.effectiveClaudeDesktopEnabled) {
                 runtime.stop()
             }
             try? adapter.restoreCLIConfig()
             if let activePerNode {
                 await adapter.activatePerNode(activePerNode)
             }
+            // Cancellation is an internal hand-off, not a user-facing failure,
+            // but it still needs the same direct-route rollback as any error.
+            if wasCancelled { return }
             operationError = error.localizedDescription
             globalProxyManagerLog.error("Failed to enable global proxy (\(self.track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
         }
@@ -654,6 +685,8 @@ final class GlobalProxyManager: ObservableObject {
             env["AIUSAGE_CLAUDE_SUPPORTS_1M_JSON"] = json
         }
         env["AIUSAGE_CLAUDE_ROUTE_STYLE"] = "desktop"
+        env["AIUSAGE_CLAUDE_DESKTOP_TIER_ROUTES"] =
+            config.effectiveClaudeDesktopCatalogMode == .smartRoutes ? "1" : "0"
         env["AIUSAGE_CLAUDE_MODEL_CATALOG"] = "1"
         env["AIUSAGE_CLAUDE_EXACT_MODELS"] = "1"
         return env

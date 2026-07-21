@@ -27,15 +27,18 @@ extension ProxyManagementView {
                     let isDragging = draggingConfigId == config.id
                     let claudeUsage = claudeNodeUsage(for: config.id)
                     let canAttachCodeToGateway = shouldAttachCodeToGateway(nodeID: config.id)
+                    let deletionBlockReason = viewModel.managedRuntimeDeletionBlockReason(for: config.id)
                     VStack(spacing: 0) {
                         ConfigurationCardView(
                             config: config,
                             isActive: viewModel.isNodeActivated(config.id),
                             isProxyOnlyRunning: viewModel.proxyOnlyRunningIds.contains(config.id),
-                            isBusy: viewModel.isOperationInProgress(config.id),
+                            isBusy: viewModel.isOperationInProgress(config.id)
+                                || isManagedRuntimeBusy(nodeID: config.id),
                             isActivationManaged: !family.isCodex && claudeGateway.isEnabled,
                             canAttachCodeToGateway: canAttachCodeToGateway,
                             claudeUsage: claudeUsage,
+                            deletionBlockReason: deletionBlockReason,
                             isSelected: isSelected,
                             statsRequests: stats.totalRequests,
                             statsSuccessRate: stats.successRate,
@@ -135,6 +138,14 @@ extension ProxyManagementView {
             science: science,
             scienceRunning: science && scienceProxy.isProxyRunning && scienceProxy.sandboxHealthy
         )
+    }
+
+    private func isManagedRuntimeBusy(nodeID: String) -> Bool {
+        if codexGateway.activeNodeId == nodeID, codexGateway.isBusy { return true }
+        if claudeGateway.activeNodeId == nodeID, claudeGateway.isBusy { return true }
+        if scienceProxy.activeNodeId == nodeID, scienceProxy.isBusy { return true }
+        if openCodeGateway.activeNodeId == nodeID, openCodeGateway.isBusy { return true }
+        return false
     }
 
     /// Desktop already owns this node's Gateway route. Treat the node's Code

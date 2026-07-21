@@ -234,7 +234,8 @@ final class ClaudeProxyConverterTests: XCTestCase {
             defaultModel: ScienceModelProtocolAdapter.desktopSonnetRouteID,
             exposeScienceModelCatalog: true,
             preferExactCatalogModels: true,
-            catalogRouteStyle: .desktop
+            catalogRouteStyle: .desktop,
+            mapDesktopTierRoutes: true
         )
 
         XCTAssertEqual(
@@ -249,6 +250,24 @@ final class ClaudeProxyConverterTests: XCTestCase {
         XCTAssertEqual(config.mapToUpstreamModel(routes[0]), "node-a-large")
         XCTAssertEqual(config.mapToUpstreamModel(routes[1]), "node-a-balanced")
         XCTAssertEqual(config.mapToUpstreamModel(routes[2]), "node-a-fast")
+    }
+
+    func testDesktopFullCatalogDoesNotGuessStableTierRouteFromRealModelName() {
+        let realModel = ScienceModelProtocolAdapter.desktopOpusRouteID
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.example.com",
+            upstreamAPIKey: "test-key",
+            bigModel: "different-tier-target",
+            availableModels: [realModel],
+            defaultModel: realModel,
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .desktop,
+            mapDesktopTierRoutes: false
+        )
+
+        XCTAssertEqual(config.mapToUpstreamModel(realModel), realModel)
     }
 
     func testRawCatalogIDThatLooksGeneratedStillRoutesExactly() {

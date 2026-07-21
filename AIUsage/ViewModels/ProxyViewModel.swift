@@ -376,46 +376,47 @@ class ProxyViewModel: ObservableObject {
 
     func updateProfile(_ profile: NodeProfile) async {
         let config = profile.metadata.proxy.toProxyConfiguration(metadata: profile.metadata)
-        profileStore.save(profile)
-
-        if let index = configurations.firstIndex(where: { $0.id == profile.id }) {
-            let wasActivated = isNodeActivated(profile.id)
-            let wasProxyOnly = proxyOnlyRunningIds.contains(profile.id)
-            let busyIds: Set<String> = [profile.id]
-            setOperationInProgress(busyIds, isActive: true)
-            defer { setOperationInProgress(busyIds, isActive: false) }
-            if wasActivated {
-                do {
-                    try await performDeactivationTransaction(profile.id)
-                } catch {
-                    reportOperationError(error)
-                    return
-                }
-            } else if wasProxyOnly {
-                runtimeService.stopProxyOnly(for: configurations[index])
-                proxyOnlyRunningIds.remove(profile.id)
+        guard let index = configurations.firstIndex(where: { $0.id == profile.id }) else { return }
+        let wasActivated = isNodeActivated(profile.id)
+        let wasProxyOnly = proxyOnlyRunningIds.contains(profile.id)
+        let busyIds: Set<String> = [profile.id]
+        setOperationInProgress(busyIds, isActive: true)
+        defer { setOperationInProgress(busyIds, isActive: false) }
+        if wasActivated {
+            do {
+                try await performDeactivationTransaction(profile.id)
+            } catch {
+                reportOperationError(error)
+                return
             }
-            configurations[index] = config
-            // 配置已变更，旧的连通性测试结果不再代表当前节点，清除之。
-            clearConnectivityResult(for: profile.id)
-            // 节点定价可能在本次保存中被新增/修改，回填历史 $0 日志的费用。
-            recalculateCosts(for: profile.id)
-            if wasActivated {
-                do {
-                    try await performActivationTransaction(profile.id)
-                } catch {
-                    reportOperationError(error)
-                }
-            } else if wasProxyOnly {
-                do {
-                    try await runtimeService.startProxyOnly(for: config)
-                    proxyOnlyRunningIds.insert(profile.id)
-                } catch {
-                    proxyRuntimeLog.error("Failed to restart proxy-only after profile update for \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
-                }
-                saveProxyOnlyIds()
-            }
+        } else if wasProxyOnly {
+            runtimeService.stopProxyOnly(for: configurations[index])
+            proxyOnlyRunningIds.remove(profile.id)
         }
+        configurations[index] = config
+        // Persist only after the old runtime has stopped successfully. Otherwise
+        // disk state could describe a node that the still-running process does not.
+        profileStore.save(profile)
+        // 配置已变更，旧的连通性测试结果不再代表当前节点，清除之。
+        clearConnectivityResult(for: profile.id)
+        // 节点定价可能在本次保存中被新增/修改，回填历史 $0 日志的费用。
+        recalculateCosts(for: profile.id)
+        if wasActivated {
+            do {
+                try await performActivationTransaction(profile.id)
+            } catch {
+                reportOperationError(error)
+            }
+        } else if wasProxyOnly {
+            do {
+                try await runtimeService.startProxyOnly(for: config)
+                proxyOnlyRunningIds.insert(profile.id)
+            } catch {
+                proxyRuntimeLog.error("Failed to restart proxy-only after profile update for \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+            saveProxyOnlyIds()
+        }
+        await reapplyManagedRuntimesIfNeeded(for: profile.id)
     }
 
     func updateConfiguration(_ config: ProxyConfiguration) async {
@@ -458,10 +459,15 @@ class ProxyViewModel: ObservableObject {
                 }
                 saveProxyOnlyIds()
             }
+            await reapplyManagedRuntimesIfNeeded(for: config.id)
         }
     }
 
     func deleteConfiguration(_ id: String) async {
+        if let reason = managedRuntimeDeletionBlockReason(for: id) {
+            operationErrorMessage = reason
+            return
+        }
         let busyIds: Set<String> = [id]
         setOperationInProgress(busyIds, isActive: true)
         defer { setOperationInProgress(busyIds, isActive: false) }
@@ -496,6 +502,54 @@ class ProxyViewModel: ObservableObject {
         saveStatistics()
         saveLogs()
         flushLogsRefresh()
+    }
+
+    /// A managed runtime owns a stable route that outlives the node editor. Do
+    /// not orphan that route by deleting its active node; the user disconnects
+    /// the named consumer first, which also gives each product a clean restore.
+    func managedRuntimeDeletionBlockReason(for id: String) -> String? {
+        var consumers: [String] = []
+
+        let codex = GlobalProxyManager.codex
+        if codex.isRuntimeEnabled, codex.activeNodeId == id { consumers.append("Codex") }
+
+        let claude = GlobalProxyManager.claude
+        if claude.activeNodeId == id {
+            if claude.config.effectiveClaudeCodeEnabled { consumers.append("Code") }
+            if claude.config.effectiveClaudeDesktopEnabled { consumers.append("Desktop") }
+        }
+
+        let science = ScienceProxyManager.shared
+        if science.isEnabled, science.activeNodeId == id { consumers.append("Science") }
+
+        let openCode = GlobalProxyManager.opencode
+        if openCode.isRuntimeEnabled, openCode.activeNodeId == id { consumers.append("OpenCode") }
+
+        guard !consumers.isEmpty else { return nil }
+        let names = AppSettings.shared.language == "zh"
+            ? consumers.joined(separator: "、")
+            : consumers.joined(separator: ", ")
+        return AppSettings.shared.t(
+            "Disconnect \(names) before deleting this node.",
+            "请先断开 \(names)，再删除此节点。"
+        )
+    }
+
+    /// Node edits must reach every live projection, not just the direct Code
+    /// route. This keeps Desktop's picker, Science's model catalog, and global
+    /// gateways aligned with the single shared node library.
+    private func reapplyManagedRuntimesIfNeeded(for id: String) async {
+        let managers = [GlobalProxyManager.codex, GlobalProxyManager.claude, GlobalProxyManager.opencode]
+        for manager in managers where manager.isRuntimeEnabled && manager.activeNodeId == id {
+            await manager.reapplyActiveUpstream()
+            if let failure = manager.operationError { operationErrorMessage = failure }
+        }
+
+        let science = ScienceProxyManager.shared
+        if science.isEnabled, science.activeNodeId == id {
+            await science.reapplyActiveUpstream()
+            if let failure = science.operationError { operationErrorMessage = failure }
+        }
     }
 
     // MARK: - Activate / Deactivate

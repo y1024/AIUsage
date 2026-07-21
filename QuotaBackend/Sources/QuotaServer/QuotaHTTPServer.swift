@@ -239,6 +239,9 @@ public final class QuotaHTTPServer: @unchecked Sendable {
                 .flatMap(ScienceModelProtocolAdapter.RouteStyle.init(rawValue:))
                 ?? currentConfig?.catalogRouteStyle
                 ?? .science,
+            mapDesktopTierRoutes: update.mapDesktopTierRoutes
+                ?? currentConfig?.mapDesktopTierRoutes
+                ?? false,
             catalogSupports1M: Set(update.catalogSupports1M ?? Array(currentConfig?.catalogSupports1M ?? [])),
             forcedModel: mode == .anthropicPassthrough ? update.forcedModel : nil
         )

@@ -4,9 +4,9 @@
 
 ## 1. 一分钟使用
 
-1. 在侧边栏打开 `Claude`，选择顶部 `Desktop / 桌面端接入`。
+1. 在侧边栏打开 `Claude`，选择顶部 `Desktop`。
 2. 在共享路由卡中选择一个已经配置模型库的 Claude 节点。
-3. 选择 `热切换三档` 或 `节点全部模型`；再按需打开 `模型设置`，为确实支持 1M 上下文的真实模型开启 `1M`。
+3. 选择 `热切换` 或 `节点模型`；再按需打开 `模型设置`，为确实支持 1M 上下文的真实模型开启 `1M`。
 4. 点 `一键接入 Desktop`。
 5. AIUsage 会准备 localhost HTTPS、启动共享 Gateway、应用自有 3P profile，并重新打开 Claude Desktop。
 6. 配置与本机端口正常后显示 `已接入`；当 Claude Desktop 的第一条真实请求到达 AIUsage 后，状态变为 `已连接`。
@@ -18,8 +18,8 @@
 ### 顶部三个产品入口
 
 - `Code / 代理与节点`：管理 Claude Code 使用的节点与全局代理。
-- `Desktop / 桌面端接入`：把同一批节点接入 Claude Desktop 官方 3P 模式。
-- `Science / 研究工作台`：独立的 Science 沙箱/接管流程。
+- `Desktop`：把同一批节点接入 Claude Desktop 官方 3P 模式。
+- `Science`：独立的 Science 沙箱/接管流程。
 
 Code 与 Desktop 共享 Claude Gateway 和当前节点，但使用独立客户端密钥与独立配置生命周期。Desktop 可以单独接入，并不要求先开启 Code 全局代理；如果两端同时接入，切节点会同步影响两端。Science 只共享节点库，不共享运行时或登录状态。
 

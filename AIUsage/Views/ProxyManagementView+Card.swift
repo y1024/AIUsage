@@ -31,6 +31,7 @@ struct ConfigurationCardView: View, Equatable {
     let isActivationManaged: Bool
     let canAttachCodeToGateway: Bool
     let claudeUsage: ClaudeNodeUsage
+    let deletionBlockReason: String?
     let isSelected: Bool
     let statsRequests: Int
     let statsSuccessRate: Double
@@ -62,6 +63,7 @@ struct ConfigurationCardView: View, Equatable {
         lhs.isActivationManaged == rhs.isActivationManaged &&
         lhs.canAttachCodeToGateway == rhs.canAttachCodeToGateway &&
         lhs.claudeUsage == rhs.claudeUsage &&
+        lhs.deletionBlockReason == rhs.deletionBlockReason &&
         lhs.isSelected == rhs.isSelected &&
         lhs.statsRequests == rhs.statsRequests &&
         lhs.statsSuccessRate == rhs.statsSuccessRate &&
@@ -228,8 +230,8 @@ struct ConfigurationCardView: View, Equatable {
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
-                    .disabled(isBusy)
-                    .instantTooltip(L("Delete", "删除"))
+                    .disabled(isBusy || deletionBlockReason != nil)
+                    .instantTooltip(deletionBlockReason ?? L("Delete", "删除"))
                 }
             }
 
@@ -447,7 +449,7 @@ struct ConfigurationCardView: View, Equatable {
                 systemImage: isActive ? "stop.circle" : "power.circle"
             )
         }
-        .disabled(isBusy)
+        .disabled(isBusy || isActivationManaged)
 
         if config.needsProxyProcess {
             Button { onToggleProxyOnly() } label: {
@@ -503,6 +505,7 @@ struct ConfigurationCardView: View, Equatable {
         Button(role: .destructive) { onDelete() } label: {
             Label(L("Delete", "删除"), systemImage: "trash")
         }
+        .disabled(isBusy || deletionBlockReason != nil)
     }
 
     // MARK: - Subviews
