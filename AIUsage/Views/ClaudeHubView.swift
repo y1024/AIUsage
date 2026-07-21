@@ -45,10 +45,15 @@ enum ClaudeHubTab: String, CaseIterable, Identifiable {
 /// gateway/node pool; Science remains an intentionally isolated runtime.
 struct ClaudeHubView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var selectedTab: ClaudeHubTab
+    @AppStorage(DefaultsKey.claudeHubSelectedTab) private var selectedTabRawValue = ClaudeHubTab.desktop.rawValue
+    private let initialTab: ClaudeHubTab?
 
-    init(initialTab: ClaudeHubTab = .desktop) {
-        _selectedTab = State(initialValue: initialTab)
+    init(initialTab: ClaudeHubTab? = nil) {
+        self.initialTab = initialTab
+    }
+
+    private var selectedTab: ClaudeHubTab {
+        ClaudeHubTab(rawValue: selectedTabRawValue) ?? .desktop
     }
 
     var body: some View {
@@ -68,6 +73,14 @@ struct ClaudeHubView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            // The normal sidebar entry restores the last product. Legacy routes may
+            // still request a specific product and become the new remembered value.
+            let restoredTab = initialTab ?? ClaudeHubTab(rawValue: selectedTabRawValue) ?? .desktop
+            if selectedTabRawValue != restoredTab.rawValue {
+                selectedTabRawValue = restoredTab.rawValue
+            }
+        }
     }
 
     private var header: some View {
@@ -101,9 +114,9 @@ struct ClaudeHubView: View {
         let selected = selectedTab == tab
         return Button {
             if reduceMotion {
-                selectedTab = tab
+                selectedTabRawValue = tab.rawValue
             } else {
-                withAnimation(.easeOut(duration: 0.18)) { selectedTab = tab }
+                withAnimation(.easeOut(duration: 0.18)) { selectedTabRawValue = tab.rawValue }
             }
         } label: {
             HStack(spacing: 9) {

@@ -856,7 +856,7 @@ struct ClaudeDesktopIntegrationConfig: Codable, Equatable {
 |---|---|---|---|---|
 | CD-601 | DONE | 将本文从规划态更新为实现态，补真实文件/端口/限制 | CD-509 | 2026-07-21 implementation update |
 | CD-602 | DONE | 新增用户指南与排障，解释 Ready/Connected 和安全恢复 | CD-509 | `CLAUDE_DESKTOP_USER_GUIDE.md` |
-| CD-603 | PARTIAL | 更新 README 截图和中英文功能说明 | CD-406, CD-602 | 中英文能力说明与用户指南已完成；新版截图待补 |
+| CD-603 | DONE | 更新 README 截图和中英文功能说明 | CD-406, CD-602 | Code / Desktop / Science 中英文新版截图与能力说明 |
 | CD-604 | DONE | 按 `docs/RELEASE_PLAYBOOK.md` 完成版本、签名、发布与 appcast | CD-601～603 | [v0.15.0](https://github.com/sylearn/AIUsage/releases/tag/v0.15.0) + CI 29828103912 + appcast `f0e9f08` |
 | CD-605 | DONE | 回复 Issue #50，说明正确需求边界、使用方式和兼容限制 | CD-604 | [issue comment](https://github.com/sylearn/AIUsage/issues/50#issuecomment-5033819333)，已按 completed 关闭 |
 
@@ -1021,6 +1021,12 @@ DeepSeek Anthropic passthrough 已取得真实回复；CPA 401 已覆盖 key 轮
 - 独立下载正式 ZIP 复核：SHA-256 `4eebb88053cc52d8689ad9ce984fdeae68aa29616b060ba769acf17fea851b1b`；App 与 QuotaServer 都是 `x86_64 arm64`；没有旧 `Resources/Helpers/QuotaServer`。
 - 正式 App、`Contents/Helpers/QuotaServer` 与 Sparkle `Autoupdate` 的 leaf certificate SHA-256 均为 `568fd5eeba6b8e9eb373f9cee44ecc2da5f6bc767a413599d607a28468d2c930`，`codesign --deep --strict` 通过。
 - [Issue #50](https://github.com/sylearn/AIUsage/issues/50#issuecomment-5033819333) 已回复实现边界、快速使用、恢复策略与兼容限制，并按 completed 关闭。
+
+### 2026-07-21 — CD-401 FOLLOW-UP / CD-603 DONE
+
+- Claude Hub 选中的 Code / Desktop / Science 页面写入稳定的 `UserDefaults` key；离开 Claude、切换其他菜单再返回时恢复上次页面，应用重启后同样保持。旧 Science 导航与深链仍可显式打开 Science，并同步成为新的最近页面。
+- README 中英文展示图替换为同一版 Code / Desktop / Science 三页面截图；Claude 三页连续排列，旧的四张 Claude Code 双图在确认无引用后删除。
+- 验证：Xcode Debug build passed；README 中英文全部本地图片引用存在；`git diff --check` passed。
 
 后续日志模板：
 

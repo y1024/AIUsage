@@ -88,12 +88,18 @@
     <td colspan="2" align="center"><strong>CPA 网关 · 托管运行时、账号池与实时模型</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/Claude-Code-Proxy-1.png" alt="Claude Code 代理节点管理"></td>
-    <td width="50%"><img src="docs/images/Claude-Code-Proxy-2.png" alt="Claude Code 代理配置"></td>
+    <td width="50%"><img src="docs/images/Claude-Code.png" alt="Claude Code 代理与节点管理"></td>
+    <td width="50%"><img src="docs/images/Claude-Desktop.png" alt="Claude Desktop 第三方模型网关"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Claude Code 代理 · 节点管理</strong></td>
-    <td align="center"><strong>Claude Code 代理 · 配置</strong></td>
+    <td align="center"><strong>Claude · Code 代理与节点</strong></td>
+    <td align="center"><strong>Claude · Desktop 接入</strong></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/images/Claude-Science.png" alt="Claude Science 研究工作台"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><strong>Claude · Science 研究工作台</strong></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/Codex-Proxy-stats.png" alt="Codex 代理"></td>
@@ -102,12 +108,6 @@
   <tr>
     <td align="center"><strong>Codex 代理 · 节点与订阅</strong></td>
     <td align="center"><strong>OpenCode 代理 · 节点与统计</strong></td>
-  </tr>
-  <tr>
-    <td colspan="2"><img src="docs/images/Claude-Science.png" alt="Claude Science 代理"></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><strong>Claude Science 代理 · 免登录本地 Science</strong></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/proxy-stats.png" alt="用量统计"></td>

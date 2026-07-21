@@ -88,12 +88,18 @@
     <td colspan="2" align="center"><strong>CPA Gateway · Managed Runtime, Account Pool &amp; Live Models</strong></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/images/Claude-Code-Proxy-1_en.png" alt="Claude Code proxy node management"></td>
-    <td width="50%"><img src="docs/images/Claude-Code-Proxy-2_en.png" alt="Claude Code proxy configuration"></td>
+    <td width="50%"><img src="docs/images/Claude-Code_en.png" alt="Claude Code proxy and node management"></td>
+    <td width="50%"><img src="docs/images/Claude-Desktop_en.png" alt="Claude Desktop third-party model gateway"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Claude Code Proxy · Node Management</strong></td>
-    <td align="center"><strong>Claude Code Proxy · Configuration</strong></td>
+    <td align="center"><strong>Claude · Code Proxy &amp; Nodes</strong></td>
+    <td align="center"><strong>Claude · Desktop Gateway</strong></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/images/Claude-Science_en.png" alt="Claude Science research workspace"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><strong>Claude · Science Research Workspace</strong></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/Codex-Proxy-stats_en.png" alt="Codex proxy"></td>
@@ -102,12 +108,6 @@
   <tr>
     <td align="center"><strong>Codex Proxy · Nodes &amp; Subscriptions</strong></td>
     <td align="center"><strong>OpenCode Proxy · Nodes &amp; Stats</strong></td>
-  </tr>
-  <tr>
-    <td colspan="2"><img src="docs/images/Claude-Science_en.png" alt="Claude Science proxy"></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><strong>Claude Science Proxy · Login-free Local Science</strong></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/images/proxy-stats_en.png" alt="Usage stats"></td>
