@@ -18,6 +18,8 @@ struct CLIProxyAccountDetailSheet: View {
     @State private var operationError: String?
     @State private var isUpdating = false
     @State private var isLoadingModels = false
+    @State private var isCheckingConnectivity = false
+    @State private var connectivityMessage: String?
 
     init(
         file: CLIProxyAuthFile,
@@ -40,6 +42,11 @@ struct CLIProxyAccountDetailSheet: View {
                     if let operationError { GatewayErrorBanner(message: operationError) }
 
                     statusStrip
+                    if let connectivityMessage {
+                        Label(connectivityMessage, systemImage: "network")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
                     if !currentFile.runtimeOnly {
                         noteCard
@@ -179,10 +186,19 @@ struct CLIProxyAccountDetailSheet: View {
             text = L("Paused", "已停用"); tint = .secondary
         } else if cooling {
             text = L("Cooling", "冷却中"); tint = .orange
-        } else if manager.authFileModelErrors[currentFile.name] != nil {
-            text = L("Unavailable", "不可用"); tint = .orange
         } else {
-            text = L("Ready", "可用"); tint = .green
+            switch manager.connectivityState(for: currentFile) {
+            case .checking:
+                text = L("Checking", "检测中"); tint = .blue
+            case .connected:
+                text = L("Connected", "已连通"); tint = .green
+            case .failed:
+                text = L("Connection issue", "连通异常"); tint = .orange
+            case .unsupported:
+                text = L("Catalog only", "仅模型目录"); tint = .secondary
+            case nil:
+                text = L("Not checked", "尚未检测"); tint = .secondary
+            }
         }
         return GatewayQuietBadge(text: text, tint: tint)
     }
@@ -237,7 +253,7 @@ struct CLIProxyAccountDetailSheet: View {
         GatewayCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text(L("Available models", "可用模型"))
+                    Text(L("Model catalog", "模型目录"))
                         .font(.headline)
                     Spacer()
                     Button {
@@ -259,7 +275,7 @@ struct CLIProxyAccountDetailSheet: View {
                             .foregroundStyle(.secondary)
                     }
                 } else if models.isEmpty {
-                    Text(L("No models returned for this account.", "该账号未返回可用模型。"))
+                    Text(L("No models are listed for this account.", "该账号的模型目录为空。"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -300,7 +316,24 @@ struct CLIProxyAccountDetailSheet: View {
     }
 
     private var actionBar: some View {
-        HStack {
+        HStack(spacing: 10) {
+            Button {
+                isCheckingConnectivity = true
+                connectivityMessage = nil
+                Task {
+                    let result = await manager.testAccountConnectivity(for: currentFile)
+                    connectivityMessage = result.detail
+                    isCheckingConnectivity = false
+                }
+            } label: {
+                Label(
+                    isCheckingConnectivity ? L("Checking…", "检测中…") : L("Check connectivity", "检测连通性"),
+                    systemImage: "network"
+                )
+            }
+            .disabled(isCheckingConnectivity || manager.isManagingAccounts)
+            .help(L("Uses an upstream account endpoint; no model inference is run", "访问上游账号接口，不发起模型推理"))
+
             Button(currentFile.disabled ? L("Enable", "启用") : L("Pause", "停用")) {
                 isUpdating = true
                 operationError = nil

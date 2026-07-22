@@ -20,16 +20,17 @@ struct SubscriptionGatewayAccountsView: View {
     @State private var subscriptionFlash: AppFlash?
     @State private var expandedAccountFamilies: Set<String> = []
     @State private var collapsedAccountFamilies: Set<String> = []
+    @State private var isCheckingAllConnectivity = false
 
     var body: some View {
         let modelCounts = GatewayAccountListLogic.modelCountsByAuthFileName(manager: manager)
         let modelErrors = GatewayAccountListLogic.modelErrorNames(manager: manager)
+        let connectivity = GatewayAccountListLogic.connectivityByAuthFileName(manager: manager)
         let groups = GatewayAccountListLogic.filteredGroups(
             authFiles: manager.authFiles,
             query: query,
             filter: filter,
-            modelCountsByAuthFileName: modelCounts,
-            modelErrorsByAuthFileName: modelErrors
+            connectivityByAuthFileName: connectivity
         )
         let linkedCandidates = GatewayAccountListLogic.linkedCandidateByAuthFileName(manager: manager)
 
@@ -51,11 +52,14 @@ struct SubscriptionGatewayAccountsView: View {
                     HStack(spacing: 4) {
                         GatewayHeaderIconButton(
                             systemImage: "waveform.path.ecg",
-                            help: L("Check all accounts", "检测全部账号"),
-                            isBusy: false,
+                            help: L(
+                                "Check upstream connectivity · no model inference",
+                                "检测上游连通性 · 不发起模型推理"
+                            ),
+                            isBusy: isCheckingAllConnectivity,
                             isDisabled: !runtime.state.isRunning || manager.isManagingAccounts
                         ) {
-                            Task { await manager.probeAllAccountModels() }
+                            Task { await testAllConnectivity() }
                         }
                         GatewayHeaderIconButton(
                             systemImage: "arrow.clockwise",
@@ -68,7 +72,7 @@ struct SubscriptionGatewayAccountsView: View {
                     }
                 }
 
-                summaryRow(modelCounts: modelCounts, modelErrors: modelErrors)
+                summaryRow(connectivity: connectivity)
                 if unsyncedCandidateCount > 0 { aiusageEntryCard }
                 searchField
 
@@ -82,7 +86,8 @@ struct SubscriptionGatewayAccountsView: View {
                             group,
                             linkedCandidates: linkedCandidates,
                             modelCounts: modelCounts,
-                            modelErrors: modelErrors
+                            modelErrors: modelErrors,
+                            connectivity: connectivity
                         )
                     }
                 }
@@ -186,20 +191,16 @@ struct SubscriptionGatewayAccountsView: View {
     }
 
     private func summaryRow(
-        modelCounts: [String: Int],
-        modelErrors: Set<String>
+        connectivity: [String: CLIProxyAccountConnectivityState]
     ) -> some View {
         let accounts = GatewayAccountListLogic.accountFamilies(in: manager.authFiles)
         let attention = GatewayAccountListLogic.attentionAccountCount(
             in: manager.authFiles,
             deduplicationConflicts: manager.authDeduplicationConflictCount,
             hasSyncManifestError: manager.syncManifestError != nil,
-            modelErrorsByAuthFileName: modelErrors
+            connectivityByAuthFileName: connectivity
         )
-        let cooling = GatewayAccountListLogic.coolingAccountCount(
-            in: manager.authFiles,
-            modelErrorsByAuthFileName: modelErrors
-        )
+        let cooling = GatewayAccountListLogic.coolingAccountCount(in: manager.authFiles)
         let paused = GatewayAccountListLogic.pausedAccountCount(in: manager.authFiles)
         return GatewayStatCapsuleRow(
             items: [
@@ -212,8 +213,8 @@ struct SubscriptionGatewayAccountsView: View {
                 ),
                 .init(
                     id: "ready",
-                    value: "\(GatewayAccountListLogic.reachableAccountCount(in: manager.authFiles, modelCountsByAuthFileName: modelCounts, modelErrorsByAuthFileName: modelErrors))",
-                    title: L("available", "可用"),
+                    value: "\(GatewayAccountListLogic.connectedAccountCount(in: manager.authFiles, connectivityByAuthFileName: connectivity))",
+                    title: L("connected", "已连通"),
                     systemImage: "antenna.radiowaves.left.and.right",
                     tint: .blue
                 ),
@@ -323,7 +324,8 @@ struct SubscriptionGatewayAccountsView: View {
         _ group: GatewayAccountGroup,
         linkedCandidates: [String: CLIProxyAccountSyncCandidate],
         modelCounts: [String: Int],
-        modelErrors: Set<String>
+        modelErrors: Set<String>,
+        connectivity: [String: CLIProxyAccountConnectivityState]
     ) -> some View {
         let families = GatewayAccountListLogic.accountFamilies(in: group)
         return GatewayCard(padding: 0) {
@@ -358,7 +360,7 @@ struct SubscriptionGatewayAccountsView: View {
                             linkedCandidate: family.primaryFile.flatMap {
                                 linkedCandidates[$0.name.lowercased()]
                             },
-                            modelErrorNames: modelErrors,
+                            connectivityByFileName: connectivity,
                             isExpanded: isExpanded,
                             isBusy: manager.isManagingAccounts,
                             onToggleExpansion: { toggleFamilyExpansion(family) },
@@ -368,8 +370,8 @@ struct SubscriptionGatewayAccountsView: View {
                             onOpenDetail: {
                                 selectedDetail = family.primaryFile
                             },
-                            onTestAvailability: {
-                                Task { await testAvailability(family) }
+                            onCheckConnectivity: {
+                                Task { await testConnectivity(family) }
                             },
                             onRequestSync: requestSync,
                             onAddToSubscription: {
@@ -386,7 +388,8 @@ struct SubscriptionGatewayAccountsView: View {
                                     presentation: file.runtimeOnly ? .project : .loginDetails,
                                     linkedCandidates: linkedCandidates,
                                     modelCounts: modelCounts,
-                                    modelErrors: modelErrors
+                                    modelErrors: modelErrors,
+                                    connectivity: connectivity
                                 )
                                 if index < family.files.count - 1 {
                                     Divider().padding(.leading, 92)
@@ -399,7 +402,8 @@ struct SubscriptionGatewayAccountsView: View {
                             presentation: .account,
                             linkedCandidates: linkedCandidates,
                             modelCounts: modelCounts,
-                            modelErrors: modelErrors
+                            modelErrors: modelErrors,
+                            connectivity: connectivity
                         )
                     }
                 }
@@ -436,7 +440,8 @@ struct SubscriptionGatewayAccountsView: View {
         presentation: GatewayAccountRowPresentation,
         linkedCandidates: [String: CLIProxyAccountSyncCandidate],
         modelCounts: [String: Int],
-        modelErrors: Set<String>
+        modelErrors: Set<String>,
+        connectivity: [String: CLIProxyAccountConnectivityState]
     ) -> some View {
         let key = file.name.lowercased()
         let failed = modelErrors.contains(key)
@@ -447,17 +452,18 @@ struct SubscriptionGatewayAccountsView: View {
             isBusy: manager.isManagingAccounts,
             modelCount: failed ? nil : modelCounts[key],
             modelLoadFailed: failed,
+            connectivityState: connectivity[key],
             presentation: presentation,
             onOpenDetail: { selectedDetail = file },
             onRequestSync: requestSync,
-            onTestAvailability: {
-                Task { await testAvailability(file) }
+            onCheckConnectivity: {
+                Task { await testConnectivity(file) }
             },
             onSetEnabled: { enabled in
                 Task {
                     await manager.setAuthFile(file, disabled: !enabled)
                     if enabled {
-                        _ = await manager.testAccountAvailability(for: file)
+                        await manager.loadModels(for: file, force: true)
                     }
                 }
             },
@@ -478,39 +484,76 @@ struct SubscriptionGatewayAccountsView: View {
         pendingForceSync = candidate
     }
 
-    private func testAvailability(_ file: CLIProxyAuthFile) async {
-        let result = await manager.testAccountAvailability(for: file)
-        if result.ok {
+    private func testConnectivity(_ file: CLIProxyAuthFile) async {
+        let result = await manager.testAccountConnectivity(for: file)
+        switch result.state {
+        case .connected:
             subscriptionFlash = .success(L(
-                "\(file.displayLabel) · \(result.modelCount) models",
-                "\(file.displayLabel) · \(result.modelCount) 个模型"
+                "\(file.displayLabel) · connected · no model inference",
+                "\(file.displayLabel) · 已连通 · 未发起模型推理"
+            ))
+        case .unsupported:
+            subscriptionFlash = .info("\(file.displayLabel) · \(result.detail)")
+        case .failed:
+            subscriptionFlash = .error(L(
+                "\(file.displayLabel) connection issue · \(result.detail)",
+                "\(file.displayLabel) 连通异常 · \(result.detail)"
+            ))
+        case .checking:
+            break
+        }
+    }
+
+    private func testConnectivity(_ family: GatewayAccountFamily) async {
+        let targets = family.loginFiles.isEmpty ? family.files : family.loginFiles
+        var connected = 0
+        var failed = 0
+        for file in targets {
+            switch await manager.testAccountConnectivity(for: file).state {
+            case .connected: connected += 1
+            case .failed: failed += 1
+            case .checking, .unsupported: break
+            }
+        }
+        if connected > 0, failed == 0 {
+            subscriptionFlash = .success(L(
+                "\(family.accountLabel) · connected · no model inference",
+                "\(family.accountLabel) · 已连通 · 未发起模型推理"
+            ))
+        } else if connected == 0, failed == 0 {
+            subscriptionFlash = .info(L(
+                "\(family.accountLabel) · catalog only; upstream check is unavailable",
+                "\(family.accountLabel) · 仅提供模型目录，暂不支持上游检测"
             ))
         } else {
-            let detail = result.message ?? L("Unknown error", "未知错误")
             subscriptionFlash = .error(L(
-                "\(file.displayLabel) unavailable · \(detail)",
-                "\(file.displayLabel) 不可用 · \(detail)"
+                "\(family.accountLabel) · \(failed) connectivity check(s) failed",
+                "\(family.accountLabel) · \(failed) 项连通检测失败"
             ))
         }
     }
 
-    private func testAvailability(_ family: GatewayAccountFamily) async {
-        let targets = family.projectFiles.isEmpty ? family.files : family.projectFiles
-        var available = 0
-        for file in targets {
-            if await manager.testAccountAvailability(for: file).ok {
-                available += 1
-            }
-        }
-        if available == targets.count {
+    private func testAllConnectivity() async {
+        guard !isCheckingAllConnectivity else { return }
+        isCheckingAllConnectivity = true
+        defer { isCheckingAllConnectivity = false }
+        let results = await manager.testAllAccountConnectivity()
+        let connected = results.filter { $0.state.isConnected }.count
+        let failed = results.filter { $0.state.needsAttention }.count
+        if results.isEmpty {
+            subscriptionFlash = .info(L(
+                "No account supports an inference-free upstream check.",
+                "当前没有可在不发起模型推理的情况下进行上游检测的账号。"
+            ))
+        } else if failed == 0 {
             subscriptionFlash = .success(L(
-                "\(family.accountLabel) · all \(available) projects available",
-                "\(family.accountLabel) · \(available) 个项目均可用"
+                "\(connected) account(s) connected · no model inference",
+                "\(connected) 个账号已连通 · 未发起模型推理"
             ))
         } else {
             subscriptionFlash = .error(L(
-                "\(family.accountLabel) · \(available) of \(targets.count) projects available",
-                "\(family.accountLabel) · \(targets.count) 个项目中 \(available) 个可用"
+                "\(connected) connected · \(failed) need attention",
+                "\(connected) 个已连通 · \(failed) 个需处理"
             ))
         }
     }

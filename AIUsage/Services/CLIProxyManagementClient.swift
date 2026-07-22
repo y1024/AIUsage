@@ -51,6 +51,18 @@ nonisolated struct CLIProxyManagementClient: Sendable {
         let note: String
         let priority: Int
     }
+    private struct APICallRequest: Encodable {
+        let authIndex: String
+        let method: String
+        let url: String
+        let header: [String: String]
+        let data: String
+
+        enum CodingKeys: String, CodingKey {
+            case authIndex = "auth_index"
+            case method, url, header, data
+        }
+    }
 
     let baseURL: URL
     let managementKey: String
@@ -78,6 +90,37 @@ nonisolated struct CLIProxyManagementClient: Sendable {
             query: [URLQueryItem(name: "name", value: name)]
         )
         return response.models
+    }
+
+    /// Runs a credential-scoped upstream request through CPA's protected
+    /// management endpoint. `$TOKEN$` substitution and any supported refresh
+    /// stay owned by CPA; AIUsage never reads the credential token here.
+    func callUpstream(
+        authIndex: String,
+        method: String,
+        url: URL,
+        headers: [String: String],
+        body: String = ""
+    ) async throws -> CLIProxyUpstreamCallResult {
+        let normalizedIndex = authIndex.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedIndex.isEmpty else {
+            throw CLIProxyGatewayError.configuration("auth_index is required for an upstream check")
+        }
+        guard let scheme = url.scheme?.lowercased(), ["https", "http"].contains(scheme), url.host != nil else {
+            throw CLIProxyGatewayError.configuration("upstream check URL is invalid")
+        }
+        let requestBody = try JSONEncoder().encode(APICallRequest(
+            authIndex: normalizedIndex,
+            method: method.uppercased(),
+            url: url.absoluteString,
+            header: headers,
+            data: body
+        ))
+        return try await request(
+            method: "POST",
+            path: "v0/management/api-call",
+            body: requestBody
+        )
     }
 
     func availableModels() async throws -> [CLIProxyModel] {

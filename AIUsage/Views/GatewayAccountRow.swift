@@ -1,7 +1,7 @@
 import SwiftUI
 
 // MARK: - Gateway Account Row（单列紧凑）
-// 可用性以「能否拉到该账号模型」为准；同步只保留「从订阅更新」，不做指纹告警。
+// 模型目录与账号连通性分开展示；只有显式上游检测才能标记「已连通」。
 
 enum GatewayAccountRowPresentation: Equatable {
     case account
@@ -17,10 +17,11 @@ struct GatewayAccountRow: View {
     /// 已缓存模型数；`nil` 表示尚未探测。
     var modelCount: Int? = nil
     var modelLoadFailed: Bool = false
+    var connectivityState: CLIProxyAccountConnectivityState? = nil
     var presentation: GatewayAccountRowPresentation = .account
     let onOpenDetail: () -> Void
     let onRequestSync: (CLIProxyAccountSyncCandidate) -> Void
-    let onTestAvailability: () -> Void
+    let onCheckConnectivity: () -> Void
     let onSetEnabled: (Bool) -> Void
     let onAddToSubscription: () -> Void
     let onDelete: () -> Void
@@ -127,8 +128,8 @@ struct GatewayAccountRow: View {
         Button(action: onOpenDetail) {
             Label(L("Account Details", "账号详情"), systemImage: "info.circle")
         }
-        Button(action: onTestAvailability) {
-            Label(L("Test availability", "测试可用性"), systemImage: "waveform.path.ecg")
+        Button(action: onCheckConnectivity) {
+            Label(L("Check account connectivity", "检测账号连通性"), systemImage: "network")
         }
         if let linkedCandidate {
             Button {
@@ -214,7 +215,7 @@ struct GatewayAccountRow: View {
     private var subtitle: String {
         var parts: [String] = [sourceDescription]
         if modelLoadFailed {
-            parts.append(L("Couldn’t load models", "无法获取可用模型"))
+            parts.append(L("Model catalog unavailable", "模型目录加载失败"))
         } else if let cooling = coolingCaption {
             parts.append(cooling)
         } else if let statusMessage = file.statusMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -257,21 +258,27 @@ struct GatewayAccountRow: View {
 
     @ViewBuilder
     private var trailingStatus: some View {
-        // 不显示绿灯「可用」：列模型成功只靠「N 模型」徽章表达连通。
         if file.disabled {
             statusDot(L("Paused", "已停用"), .secondary)
-        } else if modelLoadFailed {
-            statusDot(L("Sign-in issue", "登录异常"), .orange)
         } else if coolingCaption != nil || file.unavailable {
             statusDot(L("Temporarily limited", "暂时受限"), .orange)
         } else if file.gatewayNeedsAttention {
             statusDot(L("Attention", "异常"), .orange)
         } else if file.gatewayProviderID == "unknown" {
             statusDot(L("Unrecognized", "无法识别"), .orange)
-        } else if modelCount == nil {
-            statusDot(L("Not checked yet", "尚未检查"), .secondary)
         } else {
-            EmptyView()
+            switch connectivityState {
+            case .checking:
+                statusDot(L("Checking", "检测中"), .blue)
+            case .connected:
+                statusDot(L("Connected", "已连通"), .green)
+            case .failed:
+                statusDot(L("Connection issue", "连通异常"), .orange)
+            case .unsupported:
+                statusDot(L("Catalog only", "仅模型目录"), .secondary)
+            case nil:
+                statusDot(L("Not checked", "尚未检测"), .secondary)
+            }
         }
     }
 
@@ -322,13 +329,13 @@ struct GatewayAccountFamilyRow: View {
     let family: GatewayAccountFamily
     let identity: CLIProxyAccountIdentity?
     let linkedCandidate: CLIProxyAccountSyncCandidate?
-    let modelErrorNames: Set<String>
+    let connectivityByFileName: [String: CLIProxyAccountConnectivityState]
     let isExpanded: Bool
     let isBusy: Bool
     let onToggleExpansion: () -> Void
     let onSetEnabled: (Bool) -> Void
     let onOpenDetail: () -> Void
-    let onTestAvailability: () -> Void
+    let onCheckConnectivity: () -> Void
     let onRequestSync: (CLIProxyAccountSyncCandidate) -> Void
     let onAddToSubscription: () -> Void
     var showsAddToSubscription: Bool = false
@@ -349,16 +356,31 @@ struct GatewayAccountFamilyRow: View {
         family.files.filter { file in
             GatewayAccountListLogic.fileNeedsAttention(
                 file,
-                modelLoadFailed: modelErrorNames.contains(file.name.lowercased())
+                connectivity: connectivityByFileName[file.name.lowercased()]
             )
         }.count
     }
 
     private var coolingCount: Int {
         family.files.filter { file in
-            !modelErrorNames.contains(file.name.lowercased())
-                && GatewayAccountListLogic.isCooling(file)
+            GatewayAccountListLogic.isCooling(file)
         }.count
+    }
+
+    private var connectedCount: Int {
+        family.files.filter { file in
+            GatewayAccountListLogic.isConnected(
+                file,
+                connectivity: connectivityByFileName[file.name.lowercased()]
+            )
+        }.count
+    }
+
+    private var isChecking: Bool {
+        family.files.contains { file in
+            if case .checking = connectivityByFileName[file.name.lowercased()] { return true }
+            return false
+        }
     }
 
     private var isPartiallyDisabled: Bool {
@@ -414,8 +436,8 @@ struct GatewayAccountFamilyRow: View {
                 Button(action: onOpenDetail) {
                     Label(L("Account details", "账号详情"), systemImage: "info.circle")
                 }
-                Button(action: onTestAvailability) {
-                    Label(L("Check this account", "检查此账号"), systemImage: "waveform.path.ecg")
+                Button(action: onCheckConnectivity) {
+                    Label(L("Check account connectivity", "检测账号连通性"), systemImage: "network")
                 }
                 if let linkedCandidate {
                     Button {
@@ -491,7 +513,9 @@ struct GatewayAccountFamilyRow: View {
 
     @ViewBuilder
     private var familyStatus: some View {
-        if attentionCount > 0 {
+        if isChecking {
+            GatewayQuietBadge(text: L("Checking", "检测中"), tint: .blue)
+        } else if attentionCount > 0 {
             GatewayQuietBadge(
                 text: L("\(attentionCount) need attention", "\(attentionCount) 个需处理"),
                 tint: .orange
@@ -505,6 +529,15 @@ struct GatewayAccountFamilyRow: View {
             GatewayQuietBadge(text: L("Paused", "已停用"), tint: .secondary)
         } else if isPartiallyDisabled {
             GatewayQuietBadge(text: L("Partly paused", "部分停用"), tint: .secondary)
+        } else if connectedCount > 0 {
+            GatewayQuietBadge(text: L("Connected", "已连通"), tint: .green)
+        } else if family.files.contains(where: { file in
+            if case .unsupported = connectivityByFileName[file.name.lowercased()] { return true }
+            return false
+        }) {
+            GatewayQuietBadge(text: L("Catalog only", "仅模型目录"), tint: .secondary)
+        } else {
+            GatewayQuietBadge(text: L("Not checked", "尚未检测"), tint: .secondary)
         }
     }
 }

@@ -4,6 +4,7 @@ import Sparkle
 import UserNotifications
 import AppKit
 import os
+import QuotaBackend
 
 private let appDelegateLog = Logger(subsystem: "com.aiusage.desktop", category: "AppDelegate")
 private let sparkleLog = Logger(subsystem: "com.aiusage.desktop", category: "Sparkle")
@@ -166,6 +167,19 @@ struct AIUsageApp: App {
     // 这里只持有实例用于 environmentObject 注入，由需要的子视图自行订阅。
     private let proxyViewModel = ProxyViewModel.shared
     @StateObject private var sparkle = SparkleController()
+
+    init() {
+        #if DEBUG
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        precondition(
+            ManagedAuthImportBoundary.isBundleIdentityValid(
+                bundleIdentifier: bundleID,
+                isDebugBuild: true
+            ),
+            "Debug builds must use an isolated bundle identifier; refusing to start with the production identity."
+        )
+        #endif
+    }
     
     var body: some Scene {
         Window("AIUsage", id: AppState.mainWindowID) {

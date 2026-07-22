@@ -72,9 +72,20 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         }
 
         var effectiveCreds = creds
+        var proactiveRefreshFailure: ProviderError?
         if !creds.isApiKeyMode, creds.needsRefresh, let refreshToken = creds.refreshToken {
-            effectiveCreds = try await refreshCredentials(creds, refreshToken: refreshToken)
-            if let path = credentialPath { persistRefreshedCredentials(effectiveCreds, to: path) }
+            do {
+                effectiveCreds = try await refreshCredentials(creds, refreshToken: refreshToken)
+                if let path = credentialPath { persistRefreshedCredentials(effectiveCreds, to: path) }
+            } catch let refreshError as ProviderError {
+                // A managed copy may hold a refresh token that another Codex
+                // session already rotated. Keep the precise failure, but still
+                // try its current access token and the authoritative source file
+                // before declaring the credential expired.
+                proactiveRefreshFailure = refreshError
+            } catch {
+                proactiveRefreshFailure = CodexCredentialPolicy.refreshTransportFailure(error)
+            }
         }
 
         let usageURL = try resolveUsageURL()
@@ -90,12 +101,25 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
                 jwtUserId: effectiveCreds.jwtUserId
             )
         } catch let error as ProviderError where error.code == "unauthorized" {
-            if !effectiveCreds.isApiKeyMode,
+            var credentialFailure = proactiveRefreshFailure
+            var refreshedCredentials: Credentials?
+            if credentialFailure == nil,
+               !effectiveCreds.isApiKeyMode,
                let refreshToken = effectiveCreds.refreshToken ?? creds.refreshToken {
-                let refreshed = (try? await refreshCredentials(effectiveCreds, refreshToken: refreshToken))
-                    ?? effectiveCreds
-                if let path = credentialPath { persistRefreshedCredentials(refreshed, to: path) }
-                if let response = try? await requestUsage(creds: refreshed, url: usageURL) {
+                do {
+                    let refreshed = try await refreshCredentials(effectiveCreds, refreshToken: refreshToken)
+                    if let path = credentialPath { persistRefreshedCredentials(refreshed, to: path) }
+                    refreshedCredentials = refreshed
+                } catch let refreshError as ProviderError {
+                    credentialFailure = refreshError
+                } catch {
+                    credentialFailure = CodexCredentialPolicy.refreshTransportFailure(error)
+                }
+            }
+
+            if let refreshed = refreshedCredentials {
+                do {
+                    let response = try await requestUsage(creds: refreshed, url: usageURL)
                     return parseResponse(
                         response,
                         accountId: refreshed.accountId ?? normalizedLabel(credential.accountLabel),
@@ -104,20 +128,30 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
                         jwtPlanType: refreshed.jwtPlanType,
                         jwtUserId: refreshed.jwtUserId
                     )
+                } catch let retryError as ProviderError where retryError.code == "unauthorized" {
+                    credentialFailure = ProviderError(
+                        "unauthorized_after_refresh",
+                        "Codex rejected the refreshed access token. Sign in again to reconnect this account."
+                    )
                 }
             }
 
-            if let recovered = try? await recoverFromSourceAndFetch(
-                staleCreds: creds,
-                credentialPath: credentialPath,
-                sourcePath: credential.metadata["sourcePath"],
-                usageURL: usageURL,
-                fallbackLabel: credential.accountLabel
-            ) {
-                return recovered
+            do {
+                return try await recoverFromSourceAndFetch(
+                    staleCreds: creds,
+                    credentialPath: credentialPath,
+                    sourcePath: credential.metadata["sourcePath"],
+                    usageURL: usageURL,
+                    fallbackLabel: credential.accountLabel
+                )
+            } catch let recoveryError as ProviderError {
+                if credentialFailure == nil,
+                   !["no_source", "source_same_as_copy", "source_missing"].contains(recoveryError.code) {
+                    credentialFailure = recoveryError
+                }
             }
 
-            throw error
+            throw credentialFailure ?? error
         }
     }
 
@@ -125,8 +159,8 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     /// rotated out by the Codex CLI/App. When the authoritative auth file
     /// (credential.metadata["sourcePath"], typically ~/.codex/auth.json)
     /// belongs to the same workspace, overwrite the stale copy and retry.
-    /// Workspace identity = (accountId, planType) — planType distinguishes
-    /// Plus vs Team for the same user-xxx.
+    /// Workspace identity = accountId + userId. Plan is mutable display metadata
+    /// and must never block recovery after an upgrade or downgrade.
     private func recoverFromSourceAndFetch(
         staleCreds: Credentials,
         credentialPath: String?,
@@ -186,19 +220,12 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
     }
 
     private func sameCodexWorkspace(_ lhs: Credentials, _ rhs: Credentials) -> Bool {
-        guard let lhsId = stringValue(lhs.accountId),
-              let rhsId = stringValue(rhs.accountId),
-              lhsId == rhsId else { return false }
-
-        let lhsPlan = stringValue(lhs.jwtPlanType)?.lowercased()
-        let rhsPlan = stringValue(rhs.jwtPlanType)?.lowercased()
-        switch (lhsPlan, rhsPlan) {
-        case let (l?, r?):  return l == r
-        case (.some, .none), (.none, .some):
-            return true
-        case (.none, .none):
-            return false
-        }
+        CodexCredentialPolicy.belongsToSameWorkspace(
+            lhsAccountID: lhs.accountId,
+            lhsUserID: lhs.jwtUserId,
+            rhsAccountID: rhs.accountId,
+            rhsUserID: rhs.jwtUserId
+        )
     }
 
     public func fetchAllAccounts() async -> [AccountFetchResult] {
@@ -419,10 +446,28 @@ public struct CodexProvider: MultiAccountProviderFetcher, CredentialAcceptingPro
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw CodexCredentialPolicy.refreshTransportFailure(error)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw ProviderError(
+                "oauth_invalid_response",
+                "Codex OAuth refresh returned a non-HTTP response."
+            )
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw CodexCredentialPolicy.refreshFailure(statusCode: http.statusCode, data: data)
+        }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let newAccess = stringValue(json["access_token"]) else {
-            return creds
+            throw ProviderError(
+                "oauth_invalid_response",
+                "Codex OAuth refresh succeeded but returned no access token."
+            )
         }
 
         let newRefresh = stringValue(json["refresh_token"]) ?? refreshToken

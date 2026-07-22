@@ -78,6 +78,7 @@ final class CLIProxyGatewayManager: ObservableObject {
     @Published private(set) var modelCatalogUpdatedAt: Date?
     @Published private(set) var authFileModels: [String: [CLIProxyModel]] = [:]
     @Published private(set) var authFileModelErrors: [String: String] = [:]
+    @Published private(set) var authFileConnectivity: [String: CLIProxyAccountConnectivityState] = [:]
     @Published private(set) var isManagingAccounts = false
     @Published private(set) var oauthProvider: CLIProxyOAuthProvider?
     @Published private(set) var oauthStatusMessage: String?
@@ -196,7 +197,7 @@ final class CLIProxyGatewayManager: ObservableObject {
                     sources: Self.syncCandidateSources(from: accounts)
                 )
             }
-        // 定时列模型探测挂在 Manager，不依赖 Accounts 页生命周期。
+        // 定时刷新本地模型目录，不依赖 Accounts 页生命周期，也不访问账号上游。
         Publishers.CombineLatest(self.runtime.$state, self.runtime.$settings)
             .receive(on: RunLoop.main)
             .sink { [weak self] state, settings in
@@ -209,7 +210,7 @@ final class CLIProxyGatewayManager: ObservableObject {
             .store(in: &accountProbeCancellables)
     }
 
-    /// 设置开启且 CPA 在跑时，按间隔刷新账号池并复检列模型。
+    /// 设置开启且 CPA 在跑时，按间隔刷新账号池与本地模型目录。
     private func syncAccountProbeLoop(isRunning: Bool, settings: CLIProxyGatewaySettings) {
         accountProbeTask?.cancel()
         accountProbeTask = nil
@@ -360,12 +361,13 @@ final class CLIProxyGatewayManager: ObservableObject {
             let validNames = Set(authFiles.map(\.name))
             authFileModels = authFileModels.filter { validNames.contains($0.key) }
             authFileModelErrors = authFileModelErrors.filter { validNames.contains($0.key) }
+            authFileConnectivity = authFileConnectivity.filter { validNames.contains($0.key) }
             await refreshSyncStates(using: client)
             await reconcileManagedDistributionIfNeeded()
         } catch { lastError = error.localizedDescription }
     }
 
-    /// 强制复检全部账号的列模型连通（检测全部 / 定时任务用）。
+    /// 强制刷新全部账号的本地模型目录。该接口不访问上游，也不证明 OAuth 可用。
     func probeAllAccountModels() async {
         guard runtime.state.isRunning else { return }
         // 清缓存，确保每个账号都会 force 再拉。
@@ -632,13 +634,246 @@ final class CLIProxyGatewayManager: ObservableObject {
         }
     }
 
-    /// 探测账号可用性：强制拉取该凭据可用模型。成功返回模型数。
-    func testAccountAvailability(for file: CLIProxyAuthFile) async -> (ok: Bool, modelCount: Int, message: String?) {
-        await loadModels(for: file, force: true)
-        if let error = authFileModelErrors[file.name]?.nilIfBlank {
-            return (false, 0, error)
+    func connectivityState(for file: CLIProxyAuthFile) -> CLIProxyAccountConnectivityState? {
+        authFileConnectivity[file.name]
+    }
+
+    /// Performs an explicit, credential-scoped upstream quota/usage request via
+    /// CPA. These endpoints do not run model inference and therefore consume no
+    /// model tokens. Automatic model-catalog refresh never calls this method.
+    func testAccountConnectivity(for file: CLIProxyAuthFile) async -> CLIProxyAccountConnectivityResult {
+        guard runtime.state.isRunning, let client = managementClient() else {
+            let state = CLIProxyAccountConnectivityState.failed(
+                code: "cpa_not_running",
+                message: L("Start CPA before checking this account.", "请先启动 CPA，再检测账号连通性。"),
+                checkedAt: Date()
+            )
+            authFileConnectivity[file.name] = state
+            return CLIProxyAccountConnectivityResult(state: state, detail: connectivityDetail(for: state))
         }
-        return (true, authFileModels[file.name]?.count ?? 0, nil)
+        guard let authIndex = file.authIndex?.nilIfBlank else {
+            let state = CLIProxyAccountConnectivityState.unsupported(
+                reason: L("This account has no CPA runtime credential index.", "该账号没有 CPA 运行时凭据索引，无法执行上游检测。")
+            )
+            authFileConnectivity[file.name] = state
+            return CLIProxyAccountConnectivityResult(state: state, detail: connectivityDetail(for: state))
+        }
+
+        let provider = file.gatewayProviderID.lowercased()
+        let request: (method: String, url: URL, headers: [String: String], body: String)
+        do {
+            guard let built = try await connectivityRequest(for: file, provider: provider, client: client) else {
+                let state = CLIProxyAccountConnectivityState.unsupported(
+                    reason: L(
+                        "This provider has no inference-free upstream account check.",
+                        "该服务商暂没有不调用模型的上游账号检测方式。"
+                    )
+                )
+                authFileConnectivity[file.name] = state
+                return CLIProxyAccountConnectivityResult(state: state, detail: connectivityDetail(for: state))
+            }
+            request = built
+        } catch {
+            let state = connectivityFailureState(error)
+            authFileConnectivity[file.name] = state
+            return CLIProxyAccountConnectivityResult(state: state, detail: connectivityDetail(for: state))
+        }
+
+        authFileConnectivity[file.name] = .checking
+        do {
+            let response = try await client.callUpstream(
+                authIndex: authIndex,
+                method: request.method,
+                url: request.url,
+                headers: request.headers,
+                body: request.body
+            )
+            let state = evaluateConnectivityResponse(response)
+            authFileConnectivity[file.name] = state
+            return CLIProxyAccountConnectivityResult(state: state, detail: connectivityDetail(for: state))
+        } catch {
+            let state = connectivityFailureState(error)
+            authFileConnectivity[file.name] = state
+            return CLIProxyAccountConnectivityResult(state: state, detail: connectivityDetail(for: state))
+        }
+    }
+
+    /// User-triggered only. Keep checks serial to avoid creating an upstream
+    /// burst across a large account pool.
+    func testAllAccountConnectivity() async -> [CLIProxyAccountConnectivityResult] {
+        var results: [CLIProxyAccountConnectivityResult] = []
+        for file in authFiles where !file.disabled {
+            let result = await testAccountConnectivity(for: file)
+            if case .unsupported = result.state { continue }
+            results.append(result)
+        }
+        return results
+    }
+
+    private func connectivityRequest(
+        for file: CLIProxyAuthFile,
+        provider: String,
+        client: CLIProxyManagementClient
+    ) async throws -> (method: String, url: URL, headers: [String: String], body: String)? {
+        switch provider {
+        case "codex":
+            guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
+                throw CLIProxyGatewayError.configuration("invalid Codex usage URL")
+            }
+            var headers = [
+                "Authorization": "Bearer $TOKEN$",
+                "Accept": "application/json",
+                "User-Agent": "AIUsage"
+            ]
+            if let accountID = try await codexAccountID(for: file, client: client) {
+                headers["ChatGPT-Account-Id"] = accountID
+            }
+            return ("GET", url, headers, "")
+
+        case "antigravity":
+            guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels") else {
+                throw CLIProxyGatewayError.configuration("invalid Antigravity quota URL")
+            }
+            return (
+                "POST",
+                url,
+                [
+                    "Authorization": "Bearer $TOKEN$",
+                    "Content-Type": "application/json",
+                    "User-Agent": "antigravity/1.11.3 Darwin/arm64"
+                ],
+                try connectivityBody(projectID: file.projectID)
+            )
+
+        case "gemini", "gemini-cli":
+            guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota") else {
+                throw CLIProxyGatewayError.configuration("invalid Gemini quota URL")
+            }
+            return (
+                "POST",
+                url,
+                [
+                    "Authorization": "Bearer $TOKEN$",
+                    "Content-Type": "application/json"
+                ],
+                try connectivityBody(projectID: file.projectID)
+            )
+
+        default:
+            return nil
+        }
+    }
+
+    private func codexAccountID(
+        for file: CLIProxyAuthFile,
+        client: CLIProxyManagementClient
+    ) async throws -> String? {
+        if let cached = accountIdentity(for: file)?.accountID?.nilIfBlank { return cached }
+        guard !file.runtimeOnly else { return file.account?.nilIfBlank }
+        let data = try await client.downloadAuthFile(name: file.name)
+        return try CLIProxyAccountIdentity.parse(data: data, providerHint: "codex").accountID?.nilIfBlank
+    }
+
+    private func connectivityBody(projectID: String?) throws -> String {
+        let object: [String: String]
+        if let projectID = projectID?.nilIfBlank {
+            object = ["project": projectID]
+        } else {
+            object = [:]
+        }
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private func evaluateConnectivityResponse(
+        _ response: CLIProxyUpstreamCallResult
+    ) -> CLIProxyAccountConnectivityState {
+        let now = Date()
+        switch response.statusCode {
+        case 200..<300:
+            guard let data = response.body.data(using: .utf8),
+                  (try? JSONSerialization.jsonObject(with: data)) != nil else {
+                return .failed(
+                    code: "upstream_invalid_response",
+                    message: L("The account endpoint returned invalid data.", "账号接口返回了无法解析的数据。"),
+                    checkedAt: now
+                )
+            }
+            return .connected(checkedAt: now)
+        case 401, 403:
+            return .failed(
+                code: "oauth_access_token_rejected",
+                message: L(
+                    "The upstream rejected CPA's current access token. Retry after the credential refreshes, or sign in again if it persists.",
+                    "上游拒绝了 CPA 当前的访问令牌。请在凭据刷新后重试；若持续出现，再重新登录。"
+                ),
+                checkedAt: now
+            )
+        case 429:
+            return .failed(
+                code: "upstream_rate_limited",
+                message: L("The account endpoint is temporarily rate limited.", "账号接口当前触发频率限制，请稍后重试。"),
+                checkedAt: now
+            )
+        case 500...599:
+            return .failed(
+                code: "upstream_server_error",
+                message: L("The upstream account service is temporarily unavailable.", "上游账号服务暂时不可用。"),
+                checkedAt: now
+            )
+        default:
+            return .failed(
+                code: "upstream_http_\(response.statusCode)",
+                message: L(
+                    "The account endpoint returned HTTP \(response.statusCode).",
+                    "账号接口返回 HTTP \(response.statusCode)。"
+                ),
+                checkedAt: now
+            )
+        }
+    }
+
+    private func connectivityFailureState(_ error: Error) -> CLIProxyAccountConnectivityState {
+        let now = Date()
+        if let gatewayError = error as? CLIProxyGatewayError,
+           case .managementAPI(let status, let reason) = gatewayError {
+            let normalized = reason.lowercased()
+            if normalized.contains("token refresh failed") {
+                return .failed(
+                    code: "oauth_refresh_failed",
+                    message: L("CPA could not refresh this account's access token.", "CPA 无法刷新该账号的访问令牌。"),
+                    checkedAt: now
+                )
+            }
+            if status == 502 {
+                return .failed(
+                    code: "upstream_network_error",
+                    message: L("CPA could not reach the upstream account service.", "CPA 无法连接上游账号服务。"),
+                    checkedAt: now
+                )
+            }
+        }
+        return .failed(
+            code: "connectivity_check_failed",
+            message: SensitiveDataRedactor.redactedMessage(for: error),
+            checkedAt: now
+        )
+    }
+
+    private func connectivityDetail(for state: CLIProxyAccountConnectivityState) -> String {
+        switch state {
+        case .checking:
+            return L("Checking upstream account endpoint…", "正在检测上游账号接口…")
+        case .connected:
+            return L(
+                "Connected through CPA · no model inference or model-token usage",
+                "已通过 CPA 连通 · 未发起模型推理，也不消耗模型 token"
+            )
+        case .failed(_, let message, _):
+            return message
+        case .unsupported(let reason):
+            return reason
+        }
     }
 
     /// 账号中心 / 池变更后预取各凭据可用模型（有限并发）。
@@ -783,6 +1018,7 @@ final class CLIProxyGatewayManager: ObservableObject {
             removedRecordIDs.forEach { accountSyncStates[$0] = .notSynced }
             authFileModels[file.name] = nil
             authFileModelErrors[file.name] = nil
+            authFileConnectivity[file.name] = nil
             authFiles = try await loadAuthPool(using: activeClient)
             await refreshModelCatalogAndDistribution(using: activeClient)
         } catch { lastError = error.localizedDescription }
@@ -1628,6 +1864,7 @@ final class CLIProxyGatewayManager: ObservableObject {
                     deletedNames.insert(name.lowercased())
                     authFileModels[name] = nil
                     authFileModelErrors[name] = nil
+                    authFileConnectivity[name] = nil
                 }
             } catch {
                 syncManifest = originalManifest

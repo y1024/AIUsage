@@ -15,7 +15,7 @@ enum GatewayAccountFilter: String, CaseIterable, Hashable {
     var title: String {
         switch self {
         case .all: L("All", "全部")
-        case .ready: L("Available", "可用")
+        case .ready: L("Connected", "已连通")
         case .cooling: L("Temporarily limited", "暂时受限")
         case .attention: L("Attention", "异常")
         case .paused: L("Paused", "已停用")
@@ -47,30 +47,31 @@ struct GatewayAccountFamily: Identifiable, Equatable {
 }
 
 enum GatewayAccountListLogic {
-    /// 列表「异常」：凭据/网关自身问题，或模型探测失败。不同步指纹漂移。
+    /// 列表「异常」：凭据/网关自身问题，或显式上游检测失败。
+    /// 模型目录加载失败是独立的数据展示问题，不等于账号登录异常。
     static func fileNeedsAttention(
         _ file: CLIProxyAuthFile,
-        modelLoadFailed: Bool = false
+        connectivity: CLIProxyAccountConnectivityState? = nil
     ) -> Bool {
-        if modelLoadFailed { return true }
+        guard !file.disabled else { return false }
         // Cooling is a temporary routing state with its own filter/status; do
         // not also count it as a credential problem.
         if isCooling(file) { return false }
+        if connectivity?.needsAttention == true { return true }
         if file.gatewayNeedsAttention { return true }
         if file.gatewayProviderID == "unknown" { return true }
         return false
     }
 
-    /// 「连通」= 列模型成功，且未停用/未冷却（不声称一定能跑满请求）。
-    static func isReachable(
+    /// 「已连通」只来自用户显式触发的上游账号接口检测。
+    static func isConnected(
         _ file: CLIProxyAuthFile,
-        modelCount: Int?,
-        modelLoadFailed: Bool
+        connectivity: CLIProxyAccountConnectivityState?
     ) -> Bool {
         guard !file.disabled else { return false }
         if isCooling(file) { return false }
-        if fileNeedsAttention(file, modelLoadFailed: modelLoadFailed) { return false }
-        return modelCount != nil
+        if fileNeedsAttention(file, connectivity: connectivity) { return false }
+        return connectivity?.isConnected == true
     }
 
     static func isCooling(_ file: CLIProxyAuthFile) -> Bool {
@@ -84,8 +85,7 @@ enum GatewayAccountListLogic {
         authFiles: [CLIProxyAuthFile],
         query: String,
         filter: GatewayAccountFilter,
-        modelCountsByAuthFileName: [String: Int] = [:],
-        modelErrorsByAuthFileName: Set<String> = []
+        connectivityByAuthFileName: [String: CLIProxyAccountConnectivityState] = [:]
     ) -> [GatewayAccountGroup] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let files = authFiles.filter { file in
@@ -102,13 +102,12 @@ enum GatewayAccountListLogic {
             let matchesSearch = normalizedQuery.isEmpty || searchText.contains(normalizedQuery)
             guard matchesSearch else { return false }
             let key = file.name.lowercased()
-            let failed = modelErrorsByAuthFileName.contains(key)
-            let count = modelCountsByAuthFileName[key]
+            let connectivity = connectivityByAuthFileName[key]
             switch filter {
             case .all: return true
-            case .ready: return isReachable(file, modelCount: count, modelLoadFailed: failed)
-            case .cooling: return !failed && isCooling(file)
-            case .attention: return fileNeedsAttention(file, modelLoadFailed: failed)
+            case .ready: return isConnected(file, connectivity: connectivity)
+            case .cooling: return isCooling(file)
+            case .attention: return fileNeedsAttention(file, connectivity: connectivity)
             case .paused: return file.disabled
             case .fromAIUsage: return file.name.lowercased().hasPrefix("aiusage-")
             }
@@ -209,30 +208,28 @@ enum GatewayAccountListLogic {
         Set(manager.authFileModelErrors.keys.map { $0.lowercased() })
     }
 
-    static func reachableAccountCount(
+    static func connectivityByAuthFileName(
+        manager: CLIProxyGatewayManager
+    ) -> [String: CLIProxyAccountConnectivityState] {
+        manager.authFileConnectivity.reduce(into: [:]) { result, entry in
+            result[entry.key.lowercased()] = entry.value
+        }
+    }
+
+    static func connectedAccountCount(
         in files: [CLIProxyAuthFile],
-        modelCountsByAuthFileName: [String: Int] = [:],
-        modelErrorsByAuthFileName: Set<String> = []
+        connectivityByAuthFileName: [String: CLIProxyAccountConnectivityState] = [:]
     ) -> Int {
         accountFamilies(in: files).filter { family in
             family.files.contains { file in
-                isReachable(
-                    file,
-                    modelCount: modelCountsByAuthFileName[file.name.lowercased()],
-                    modelLoadFailed: modelErrorsByAuthFileName.contains(file.name.lowercased())
-                )
+                isConnected(file, connectivity: connectivityByAuthFileName[file.name.lowercased()])
             }
         }.count
     }
 
-    static func coolingAccountCount(
-        in files: [CLIProxyAuthFile],
-        modelErrorsByAuthFileName: Set<String> = []
-    ) -> Int {
+    static func coolingAccountCount(in files: [CLIProxyAuthFile]) -> Int {
         accountFamilies(in: files).filter { family in
-            family.files.contains { file in
-                !modelErrorsByAuthFileName.contains(file.name.lowercased()) && isCooling(file)
-            }
+            family.files.contains { isCooling($0) }
         }.count
     }
 
@@ -246,13 +243,13 @@ enum GatewayAccountListLogic {
         in files: [CLIProxyAuthFile],
         deduplicationConflicts: Int,
         hasSyncManifestError: Bool,
-        modelErrorsByAuthFileName: Set<String> = []
+        connectivityByAuthFileName: [String: CLIProxyAccountConnectivityState] = [:]
     ) -> Int {
         accountFamilies(in: files).filter { family in
             family.files.contains { file in
                 fileNeedsAttention(
                     file,
-                    modelLoadFailed: modelErrorsByAuthFileName.contains(file.name.lowercased())
+                    connectivity: connectivityByAuthFileName[file.name.lowercased()]
                 )
             }
         }.count

@@ -2,28 +2,26 @@ import Foundation
 import QuotaBackend
 
 enum ProviderManagedImportStore {
-    /// 正式版沿用历史目录；Debug / 测试宿主使用隔离目录，避免共用 AuthImports
-    /// 时「孤儿清理」按当前进程 Vault 删掉另一套安装的凭据文件。
-    private static let productionRootMarker = "/Library/Application Support/AIUsage/AuthImports/"
-
     private static var bundleID: String {
-        Bundle.main.bundleIdentifier ?? "com.aiusage.desktop"
+        if let bundleID = Bundle.main.bundleIdentifier?.nilIfBlank { return bundleID }
+        #if DEBUG
+        return "com.aiusage.desktop.debug"
+        #else
+        return ManagedAuthImportBoundary.productionBundleIdentifier
+        #endif
     }
 
-    private static var isProductionBundle: Bool {
-        bundleID == "com.aiusage.desktop"
-    }
-
-    /// 当前进程写入/清理用的根目录标记。
-    private static var activeRootMarker: String {
-        if isProductionBundle { return productionRootMarker }
-        return "/Library/Application Support/AIUsage/AuthImports-\(bundleID)/"
-    }
-
-    /// 识别「托管导入」路径时同时接受正式目录与当前隔离目录。
-    private static var recognizedRootMarkers: [String] {
-        if isProductionBundle { return [productionRootMarker] }
-        return [productionRootMarker, activeRootMarker]
+    private static func boundary(create: Bool) throws -> ManagedAuthImportBoundary {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: create
+        )
+        return ManagedAuthImportBoundary(
+            bundleIdentifier: bundleID,
+            applicationSupportDirectory: base
+        )
     }
 
     static func isManagedImportPath(_ path: String?) -> Bool {
@@ -40,20 +38,24 @@ enum ProviderManagedImportStore {
         return canonicalManagedPath(credential.metadata["sourcePath"])
     }
 
-    static func managedImportPaths(for credential: AccountCredential) -> Set<String> {
+    private static func writableManagedImportPaths(for credential: AccountCredential) -> Set<String> {
         Set(
             [credential.credential, credential.metadata["sourcePath"]]
-                .compactMap { canonicalManagedPath($0) }
+                .compactMap { writableManagedPath($0) }
         )
     }
 
     static func reuseManagedImportIfPossible(existingCredential: AccountCredential, incomingCredential: inout AccountCredential) {
         guard incomingCredential.authMethod == .authFile,
               let existingPath = primaryManagedImportPath(for: existingCredential),
-              let incomingPath = primaryManagedImportPath(for: incomingCredential),
+              let incomingPath = primaryWritableManagedImportPath(for: incomingCredential),
               existingPath != incomingPath else {
             return
         }
+
+        // Debug may discover production imports, but it must retain its own copied
+        // artifact instead of overwriting or referencing the production file.
+        guard writableManagedPath(existingPath) != nil else { return }
 
         do {
             try replaceManagedImport(at: existingPath, withContentsOf: incomingPath)
@@ -89,7 +91,7 @@ enum ProviderManagedImportStore {
             return
         }
 
-        let referencedPaths = Set(credentials.flatMap { managedImportPaths(for: $0) })
+        let referencedPaths = Set(credentials.flatMap { writableManagedImportPaths(for: $0) })
         guard !referencedPaths.isEmpty else { return }
 
         // Vault 与磁盘不同步时 fail closed：缺文件说明路径漂移或另一套安装刚写过，
@@ -119,47 +121,19 @@ enum ProviderManagedImportStore {
 
     /// 当前进程应写入的 AuthImports 根目录。
     static func managedImportsRootDirectory() throws -> URL {
-        let base = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let folderName: String
-        if isProductionBundle {
-            folderName = "AuthImports"
-        } else {
-            folderName = "AuthImports-\(bundleID)"
-        }
-        return base
-            .appendingPathComponent("AIUsage", isDirectory: true)
-            .appendingPathComponent(folderName, isDirectory: true)
+        try boundary(create: true).activeRootURL
     }
 
     /// 读取补回时同时扫正式目录与当前隔离目录（Debug 仍能看到已恢复的历史文件）。
     static func readableImportRoots() -> [URL] {
-        var roots: [URL] = []
-        if let active = try? managedImportsRootDirectory() {
-            roots.append(active)
-        }
-        if !isProductionBundle,
-           let base = try? FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: false
-           ) {
-            let legacy = base
-                .appendingPathComponent("AIUsage", isDirectory: true)
-                .appendingPathComponent("AuthImports", isDirectory: true)
-            if legacy.path != roots.first?.path {
-                roots.append(legacy)
-            }
-        }
-        return roots
+        (try? boundary(create: false).readableRootURLs) ?? []
     }
 
     private static func replaceManagedImport(at targetPath: String, withContentsOf sourcePath: String) throws {
+        guard let targetPath = writableManagedPath(targetPath),
+              let sourcePath = writableManagedPath(sourcePath) else {
+            throw CocoaError(.fileWriteNoPermission)
+        }
         let targetURL = URL(fileURLWithPath: targetPath)
         let sourceURL = URL(fileURLWithPath: sourcePath)
         let data = try Data(contentsOf: sourceURL)
@@ -167,20 +141,26 @@ enum ProviderManagedImportStore {
     }
 
     private static func removeManagedImport(at path: String) {
-        guard let managedPath = canonicalManagedPath(path) else { return }
-        // 只允许删除落在当前写入根下的文件；历史共享目录留给正式版自己清理。
-        guard managedPath.contains(activeRootMarker) else { return }
+        guard let managedPath = writableManagedPath(path) else { return }
         try? FileManager.default.removeItem(atPath: managedPath)
     }
 
     private static func canonicalManagedPath(_ path: String?) -> String? {
         guard let path = path?.nilIfBlank else { return nil }
-        let expanded = NSString(string: path).expandingTildeInPath
-        let canonical = URL(fileURLWithPath: expanded).standardizedFileURL.path
-        guard recognizedRootMarkers.contains(where: { canonical.contains($0) }) else {
-            return nil
+        return try? boundary(create: false).readableManagedPath(path)
+    }
+
+    private static func writableManagedPath(_ path: String?) -> String? {
+        guard let path = path?.nilIfBlank else { return nil }
+        return try? boundary(create: false).writableManagedPath(path)
+    }
+
+    private static func primaryWritableManagedImportPath(for credential: AccountCredential) -> String? {
+        if credential.authMethod == .authFile,
+           let credentialPath = writableManagedPath(credential.credential) {
+            return credentialPath
         }
-        return canonical
+        return writableManagedPath(credential.metadata["sourcePath"])
     }
 
     private static func pruneEmptyDirectories(under rootDirectory: URL) {

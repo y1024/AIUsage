@@ -57,9 +57,9 @@ struct SubscriptionGatewaySettingsRuntimePane: View {
 
                     GatewayCard(padding: 0) {
                         VStack(alignment: .leading, spacing: 0) {
-                            groupLabel(L("Health check", "健康检查"))
+                            groupLabel(L("Model catalog", "模型目录"))
                             compactToggle(
-                                L("Auto refresh account status", "自动刷新账号状态"),
+                                L("Auto refresh model catalog", "自动刷新模型目录"),
                                 isOn: $draftSettings.accountModelProbeEnabled
                             )
                             if draftSettings.accountModelProbeEnabled {
@@ -67,8 +67,8 @@ struct SubscriptionGatewaySettingsRuntimePane: View {
                                 advancedNumberRow(
                                     title: L("Every (sec)", "每隔（秒）"),
                                     subtitle: L(
-                                        "Updates cooling flags and credential reachability",
-                                        "更新冷却标记与凭据是否可达"
+                                        "Updates cooling flags and local model lists; does not verify OAuth",
+                                        "更新冷却标记与本地模型目录，不验证 OAuth"
                                     ),
                                     value: $draftSettings.accountModelProbeIntervalSeconds,
                                     range: 15...3600,
@@ -76,8 +76,8 @@ struct SubscriptionGatewaySettingsRuntimePane: View {
                                 )
                             } else {
                                 Text(L(
-                                    "Manual only · use Check all in Accounts.",
-                                    "仅手动 · 在账号页使用「检测全部」。"
+                                    "Refresh the account list manually when you need updated model data.",
+                                    "需要更新模型数据时，请在账号页手动刷新列表。"
                                 ))
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)

@@ -521,6 +521,43 @@ nonisolated struct CLIProxyAuthFile: Codable, Identifiable, Equatable, Sendable 
     }
 }
 
+/// Raw result returned by CPA's credential-scoped management request. The body
+/// is inspected only to validate that the upstream returned its expected JSON;
+/// it is never persisted or displayed because it can contain account details.
+nonisolated struct CLIProxyUpstreamCallResult: Decodable, Sendable {
+    let statusCode: Int
+    let body: String
+
+    enum CodingKeys: String, CodingKey {
+        case statusCode = "status_code"
+        case body
+    }
+}
+
+/// A point-in-time, user-triggered upstream check. Model-catalog loading is a
+/// separate concern and must never be interpreted as proof that OAuth works.
+nonisolated enum CLIProxyAccountConnectivityState: Equatable, Sendable {
+    case checking
+    case connected(checkedAt: Date)
+    case failed(code: String, message: String, checkedAt: Date)
+    case unsupported(reason: String)
+
+    var isConnected: Bool {
+        if case .connected = self { return true }
+        return false
+    }
+
+    var needsAttention: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+}
+
+nonisolated struct CLIProxyAccountConnectivityResult: Equatable, Sendable {
+    let state: CLIProxyAccountConnectivityState
+    let detail: String
+}
+
 nonisolated struct CLIProxyModel: Codable, Identifiable, Equatable, Sendable {
     let id: String
     let displayName: String?
