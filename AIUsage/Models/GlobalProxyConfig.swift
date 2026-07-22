@@ -2,29 +2,30 @@ import Foundation
 import os.log
 
 // MARK: - Global Proxy Track
-// 全局统一代理覆盖的三条轨道。每条轨道一个常驻 QuotaServer 进程 + 一份独立持久化配置。
+// 每个产品轨道各自拥有一条固定入口、一个 QuotaServer 进程和一份独立持久化配置。
 enum GlobalProxyTrack: String, Codable, CaseIterable {
     case codex
     case claude
+    /// Claude Desktop owns an independent product gateway and port. It shares
+    /// Node Runtime endpoints with other products, never gateway state.
+    case desktop
     case opencode
-    /// Claude Science：免订阅启动 Science（隔离沙箱 + 本地虚拟登录），推理经代理走第三方模型。
-    /// 复用 Claude 轨的 Anthropic→OpenAI 转换代理（同 admin 路由），差异在于沙箱/虚拟登录生命周期。
+    /// Claude Science：免订阅启动 Science（隔离沙箱 + 本地虚拟登录），推理经独立产品网关走共享 Node Runtime。
     case science
 
     /// 持久化文件名（~/.config/aiusage 下）。
     var configFileName: String { "global-proxy-\(rawValue).json" }
 }
 
-/// A product currently attached to the shared Claude Gateway. Code and
-/// Desktop deliberately share one upstream route; Science owns another
-/// runtime and therefore never appears in this set.
+/// Compatibility model for decoding the pre-0.16 shared Claude Gateway file.
+/// New product tracks never use this set for runtime ownership.
 enum ClaudeGatewayConsumer: String, Codable, CaseIterable, Hashable {
     case code
     case desktop
 }
 
 /// The model surface published to Claude Desktop. This is independent from
-/// whether Claude Code is attached to the shared Gateway.
+/// the legacy shared-Gateway attachment flag retained for migration.
 enum ClaudeDesktopCatalogMode: String, Codable, CaseIterable, Identifiable {
     /// Fixed Opus/Sonnet/Haiku identities; node switches only remap tiers.
     case smartRoutes
@@ -32,6 +33,74 @@ enum ClaudeDesktopCatalogMode: String, Codable, CaseIterable, Identifiable {
     case fullNodeCatalog
 
     var id: String { rawValue }
+}
+
+/// The four application-facing model entries shared by Code and Desktop.
+/// Nodes remain the source of truth; each product may keep a sparse, per-node
+/// projection without mutating that shared node configuration.
+enum ClaudeAppModelRoute: String, Codable, CaseIterable, Identifiable {
+    case defaultModel = "default"
+    case opus
+    case sonnet
+    case haiku
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .defaultModel: return "Default"
+        case .opus: return "Opus"
+        case .sonnet: return "Sonnet"
+        case .haiku: return "Haiku"
+        }
+    }
+}
+
+struct ClaudeAppNodeModelOverride: Codable, Equatable {
+    var defaultModel: String? = nil
+    var opus: String? = nil
+    var sonnet: String? = nil
+    var haiku: String? = nil
+
+    var isEmpty: Bool {
+        defaultModel?.nilIfBlank == nil
+            && opus?.nilIfBlank == nil
+            && sonnet?.nilIfBlank == nil
+            && haiku?.nilIfBlank == nil
+    }
+
+    func model(for route: ClaudeAppModelRoute) -> String? {
+        switch route {
+        case .defaultModel: return defaultModel?.nilIfBlank
+        case .opus: return opus?.nilIfBlank
+        case .sonnet: return sonnet?.nilIfBlank
+        case .haiku: return haiku?.nilIfBlank
+        }
+    }
+
+    mutating func setModel(_ model: String?, for route: ClaudeAppModelRoute) {
+        switch route {
+        case .defaultModel: defaultModel = model?.nilIfBlank
+        case .opus: opus = model?.nilIfBlank
+        case .sonnet: sonnet = model?.nilIfBlank
+        case .haiku: haiku = model?.nilIfBlank
+        }
+    }
+}
+
+struct ClaudeAppResolvedModels: Equatable {
+    let defaultModel: String
+    let opus: String
+    let sonnet: String
+    let haiku: String
+
+    func model(for route: ClaudeAppModelRoute) -> String {
+        switch route {
+        case .defaultModel: return defaultModel
+        case .opus: return opus
+        case .sonnet: return sonnet
+        case .haiku: return haiku
+        }
+    }
 }
 
 // MARK: - Global Proxy Config
@@ -74,13 +143,22 @@ struct GlobalProxyConfig: Codable, Equatable {
     var openCodeInterface: OpenCodeProtocol?
     /// 当前激活的参与节点 id；nil 表示未选定。
     var activeNodeId: String?
-    /// Claude Code 与 Desktop 是同一 Claude Gateway 的两个消费者。旧配置
-    /// 缺少该字段时由 `isEnabled` 迁移为 Code consumer。
+    /// Code Gateway connection state. The optional field remains for decoding
+    /// the pre-0.16 shared-Gateway file; missing values migrate from isEnabled.
     var claudeCodeEnabled: Bool? = nil
     /// Claude Desktop 官方 3P profile consumer；与 Code 配置/鉴权独立。
     var claudeDesktopEnabled: Bool? = nil
     /// 缺省保持 0.15 的完整节点目录行为，避免升级后静默隐藏模型。
     var claudeDesktopCatalogMode: ClaudeDesktopCatalogMode? = nil
+    /// Code's public model surface. Reuses the same two durable wire values as
+    /// Desktop: stable tier routes or the selected node's exact catalog.
+    var claudeCodeCatalogMode: ClaudeDesktopCatalogMode? = nil
+    /// Sparse Code-only model overrides keyed by node id. Missing tiers always
+    /// follow the node's current defaults, so later node edits remain visible.
+    var claudeCodeModelOverridesByNode: [String: ClaudeAppNodeModelOverride]? = nil
+    /// Sparse Desktop-only overrides. They are used only by hot-switch routes;
+    /// the full node catalog continues to expose exact node-owned identities.
+    var claudeDesktopModelOverridesByNode: [String: ClaudeAppNodeModelOverride]? = nil
     /// Claude Desktop 专用 HTTPS listener，默认 14403。
     var claudeDesktopHTTPSPort: Int? = nil
     /// 只供本地 Desktop profile 使用的独立随机 key（配置文件本身为 0600）。
@@ -109,6 +187,7 @@ struct GlobalProxyConfig: Codable, Equatable {
     // 全局代理端口提到 1 万段（避开常用低端口、降低与其他本地服务冲突概率）。
     static let defaultCodexPort = 14399
     static let defaultClaudePort = 14400
+    static let defaultClaudeDesktopGatewayPort = 14404
     static let defaultClaudeDesktopHTTPSPort = 14403
     static let defaultOpenCodePort = 14401
     // Science 轨端口全部落在 AIUsage 自有的 144xx 端口族（区别于其它同类工具，避免撞常用端口）：
@@ -181,6 +260,17 @@ struct GlobalProxyConfig: Codable, Equatable {
             config.claudeDesktopHTTPSPort = defaultClaudeDesktopHTTPSPort
             config.claudeDesktopClientKey = freshDesktopClientKey()
             return config
+        case .desktop:
+            var config = GlobalProxyConfig(
+                isEnabled: false, port: defaultClaudeDesktopGatewayPort,
+                clientKey: freshClientKey(), virtualModel: defaultClaudeOpus,
+                sonnetModel: defaultClaudeSonnet, haikuModel: defaultClaudeHaiku,
+                openCodeInterface: nil, activeNodeId: nil
+            )
+            config.claudeDesktopCatalogMode = .fullNodeCatalog
+            config.claudeDesktopHTTPSPort = defaultClaudeDesktopHTTPSPort
+            config.claudeDesktopClientKey = freshDesktopClientKey()
+            return config
         case .opencode:
             return GlobalProxyConfig(
                 isEnabled: false, port: defaultOpenCodePort, clientKey: freshClientKey(),
@@ -244,6 +334,22 @@ struct GlobalProxyConfig: Codable, Equatable {
         isEnabled = hasClaudeConsumers
     }
 
+    /// Normalize the independent Desktop product gateway. Unlike the legacy
+    /// shared Claude config, `isEnabled` is the Desktop connection state and
+    /// must not be derived from Code/Desktop consumer flags.
+    mutating func ensureDesktopDefaults() {
+        claudeDesktopCatalogMode = claudeDesktopCatalogMode ?? .fullNodeCatalog
+        let requestedHTTPSPort = claudeDesktopHTTPSPort ?? Self.defaultClaudeDesktopHTTPSPort
+        let validPort = (1_024...65_535).contains(requestedHTTPSPort)
+            ? requestedHTTPSPort : Self.defaultClaudeDesktopHTTPSPort
+        claudeDesktopHTTPSPort = validPort == port
+            ? (port == 65_535 ? 65_534 : max(1_024, port + 1))
+            : validPort
+        if claudeDesktopClientKey?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            claudeDesktopClientKey = Self.freshDesktopClientKey()
+        }
+    }
+
     // MARK: Derived
 
     /// client key 兜底：空则用稳定占位，避免 admin/CLI 鉴权两端空值不一致。
@@ -256,6 +362,35 @@ struct GlobalProxyConfig: Codable, Equatable {
     var effectiveClaudeDesktopEnabled: Bool { claudeDesktopEnabled ?? false }
     var effectiveClaudeDesktopCatalogMode: ClaudeDesktopCatalogMode {
         claudeDesktopCatalogMode ?? .fullNodeCatalog
+    }
+    var effectiveClaudeCodeCatalogMode: ClaudeDesktopCatalogMode {
+        claudeCodeCatalogMode ?? .smartRoutes
+    }
+    func claudeCodeModelOverride(for nodeID: String) -> ClaudeAppNodeModelOverride? {
+        guard let value = claudeCodeModelOverridesByNode?[nodeID], !value.isEmpty else { return nil }
+        return value
+    }
+    func effectiveClaudeCodeModels(for node: ProxyConfiguration) -> ClaudeAppResolvedModels {
+        let override = claudeCodeModelOverride(for: node.id)
+        return ClaudeAppResolvedModels(
+            defaultModel: override?.defaultModel?.nilIfBlank ?? node.defaultModel,
+            opus: override?.opus?.nilIfBlank ?? node.modelMapping.bigModel.name,
+            sonnet: override?.sonnet?.nilIfBlank ?? node.modelMapping.middleModel.name,
+            haiku: override?.haiku?.nilIfBlank ?? node.modelMapping.smallModel.name
+        )
+    }
+    func claudeDesktopModelOverride(for nodeID: String) -> ClaudeAppNodeModelOverride? {
+        guard let value = claudeDesktopModelOverridesByNode?[nodeID], !value.isEmpty else { return nil }
+        return value
+    }
+    func effectiveClaudeDesktopModels(for node: ProxyConfiguration) -> ClaudeAppResolvedModels {
+        let override = claudeDesktopModelOverride(for: node.id)
+        return ClaudeAppResolvedModels(
+            defaultModel: override?.defaultModel?.nilIfBlank ?? node.defaultModel,
+            opus: override?.opus?.nilIfBlank ?? node.modelMapping.bigModel.name,
+            sonnet: override?.sonnet?.nilIfBlank ?? node.modelMapping.middleModel.name,
+            haiku: override?.haiku?.nilIfBlank ?? node.modelMapping.smallModel.name
+        )
     }
     var hasClaudeConsumers: Bool { effectiveClaudeCodeEnabled || effectiveClaudeDesktopEnabled }
     var claudeConsumers: Set<ClaudeGatewayConsumer> {
@@ -363,6 +498,9 @@ enum GlobalProxyStore {
     static func load(track: GlobalProxyTrack) -> GlobalProxyConfig {
         let path = configPath(track: track)
         guard let data = FileManager.default.contents(atPath: path) else {
+            if track == .desktop, let migrated = migrateLegacyDesktopIfNeeded() {
+                return migrated
+            }
             return .makeDefault(track: track)
         }
         do {
@@ -372,6 +510,15 @@ enum GlobalProxyStore {
             } else if track == .claude {
                 let decoded = config
                 config.ensureClaudeDesktopDefaults()
+                if config.effectiveClaudeDesktopEnabled {
+                    _ = persistDesktopMigration(from: config)
+                    config.claudeDesktopEnabled = false
+                    config.isEnabled = config.effectiveClaudeCodeEnabled
+                }
+                if config != decoded { _ = save(config, track: track) }
+            } else if track == .desktop {
+                let decoded = config
+                config.ensureDesktopDefaults()
                 if config != decoded { _ = save(config, track: track) }
             }
             return config
@@ -388,6 +535,8 @@ enum GlobalProxyStore {
             toSave.ensureScienceWorkspaceDefaults()
         } else if track == .claude {
             toSave.ensureClaudeDesktopDefaults()
+        } else if track == .desktop {
+            toSave.ensureDesktopDefaults()
         }
         let path = configPath(track: track)
         let dir = (path as NSString).deletingLastPathComponent
@@ -401,5 +550,42 @@ enum GlobalProxyStore {
             globalProxyLog.error("Failed to persist global proxy config (\(track.rawValue, privacy: .public)): \(String(describing: error), privacy: .public)")
             return false
         }
+    }
+
+    /// One-time 0.15 shared-Gateway migration. Desktop keeps the same public
+    /// HTTPS port, key, model mode and selected node, but receives a new
+    /// independent internal product port.
+    private static func migrateLegacyDesktopIfNeeded() -> GlobalProxyConfig? {
+        let legacyPath = configPath(track: .claude)
+        guard let data = FileManager.default.contents(atPath: legacyPath),
+              var legacy = try? JSONDecoder().decode(GlobalProxyConfig.self, from: data) else { return nil }
+        legacy.ensureClaudeDesktopDefaults()
+        guard legacy.effectiveClaudeDesktopEnabled else { return nil }
+        let desktop = desktopConfig(from: legacy)
+        guard save(desktop, track: .desktop) else { return nil }
+        legacy.claudeDesktopEnabled = false
+        legacy.isEnabled = legacy.effectiveClaudeCodeEnabled
+        _ = save(legacy, track: .claude)
+        return desktop
+    }
+
+    @discardableResult
+    private static func persistDesktopMigration(from legacy: GlobalProxyConfig) -> Bool {
+        let desktopPath = configPath(track: .desktop)
+        if FileManager.default.fileExists(atPath: desktopPath) { return true }
+        return save(desktopConfig(from: legacy), track: .desktop)
+    }
+
+    private static func desktopConfig(from legacy: GlobalProxyConfig) -> GlobalProxyConfig {
+        var desktop = GlobalProxyConfig.makeDefault(track: .desktop)
+        desktop.isEnabled = legacy.effectiveClaudeDesktopEnabled
+        desktop.activeNodeId = legacy.activeNodeId
+        desktop.clientKey = legacy.effectiveClaudeDesktopClientKey
+        desktop.claudeDesktopClientKey = legacy.effectiveClaudeDesktopClientKey
+        desktop.claudeDesktopHTTPSPort = legacy.effectiveClaudeDesktopHTTPSPort
+        desktop.claudeDesktopCatalogMode = legacy.effectiveClaudeDesktopCatalogMode
+        desktop.claudeDesktopSupports1MByNode = legacy.claudeDesktopSupports1MByNode
+        desktop.ensureDesktopDefaults()
+        return desktop
     }
 }

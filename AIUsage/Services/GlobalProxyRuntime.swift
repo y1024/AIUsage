@@ -54,15 +54,17 @@ final class GlobalProxyRuntime: ObservableObject {
     // 每条轨一个常驻实例（互不影响，可同时启用）。
     static let codex = GlobalProxyRuntime(track: .codex, adminPath: "/__aiusage/admin/codex-upstream")
     static let claude = GlobalProxyRuntime(track: .claude, adminPath: "/__aiusage/admin/claude-upstream")
+    static let desktop = GlobalProxyRuntime(track: .desktop, adminPath: "/__aiusage/admin/claude-upstream")
     static let opencode = GlobalProxyRuntime(track: .opencode, adminPath: "/__aiusage/admin/opencode-upstream")
     // Science 复用 Claude 轨的 Anthropic→OpenAI 转换代理（同 admin 路由，独立进程/端口）。
     static let science = GlobalProxyRuntime(track: .science, adminPath: "/__aiusage/admin/claude-upstream")
-    static var all: [GlobalProxyRuntime] { [codex, claude, opencode, science] }
+    static var all: [GlobalProxyRuntime] { [codex, claude, desktop, opencode, science] }
 
     static func instance(for track: GlobalProxyTrack) -> GlobalProxyRuntime {
         switch track {
         case .codex: return codex
         case .claude: return claude
+        case .desktop: return desktop
         case .opencode: return opencode
         case .science: return science
         }
@@ -76,7 +78,8 @@ final class GlobalProxyRuntime: ObservableObject {
     var trackLabel: String {
         switch track {
         case .codex: return AppSettings.shared.t("Codex global proxy", "Codex 全局代理")
-        case .claude: return "Claude Gateway"
+        case .claude: return AppSettings.shared.t("Code Gateway", "Code 网关")
+        case .desktop: return AppSettings.shared.t("Claude Desktop gateway", "Claude Desktop 网关")
         case .opencode: return AppSettings.shared.t("OpenCode global proxy", "OpenCode 全局代理")
         case .science: return AppSettings.shared.t("Claude Science proxy", "Claude Science 代理")
         }
@@ -106,7 +109,7 @@ final class GlobalProxyRuntime: ObservableObject {
 
     var isProcessRunning: Bool { process?.isRunning == true }
     var isClaudeDesktopListenerRunning: Bool {
-        track == .claude && isProcessRunning && httpsListenPort != nil
+        track == .desktop && isProcessRunning && httpsListenPort != nil
     }
 
     /// 跨轨仲裁聚合用：本轨全局代理运行时占用的端口所有者（仅在确实运行时上报）。
@@ -203,10 +206,12 @@ final class GlobalProxyRuntime: ObservableObject {
                 guard line.hasPrefix("PROXY_LOG:") else { return }
                 Task { @MainActor in
                     // OpenCode 轨：归因到 OpenCodeProxyRuntime（节点卡片/统计/热力图同源、按节点定价算成本）。
-                    // Codex/Claude/Science 轨：仍走 ProxyViewModel（节点在 configurations 里，统计/归档复用既有链路）。
+                    // Claude product gateways forward into a Node Runtime,
+                    // which owns aggregate usage. Ignoring their transport log
+                    // prevents every request from being counted twice.
                     if capturedTrack == .opencode {
                         OpenCodeProxyRuntime.shared.ingestGlobalProxyLog(jsonStr)
-                    } else {
+                    } else if capturedTrack == .codex {
                         let runtime = GlobalProxyRuntime.instance(for: capturedTrack)
                         ProxyViewModel.shared.parseProxyLog(jsonStr, configId: runtime.activeNodeId ?? "")
                     }

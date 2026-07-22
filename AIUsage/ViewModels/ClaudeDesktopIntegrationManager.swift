@@ -97,8 +97,8 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
     @Published private(set) var activeNodeName: String?
     @Published private(set) var isBusy = false
 
-    private let gateway = GlobalProxyManager.claude
-    private let runtime = GlobalProxyRuntime.claude
+    private let gateway = GlobalProxyManager.desktop
+    private let runtime = GlobalProxyRuntime.desktop
     private let profileStore = ClaudeDesktopProfileStore.shared
     private var cancellables: Set<AnyCancellable> = []
     private var trafficObservationCancellable: AnyCancellable?
@@ -164,7 +164,8 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
         let catalog = ClaudeDesktopProfileStore.catalog(
             for: node,
             mode: gateway.config.effectiveClaudeDesktopCatalogMode,
-            supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id)
+            supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id),
+            routes: gateway.config.effectiveClaudeDesktopModels(for: node)
         )
         guard !catalog.isEmpty else {
             state = .failed(AppSettings.shared.t(
@@ -184,7 +185,7 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
             ))
             try await TLSCertificateManager.shared.ensureCertificate()
 
-            state = .preparing(AppSettings.shared.t("Starting the shared Claude Gateway…", "正在启动共享 Claude Gateway…"))
+            state = .preparing(AppSettings.shared.t("Starting the Desktop Gateway…", "正在启动 Desktop 网关…"))
             try await gateway.attachClaudeDesktop(
                 activeNodeId: nodeID,
                 httpsPort: gateway.config.effectiveClaudeDesktopHTTPSPort,
@@ -304,7 +305,7 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
             return
         }
         let profileStatus = profileStore.status()
-        guard gateway.config.effectiveClaudeDesktopEnabled else {
+        guard gateway.config.isEnabled else {
             state = profileStatus.isOwnedByAIUsage
                 ? .conflict(AppSettings.shared.t(
                     "The AIUsage profile is still selected, but its gateway consumer is off.",
@@ -328,7 +329,8 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
             configuredModels = ClaudeDesktopProfileStore.catalog(
                 for: node,
                 mode: gateway.config.effectiveClaudeDesktopCatalogMode,
-                supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id)
+                supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id),
+                routes: gateway.config.effectiveClaudeDesktopModels(for: node)
             )
             activeNodeName = node.name
         }
@@ -337,12 +339,13 @@ final class ClaudeDesktopIntegrationManager: ObservableObject {
     }
 
     func refreshProfileForActiveNode(_ nodeID: String) async {
-        guard gateway.config.effectiveClaudeDesktopEnabled,
+        guard gateway.config.isEnabled,
               let node = ProxyViewModel.shared.configurations.first(where: { $0.id == nodeID }) else { return }
         let catalog = ClaudeDesktopProfileStore.catalog(
             for: node,
             mode: gateway.config.effectiveClaudeDesktopCatalogMode,
-            supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id)
+            supports1M: gateway.config.claudeDesktopSupports1MModels(for: node.id),
+            routes: gateway.config.effectiveClaudeDesktopModels(for: node)
         )
         guard !catalog.isEmpty else {
             state = .failed(AppSettings.shared.t(

@@ -31,8 +31,13 @@ extension ProxyManagementView {
                     VStack(spacing: 0) {
                         ConfigurationCardView(
                             config: config,
-                            isActive: viewModel.isNodeActivated(config.id),
-                            isProxyOnlyRunning: viewModel.proxyOnlyRunningIds.contains(config.id),
+                            isActive: (showsClaudeProductConfiguration || family.isCodex)
+                                && viewModel.isNodeActivated(config.id),
+                            isProxyOnlyRunning: showsClaudeProductConfiguration
+                                ? viewModel.proxyOnlyRunningIds.contains(config.id)
+                                : viewModel.isNodeRuntimeRunning(config.id),
+                            isRuntimeManuallyHeld: viewModel.proxyOnlyRunningIds.contains(config.id),
+                            showsActivationControl: showsClaudeProductConfiguration || family.isCodex,
                             isBusy: viewModel.isOperationInProgress(config.id)
                                 || isManagedRuntimeBusy(nodeID: config.id),
                             isActivationManaged: !family.isCodex && claudeGateway.isEnabled,
@@ -53,7 +58,15 @@ extension ProxyManagementView {
                             },
                             onDragEnded: { commitNodeDrag() },
                             onToggleActivation: { toggleCodeRoute(for: config) },
-                            onToggleProxyOnly: { Task { await viewModel.toggleProxyOnly(config.id) } },
+                            onToggleProxyOnly: {
+                                Task {
+                                    if showsClaudeProductConfiguration || family.isCodex {
+                                        await viewModel.toggleProxyOnly(config.id)
+                                    } else {
+                                        await viewModel.toggleNodeRuntimeManually(config.id)
+                                    }
+                                }
+                            },
                             onCopyLaunchCommand: { viewModel.copyLaunchCommand(for: config.id) },
                             onTestConnectivity: { Task { await viewModel.testConnectivity(config.id) } },
                             onEdit: {
@@ -127,14 +140,13 @@ extension ProxyManagementView {
         let node = viewModel.configurations.first(where: { $0.id == nodeID })
         let directCodeRunning = directCode && (node?.needsProxyProcess != true || viewModel.isProxyRunning(nodeID))
         let gatewayRunning = claudeGatewayRuntime.isProcessRunning
-        let desktop = claudeGateway.config.effectiveClaudeDesktopEnabled
-            && claudeGateway.activeNodeId == nodeID
+        let desktop = desktopGateway.isEnabled && desktopGateway.activeNodeId == nodeID
         let science = scienceProxy.isEnabled && scienceProxy.activeNodeId == nodeID
         return ClaudeNodeUsage(
             codeRoute: gatewayCode ? .gateway : (directCode ? .direct : nil),
             codeRunning: gatewayCode ? gatewayRunning : directCodeRunning,
             desktop: desktop,
-            desktopRunning: desktop && claudeGatewayRuntime.isClaudeDesktopListenerRunning,
+            desktopRunning: desktop && desktopGatewayRuntime.isClaudeDesktopListenerRunning,
             science: science,
             scienceRunning: science && scienceProxy.isProxyRunning && scienceProxy.sandboxHealthy
         )
@@ -143,20 +155,14 @@ extension ProxyManagementView {
     private func isManagedRuntimeBusy(nodeID: String) -> Bool {
         if codexGateway.activeNodeId == nodeID, codexGateway.isBusy { return true }
         if claudeGateway.activeNodeId == nodeID, claudeGateway.isBusy { return true }
+        if desktopGateway.activeNodeId == nodeID, desktopGateway.isBusy { return true }
         if scienceProxy.activeNodeId == nodeID, scienceProxy.isBusy { return true }
         if openCodeGateway.activeNodeId == nodeID, openCodeGateway.isBusy { return true }
         return false
     }
 
-    /// Desktop already owns this node's Gateway route. Treat the node's Code
-    /// toggle as "join the existing route" instead of trying to start a second
-    /// listener that may collide with the Gateway port.
     private func shouldAttachCodeToGateway(nodeID: String) -> Bool {
-        guard !family.isCodex,
-              !claudeGateway.isEnabled,
-              claudeGateway.config.effectiveClaudeDesktopEnabled,
-              claudeGateway.activeNodeId == nodeID else { return false }
-        return !viewModel.isNodeActivated(nodeID)
+        false
     }
 
     private func toggleCodeRoute(for config: ProxyConfiguration) {

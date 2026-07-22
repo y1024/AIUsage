@@ -122,11 +122,51 @@ struct CodexGlobalProxyAdapter: GlobalProxyTrackAdapter {
 
 @MainActor
 struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
-    let track: GlobalProxyTrack = .claude
-    var runtime: GlobalProxyRuntime { .claude }
+    let track: GlobalProxyTrack
+    var runtime: GlobalProxyRuntime { .instance(for: track) }
+
+    init(track: GlobalProxyTrack = .claude) {
+        precondition([.claude, .desktop, .science].contains(track))
+        self.track = track
+    }
 
     private func node(_ id: String) -> ProxyConfiguration? {
         ProxyViewModel.shared.configurations.first { $0.id == id && ProxyNodeFamily.claude.contains($0.nodeType) }
+    }
+
+    private func productCatalogProjection(
+        config: GlobalProxyConfig,
+        node: ProxyConfiguration,
+        codeModels: ClaudeAppResolvedModels,
+        desktopModels: ClaudeAppResolvedModels
+    ) -> (projection: ClaudeProductGatewayCatalogProjection, routeStyle: String, mapsStableRoutes: Bool)? {
+        switch track {
+        case .claude:
+            let mode = config.effectiveClaudeCodeCatalogMode
+            return (
+                ClaudeDesktopProfileStore.gatewayProjection(
+                    for: node,
+                    mode: mode,
+                    routes: codeModels
+                ),
+                mode == .smartRoutes ? "desktop" : "code",
+                mode == .smartRoutes
+            )
+        case .desktop:
+            let mode = config.effectiveClaudeDesktopCatalogMode
+            return (
+                ClaudeDesktopProfileStore.gatewayProjection(
+                    for: node,
+                    mode: mode,
+                    supports1M: config.claudeDesktopSupports1MModels(for: node.id),
+                    routes: desktopModels
+                ),
+                "desktop",
+                mode == .smartRoutes
+            )
+        default:
+            return nil
+        }
     }
 
     func availableNodes(config: GlobalProxyConfig) -> [GlobalProxyNodeRef] {
@@ -135,66 +175,93 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
             .map { GlobalProxyNodeRef(id: $0.id, name: $0.name) }
     }
 
-    /// Anthropic 直连且开启透传 → passthrough；其余（openaiProxy / 直连非透传）→ openai 转换。
-    private func isPassthrough(_ node: ProxyConfiguration) -> Bool {
-        node.nodeType == .anthropicDirect && node.usePassthroughProxy
-    }
-
     func startEnv(config: GlobalProxyConfig, nodeId: String) -> [String: String]? {
         guard let node = node(nodeId) else { return nil }
-        // CLI 始终发送固定虚拟模型名（opus/sonnet/haiku），由代理按层映射到节点真实 big/middle/small。
+        let codeModels = config.effectiveClaudeCodeModels(for: node)
+        let desktopModels = config.effectiveClaudeDesktopModels(for: node)
+        let routeModels = track == .desktop ? desktopModels : codeModels
+        let useProductRoutes = track == .claude
+            || (track == .desktop && config.effectiveClaudeDesktopCatalogMode == .smartRoutes)
+        let productCatalog = productCatalogProjection(
+            config: config,
+            node: node,
+            codeModels: codeModels,
+            desktopModels: desktopModels
+        )
+        // Product Gateway owns aliases/catalog presentation. It always sends
+        // an Anthropic-compatible request with an exact model to the selected
+        // Node Runtime, where protocol conversion and aggregate usage live.
         var env: [String: String] = [
+            "PROXY_MODE": "passthrough",
             "ANTHROPIC_API_KEY": config.effectiveClientKey,
-            "BIG_MODEL": node.modelMapping.bigModel.name,
-            "MIDDLE_MODEL": node.modelMapping.middleModel.name,
-            "SMALL_MODEL": node.modelMapping.smallModel.name,
+            "ANTHROPIC_UPSTREAM_URL": node.displayURL,
+            "ANTHROPIC_UPSTREAM_KEY": node.effectiveClientKey,
+            "ENABLE_MODEL_ALIAS_MAPPING": "1",
+            "BIG_MODEL": useProductRoutes ? routeModels.opus : node.modelMapping.bigModel.name,
+            "MIDDLE_MODEL": useProductRoutes ? routeModels.sonnet : node.modelMapping.middleModel.name,
+            "SMALL_MODEL": useProductRoutes ? routeModels.haiku : node.modelMapping.smallModel.name,
+            "AIUSAGE_CLAUDE_MODEL_CATALOG": "1",
+            "AIUSAGE_CLAUDE_EXACT_MODELS": "1",
         ]
-        if isPassthrough(node) {
-            env["PROXY_MODE"] = "passthrough"
-            env["ANTHROPIC_UPSTREAM_URL"] = node.anthropicBaseURL
-            env["ANTHROPIC_UPSTREAM_KEY"] = node.anthropicAPIKey
-            // 全局代理下 CLI 恒发虚拟名，必须开别名映射把 opus/sonnet/haiku 落到节点真实模型。
-            env["ENABLE_MODEL_ALIAS_MAPPING"] = "1"
-        } else {
-            env["PROXY_MODE"] = "openai"
-            env["OPENAI_API_KEY"] = node.upstreamAPIKey
-            env["OPENAI_BASE_URL"] = node.normalizedUpstreamBaseURL
-            env["OPENAI_API_MODE"] = node.openAIUpstreamAPI.rawValue
-            if node.maxOutputTokens > 0 { env["MAX_OUTPUT_TOKENS"] = "\(node.maxOutputTokens)" }
+        if let data = try? JSONEncoder().encode(node.runtimeModelCatalog),
+           let json = String(data: data, encoding: .utf8) {
+            env["AIUSAGE_CLAUDE_MODELS_JSON"] = json
+        }
+        env["AIUSAGE_CLAUDE_DEFAULT_MODEL"] = useProductRoutes
+            ? routeModels.defaultModel
+            : node.defaultModel
+        if let productCatalog {
+            if let data = try? JSONEncoder().encode(productCatalog.projection.availableModels),
+               let json = String(data: data, encoding: .utf8) {
+                env["AIUSAGE_CLAUDE_MODELS_JSON"] = json
+            }
+            if let defaultModel = productCatalog.projection.defaultModel {
+                env["AIUSAGE_CLAUDE_DEFAULT_MODEL"] = defaultModel
+            }
+            if let data = try? JSONEncoder().encode(productCatalog.projection.supports1MModels),
+               let json = String(data: data, encoding: .utf8) {
+                env["AIUSAGE_CLAUDE_SUPPORTS_1M_JSON"] = json
+            }
+            env["AIUSAGE_CLAUDE_ROUTE_STYLE"] = productCatalog.routeStyle
+            env["AIUSAGE_CLAUDE_DESKTOP_TIER_ROUTES"] = productCatalog.mapsStableRoutes ? "1" : "0"
         }
         return env
     }
 
     func switchPayload(config: GlobalProxyConfig, nodeId: String) -> [String: Any]? {
         guard let node = node(nodeId) else { return nil }
-        let passthrough = isPassthrough(node)
-        let desktopProjection = ClaudeDesktopProfileStore.gatewayProjection(
-            for: node,
-            mode: config.effectiveClaudeDesktopCatalogMode,
-            supports1M: config.claudeDesktopSupports1MModels(for: node.id)
+        let codeModels = config.effectiveClaudeCodeModels(for: node)
+        let desktopModels = config.effectiveClaudeDesktopModels(for: node)
+        let routeModels = track == .desktop ? desktopModels : codeModels
+        let useProductRoutes = track == .claude
+            || (track == .desktop && config.effectiveClaudeDesktopCatalogMode == .smartRoutes)
+        let productCatalog = productCatalogProjection(
+            config: config,
+            node: node,
+            codeModels: codeModels,
+            desktopModels: desktopModels
         )
+        let availableModels = productCatalog?.projection.availableModels ?? node.runtimeModelCatalog
+        let defaultModel = productCatalog?.projection.defaultModel
+            ?? (track == .claude ? codeModels.defaultModel : node.defaultModel)
         var payload: [String: Any] = [
             "nodeId": node.id,
-            "mode": passthrough ? "passthrough" : "convert",
-            "baseURL": passthrough ? node.anthropicBaseURL : node.normalizedUpstreamBaseURL,
-            "apiKey": passthrough ? node.anthropicAPIKey : node.upstreamAPIKey,
-            "apiMode": node.openAIUpstreamAPI.rawValue,
-            "bigModel": node.modelMapping.bigModel.name,
-            "middleModel": node.modelMapping.middleModel.name,
-            "smallModel": node.modelMapping.smallModel.name,
+            "mode": "passthrough",
+            "baseURL": node.displayURL,
+            "apiKey": node.effectiveClientKey,
+            "apiMode": OpenAIUpstreamAPI.chatCompletions.rawValue,
+            "bigModel": useProductRoutes ? routeModels.opus : node.modelMapping.bigModel.name,
+            "middleModel": useProductRoutes ? routeModels.sonnet : node.modelMapping.middleModel.name,
+            "smallModel": useProductRoutes ? routeModels.haiku : node.modelMapping.smallModel.name,
             "maxOutputTokens": node.maxOutputTokens,
-            "enableModelAliasMapping": passthrough,
-            "availableModels": desktopProjection.availableModels,
-            "defaultModel": desktopProjection.defaultModel
-                ?? (config.effectiveClaudeDesktopCatalogMode == .smartRoutes
-                    ? ClaudeDesktopProfileStore.sonnetRouteID
-                    : node.defaultModel),
+            "enableModelAliasMapping": true,
+            "availableModels": availableModels,
+            "defaultModel": defaultModel,
         ]
-        if config.effectiveClaudeDesktopEnabled {
-            payload["catalogRouteStyle"] = "desktop"
-            payload["mapDesktopTierRoutes"] =
-                config.effectiveClaudeDesktopCatalogMode == .smartRoutes
-            payload["catalogSupports1M"] = desktopProjection.supports1MModels
+        if let productCatalog {
+            payload["catalogRouteStyle"] = productCatalog.routeStyle
+            payload["mapDesktopTierRoutes"] = productCatalog.mapsStableRoutes
+            payload["catalogSupports1M"] = productCatalog.projection.supports1MModels
         }
         return payload
     }
@@ -202,30 +269,43 @@ struct ClaudeGlobalProxyAdapter: GlobalProxyTrackAdapter {
     func adminPath(config: GlobalProxyConfig) -> String { "/__aiusage/admin/claude-upstream" }
 
     func activateCLIConfig(_ config: GlobalProxyConfig) throws {
+        guard track == .claude else { return }
+        let activeNode = node(config.activeNodeId ?? "")
+        let routes = activeNode.map { config.effectiveClaudeCodeModels(for: $0) }
+        let smartRoutes = config.effectiveClaudeCodeCatalogMode == .smartRoutes
         try ClaudeSettingsManager.shared.writeEnv(.init(
             baseURL: config.localBaseURL,
             authToken: config.effectiveClientKey,
-            defaultModel: nil,
-            opusModel: config.claudeOpus,
-            sonnetModel: config.claudeSonnet,
-            haikuModel: config.claudeHaiku,
+            // Smart mode never leaks a node-owned model id into Claude Code's
+            // session identity. The Gateway remaps these durable routes live.
+            defaultModel: smartRoutes ? ClaudeDesktopProfileStore.defaultRouteID : routes?.defaultModel,
+            opusModel: smartRoutes ? ClaudeDesktopProfileStore.opusRouteID : (routes?.opus ?? config.claudeOpus),
+            sonnetModel: smartRoutes ? ClaudeDesktopProfileStore.sonnetRouteID : (routes?.sonnet ?? config.claudeSonnet),
+            haikuModel: smartRoutes ? ClaudeDesktopProfileStore.haikuRouteID : (routes?.haiku ?? config.claudeHaiku),
+            modelPresentation: smartRoutes ? .aiUsageRoutes : nil,
+            // Full catalog needs discovery for real node ids; smart mode needs
+            // it so the stable Default route is restored as a known model.
+            enableGatewayModelDiscovery: true,
             nodeExtraCACerts: nil
         ))
     }
 
     func restoreCLIConfig() throws {
+        guard track == .claude else { return }
         try ClaudeSettingsManager.shared.clearEnv()
     }
 
     func currentPerNodeActiveId() -> String? {
-        ProxyViewModel.shared.activatedId(isCodex: false)
+        track == .claude ? ProxyViewModel.shared.activatedId(isCodex: false) : nil
     }
 
     func deactivatePerNode(_ id: String) async {
+        guard track == .claude else { return }
         await ProxyViewModel.shared.deactivateConfiguration(id)
     }
 
     func activatePerNode(_ id: String) async {
+        guard track == .claude else { return }
         await ProxyViewModel.shared.activateConfiguration(id)
     }
 }

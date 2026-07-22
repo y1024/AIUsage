@@ -13,7 +13,7 @@ extension ProxyManagementView {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
                 ccSwitchImportButton
-                liveConfigFileButton
+                if showsClaudeProductConfiguration || family.isCodex { liveConfigFileButton }
 
                 Spacer(minLength: 16)
 
@@ -25,7 +25,7 @@ extension ProxyManagementView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
                     ccSwitchImportButton
-                    liveConfigFileButton
+                    if showsClaudeProductConfiguration || family.isCodex { liveConfigFileButton }
                     Spacer(minLength: 0)
                 }
 
@@ -223,9 +223,12 @@ extension ProxyManagementView {
                 tint: .blue
             )
             summaryCell(
-                icon: "checkmark.circle.fill",
-                title: L("Active", "已激活"),
-                value: familyActivatedId != nil ? "1" : "0",
+                icon: "wave.3.right.circle.fill",
+                title: showsClaudeProductConfiguration || family.isCodex
+                    ? L("Active", "已激活") : L("Running", "运行中"),
+                value: showsClaudeProductConfiguration || family.isCodex
+                    ? (familyActivatedId != nil ? "1" : "0")
+                    : "\(displayConfigs.filter { viewModel.isNodeRuntimeRunning($0.id) }.count)",
                 tint: .green
             )
             summaryCell(

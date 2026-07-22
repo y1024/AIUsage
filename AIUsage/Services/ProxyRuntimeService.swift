@@ -462,24 +462,23 @@ final class ProxyRuntimeService {
                 environment["MAX_OUTPUT_TOKENS"] = "\(config.maxOutputTokens)"
             }
             environment["CODEX_CLIENT_KEY"] = config.effectiveClientKey
-        } else if config.nodeType == .anthropicDirect && config.usePassthroughProxy {
+        } else if config.nodeType == .anthropicDirect {
             environment["PROXY_MODE"] = "passthrough"
             environment["ANTHROPIC_UPSTREAM_URL"] = config.anthropicBaseURL
             environment["ANTHROPIC_UPSTREAM_KEY"] = config.anthropicAPIKey
-            if !config.expectedClientKey.isEmpty {
-                environment["ANTHROPIC_API_KEY"] = config.expectedClientKey
-            }
+            environment["ANTHROPIC_API_KEY"] = config.effectiveClientKey
             let upstreamLower = config.anthropicBaseURL.lowercased()
             if upstreamLower.contains("anyrouter.top")
                 || upstreamLower.contains("a-ocnfniawgw.cn-shanghai.fcapp.run") {
                 environment["ENABLE_THINKING_REWRITE"] = "1"
             }
-            if config.enableModelAliasMapping {
-                environment["ENABLE_MODEL_ALIAS_MAPPING"] = "1"
-                environment["BIG_MODEL"] = config.modelMapping.bigModel.name
-                environment["MIDDLE_MODEL"] = config.modelMapping.middleModel.name
-                environment["SMALL_MODEL"] = config.modelMapping.smallModel.name
-            }
+            // Node runtimes receive exact model IDs from product gateways.
+            // Alias resolution here would map a second time and violate the
+            // Node / product boundary.
+            environment["ENABLE_MODEL_ALIAS_MAPPING"] = "0"
+            environment["BIG_MODEL"] = config.modelMapping.bigModel.name
+            environment["MIDDLE_MODEL"] = config.modelMapping.middleModel.name
+            environment["SMALL_MODEL"] = config.modelMapping.smallModel.name
         } else {
             environment["OPENAI_API_KEY"] = config.upstreamAPIKey
             environment["OPENAI_BASE_URL"] = config.normalizedUpstreamBaseURL
@@ -492,9 +491,18 @@ final class ProxyRuntimeService {
                 environment["MAX_OUTPUT_TOKENS"] = "\(config.maxOutputTokens)"
             }
 
-            if !config.expectedClientKey.isEmpty {
-                environment["ANTHROPIC_API_KEY"] = config.expectedClientKey
+            environment["ANTHROPIC_API_KEY"] = config.effectiveClientKey
+        }
+
+        if !config.nodeType.isCodex {
+            if let data = try? JSONEncoder().encode(config.runtimeModelCatalog),
+               let json = String(data: data, encoding: .utf8) {
+                environment["AIUSAGE_CLAUDE_MODELS_JSON"] = json
             }
+            environment["AIUSAGE_CLAUDE_DEFAULT_MODEL"] = config.defaultModel
+            environment["AIUSAGE_CLAUDE_MODEL_CATALOG"] = "1"
+            environment["AIUSAGE_CLAUDE_EXACT_MODELS"] = "1"
+            environment["AIUSAGE_CLAUDE_DESKTOP_TIER_ROUTES"] = "0"
         }
 
         if config.enableHTTPS {

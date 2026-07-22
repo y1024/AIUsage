@@ -9,14 +9,17 @@ import QuotaBackend
 struct ProxyManagementView: View {
     /// 节点家族过滤：Claude 菜单只列 Claude 家族节点，Codex 菜单只列 Codex 节点。
     var family: ProxyNodeFamily = .claude
+    var showsClaudeProductConfiguration = true
 
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var viewModel: ProxyViewModel
     @Environment(\.colorScheme) var colorScheme
     @ObservedObject var codexGateway = GlobalProxyManager.codex
     @ObservedObject var claudeGateway = GlobalProxyManager.claude
+    @ObservedObject var desktopGateway = GlobalProxyManager.desktop
     @ObservedObject var openCodeGateway = GlobalProxyManager.opencode
     @ObservedObject var claudeGatewayRuntime = GlobalProxyRuntime.claude
+    @ObservedObject var desktopGatewayRuntime = GlobalProxyRuntime.desktop
     @ObservedObject var scienceProxy = ScienceProxyManager.shared
     @State var showingNewConfigEditor = false
     @State var editingConfig: ProxyConfiguration?
@@ -95,7 +98,7 @@ struct ProxyManagementView: View {
                                 CodexSubscriptionSection(entries: codexSubscriptionEntries)
                             }
                             // 订阅制不按 token 计费 → 不再设订阅定价，订阅用量仅在统计页按 token 呈现。
-                        } else {
+                        } else if showsClaudeProductConfiguration {
                             // 通用配置仅作用于 Claude 的 ~/.claude/settings.json。
                             GlobalConfigSection()
                             // 全局统一代理：固定入口 + 热切换激活节点（启用时接管 settings.json）。

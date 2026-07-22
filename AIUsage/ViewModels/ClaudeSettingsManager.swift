@@ -3,6 +3,19 @@ import os.log
 
 private let claudeSettingsLog = Logger(subsystem: "com.aiusage.desktop", category: "ClaudeSettings")
 
+/// Values Claude Code accepts in the durable `effortLevel` setting. This
+/// startup default is loaded by a new Claude Code process; it does not mutate
+/// the effort of a process that is already running.
+enum ClaudeCodePersistentEffort: String, CaseIterable, Identifiable {
+    case auto
+    case low
+    case medium
+    case high
+    case xhigh
+
+    var id: String { rawValue }
+}
+
 enum ClaudeSettingsError: LocalizedError {
     case invalidRootObject
     case unreadableSettings
@@ -65,18 +78,31 @@ class ClaudeSettingsManager {
         "ANTHROPIC_BASE_URL",
         "ANTHROPIC_AUTH_TOKEN",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
+        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
         "NODE_EXTRA_CA_CERTS",
     ]
 
     struct EnvConfig {
+        enum ModelPresentation: Equatable {
+            case aiUsageRoutes
+        }
+
         var baseURL: String?
         var authToken: String?
         var defaultModel: String?
         var opusModel: String?
         var sonnetModel: String?
         var haikuModel: String?
+        var modelPresentation: ModelPresentation? = nil
+        var enableGatewayModelDiscovery: Bool = false
         var nodeExtraCACerts: String?
     }
 
@@ -85,12 +111,24 @@ class ClaudeSettingsManager {
         var settings = try readSettings()
         var env = settings["env"] as? [String: Any] ?? [:]
 
+        let routeDescription = AppSettings.shared.t(
+            "Stable route hot-switched inside AIUsage Gateway",
+            "由 AIUsage Gateway 热切换的稳定路由"
+        )
+        let presentsAIUsageRoutes = config.modelPresentation == .aiUsageRoutes
         let pairs: [(String, String?)] = [
             ("ANTHROPIC_BASE_URL", config.baseURL),
             ("ANTHROPIC_AUTH_TOKEN", config.authToken),
             ("ANTHROPIC_DEFAULT_OPUS_MODEL", config.opusModel),
+            ("ANTHROPIC_DEFAULT_OPUS_MODEL_NAME", presentsAIUsageRoutes ? "AIUsage Opus" : nil),
+            ("ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
             ("ANTHROPIC_DEFAULT_SONNET_MODEL", config.sonnetModel),
+            ("ANTHROPIC_DEFAULT_SONNET_MODEL_NAME", presentsAIUsageRoutes ? "AIUsage Sonnet" : nil),
+            ("ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
             ("ANTHROPIC_DEFAULT_HAIKU_MODEL", config.haikuModel),
+            ("ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME", presentsAIUsageRoutes ? "AIUsage Haiku" : nil),
+            ("ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION", presentsAIUsageRoutes ? routeDescription : nil),
+            ("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY", config.enableGatewayModelDiscovery ? "1" : nil),
             ("NODE_EXTRA_CA_CERTS", config.nodeExtraCACerts),
         ]
         for (key, value) in pairs {
@@ -109,6 +147,27 @@ class ClaudeSettingsManager {
             settings.removeValue(forKey: "model")
         }
 
+        try writeSettings(settings)
+    }
+
+    /// Claude Code accepts only low...xhigh as a durable settings value.
+    /// `auto` is represented by removing the key. Max and Ultracode remain
+    /// session-only and are changed inside Claude Code via `/effort`.
+    func readPersistentEffort() throws -> ClaudeCodePersistentEffort {
+        let settings = try readSettings()
+        guard let raw = settings["effortLevel"] as? String,
+              let level = ClaudeCodePersistentEffort(rawValue: raw),
+              level != .auto else { return .auto }
+        return level
+    }
+
+    func writePersistentEffort(_ level: ClaudeCodePersistentEffort) throws {
+        var settings = try readSettings()
+        if level == .auto {
+            settings.removeValue(forKey: "effortLevel")
+        } else {
+            settings["effortLevel"] = level.rawValue
+        }
         try writeSettings(settings)
     }
 

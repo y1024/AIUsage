@@ -13,7 +13,7 @@ import Foundation
 
 @MainActor
 enum ProxyPortArbiter {
-    /// 一个正在监听端口的代理节点：所属代理家族（Codex/Claude Gateway/OpenCode/Science）+ 节点展示名，
+    /// 一个正在监听端口的代理节点：所属代理家族（Codex/Code/Desktop/OpenCode/Science）+ 节点展示名，
     /// 及其实际占用的端口集合（HTTPS 节点含两个端口）。
     struct Owner {
         let id: String

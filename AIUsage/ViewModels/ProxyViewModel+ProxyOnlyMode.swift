@@ -9,12 +9,101 @@ import os.log
 
 extension ProxyViewModel {
 
+    // MARK: - Shared Node Runtime leases
+
+    func runtimeConsumers(for id: String) -> Set<NodeRuntimeConsumer> {
+        nodeRuntimeConsumers[id] ?? []
+    }
+
+    func isNodeRuntimeRunning(_ id: String) -> Bool {
+        runtimeService.isProxyRunning(id)
+    }
+
+    /// Acquire one reusable runtime endpoint. Starting an already-running node
+    /// only adds a lease and never binds a second process or port.
+    func acquireNodeRuntime(_ id: String, consumer: NodeRuntimeConsumer) async throws {
+        guard let config = configurations.first(where: { $0.id == id }) else {
+            throw ProxyRuntimeError.configurationNotFound
+        }
+        if let pendingStart = nodeRuntimeStartTasks[id] {
+            try await pendingStart.value
+        } else if !runtimeService.isProxyRunning(id) {
+            if let conflict = portConflictDescription(for: config) {
+                throw ProxyRuntimeError.proxyStartFailed(conflict)
+            }
+            let startTask = Task { @MainActor in
+                try await runtimeService.startProxyOnly(for: config)
+            }
+            nodeRuntimeStartTasks[id] = startTask
+            do {
+                try await startTask.value
+                nodeRuntimeStartTasks.removeValue(forKey: id)
+            } catch {
+                nodeRuntimeStartTasks.removeValue(forKey: id)
+                throw error
+            }
+        }
+        var consumers = nodeRuntimeConsumers[id] ?? []
+        consumers.insert(consumer)
+        nodeRuntimeConsumers[id] = consumers
+        if unusedNodeRuntimePrompt?.nodeID == id { unusedNodeRuntimePrompt = nil }
+        proxyRuntimeLog.info("Node Runtime lease acquired: \(config.name, privacy: .public) <- \(consumer.rawValue, privacy: .public)")
+    }
+
+    /// Release one product lease. The last product disconnect deliberately
+    /// leaves the process alive until the user chooses whether to stop it.
+    func releaseNodeRuntime(
+        _ id: String,
+        consumer: NodeRuntimeConsumer,
+        promptWhenUnused: Bool = true
+    ) {
+        guard let config = configurations.first(where: { $0.id == id }) else {
+            nodeRuntimeConsumers.removeValue(forKey: id)
+            return
+        }
+        var consumers = nodeRuntimeConsumers[id] ?? []
+        consumers.remove(consumer)
+        if consumers.isEmpty {
+            nodeRuntimeConsumers.removeValue(forKey: id)
+        } else {
+            nodeRuntimeConsumers[id] = consumers
+        }
+
+        guard consumers.isEmpty,
+              !isNodeActivated(id),
+              runtimeService.isProxyRunning(id) else { return }
+        if promptWhenUnused {
+            unusedNodeRuntimePrompt = .init(nodeID: id, nodeName: config.name)
+        } else {
+            runtimeService.stopProxyOnly(for: config)
+        }
+    }
+
+    func resolveUnusedNodeRuntimePrompt(keepRunning: Bool) {
+        guard let prompt = unusedNodeRuntimePrompt,
+              let config = configurations.first(where: { $0.id == prompt.nodeID }) else {
+            unusedNodeRuntimePrompt = nil
+            return
+        }
+        unusedNodeRuntimePrompt = nil
+        if keepRunning {
+            var consumers = nodeRuntimeConsumers[prompt.nodeID] ?? []
+            consumers.insert(.manual)
+            nodeRuntimeConsumers[prompt.nodeID] = consumers
+            proxyOnlyRunningIds.insert(prompt.nodeID)
+            saveProxyOnlyIds()
+        } else {
+            runtimeService.stopProxyOnly(for: config)
+            proxyOnlyRunningIds.remove(prompt.nodeID)
+            saveProxyOnlyIds()
+        }
+    }
+
     // MARK: - Proxy-Only Start / Stop
 
     func startProxyOnly(_ id: String) async {
         guard !operationInProgressConfigIds.contains(id) else { return }
         guard let config = configurations.first(where: { $0.id == id }) else { return }
-        guard config.needsProxyProcess else { return }
 
         if let conflict = portConflictDescription(for: config) {
             operationErrorMessage = conflict
@@ -27,7 +116,7 @@ extension ProxyViewModel {
         operationErrorMessage = nil
 
         do {
-            try await runtimeService.startProxyOnly(for: config)
+            try await acquireNodeRuntime(id, consumer: .manual)
             proxyOnlyRunningIds.insert(id)
             saveProxyOnlyIds()
             proxyRuntimeLog.info("Proxy-only started for node \(config.name, privacy: .public) on \(config.displayURL, privacy: .public)")
@@ -44,7 +133,7 @@ extension ProxyViewModel {
         setOperationInProgress(busyIds, isActive: true)
         defer { setOperationInProgress(busyIds, isActive: false) }
 
-        runtimeService.stopProxyOnly(for: config)
+        releaseNodeRuntime(id, consumer: .manual, promptWhenUnused: false)
         proxyOnlyRunningIds.remove(id)
         saveProxyOnlyIds()
         proxyRuntimeLog.info("Proxy-only stopped for node \(config.name, privacy: .public)")
@@ -56,6 +145,22 @@ extension ProxyViewModel {
         } else {
             await startProxyOnly(id)
         }
+    }
+
+    /// Node-tab action uses actual runtime state instead of legacy Code
+    /// activation state. Product-owned runtimes cannot be force-stopped here.
+    func toggleNodeRuntimeManually(_ id: String) async {
+        let productConsumers = runtimeConsumers(for: id).subtracting([.manual])
+        if isNodeRuntimeRunning(id), !productConsumers.isEmpty,
+           !proxyOnlyRunningIds.contains(id) {
+            let owners = productConsumers.map(\.label).sorted().joined(separator: " · ")
+            operationErrorMessage = AppSettings.shared.t(
+                "This Node Runtime is in use by \(owners). Disconnect those products before stopping it.",
+                "该节点运行时正被 \(owners) 使用，请先断开这些应用后再关闭。"
+            )
+            return
+        }
+        await toggleProxyOnly(id)
     }
 
     // MARK: - Proxy-Only Persistence & Restore
@@ -88,7 +193,7 @@ extension ProxyViewModel {
             }
 
             do {
-                try await runtimeService.startProxyOnly(for: config)
+                try await acquireNodeRuntime(id, consumer: .manual)
                 proxyOnlyRunningIds.insert(id)
                 proxyRuntimeLog.info("Restored proxy-only node \(config.name, privacy: .public) on \(config.displayURL, privacy: .public)")
             } catch {
@@ -106,7 +211,7 @@ extension ProxyViewModel {
     func runningProxyPortOwners() -> [ProxyPortArbiter.Owner] {
         configurations.compactMap { config in
             guard config.needsProxyProcess, runtimeService.isProxyRunning(config.id) else { return nil }
-            let track = config.nodeType.isCodex ? "Codex" : "Claude Code"
+            let track = config.nodeType.isCodex ? "Codex" : "Claude Node Runtime"
             return ProxyPortArbiter.Owner(id: config.id, ports: config.listeningPorts, track: track, label: config.name)
         }
     }

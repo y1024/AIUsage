@@ -46,23 +46,11 @@ struct MenuBarTrackPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if isGlobal {
-                Text(manager.track == .claude && manager.config.effectiveClaudeDesktopEnabled
-                     ? L("Desktop · shared route", "Desktop · 共享路由")
-                     : L("Fixed port :\(manager.config.port) · hot-swap",
-                         "固定端口 :\(manager.config.port) · 热切换"))
+                Text(routeSummary)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 8)
-            } else if manager.track == .claude && manager.config.effectiveClaudeDesktopEnabled {
-                Text(L(
-                    "Desktop · Code independent",
-                    "Desktop · Code 独立"
-                ))
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
             }
             Divider()
             ScrollView {
@@ -130,7 +118,9 @@ struct MenuBarTrackPanel: View {
     private var footer: some View {
         if isGlobal {
             Divider()
-            footerButton(title: L("Disable global proxy", "停用全局代理"),
+            footerButton(title: manager.track == .claude
+                         ? L("Disconnect Code Gateway", "断开 Code Gateway")
+                         : L("Disable global proxy", "停用全局代理"),
                          icon: "bolt.slash.fill", tint: .red, action: onDisableGlobal)
                 .disabled(manager.isBusy)
         } else if let onDeactivateActiveNode {
@@ -138,6 +128,20 @@ struct MenuBarTrackPanel: View {
             footerButton(title: L("Deactivate node", "停用当前节点"),
                          icon: "stop.circle", tint: .secondary, action: onDeactivateActiveNode)
         }
+    }
+
+    private var routeSummary: String {
+        if manager.track == .claude,
+           manager.config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog {
+            return L(
+                "Fixed port :\(manager.config.port) · node models · restart Code",
+                "固定端口 :\(manager.config.port) · 节点模型 · 需重启 Code"
+            )
+        }
+        return L(
+            "Fixed port :\(manager.config.port) · hot-swap",
+            "固定端口 :\(manager.config.port) · 热切换"
+        )
     }
 
     private func footerButton(title: String, icon: String, tint: Color,

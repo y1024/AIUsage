@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var refreshCoordinator: ProviderRefreshCoordinator
     @EnvironmentObject var sparkle: SparkleController
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var proxyVM = ProxyViewModel.shared
     private var sectionBinding: Binding<AppSection> {
         Binding(
             get: { appState.selectedSection },
@@ -212,6 +213,26 @@ struct ContentView: View {
             ProviderPickerView(mode: mode)
                 .environmentObject(appState)
                 .interactiveDismissDisabled(mode == .initialSetup)
+        }
+        .alert(
+            L("Node is no longer in use", "节点已不再使用"),
+            isPresented: Binding(
+                get: { proxyVM.unusedNodeRuntimePrompt != nil },
+                set: { if !$0 { proxyVM.unusedNodeRuntimePrompt = nil } }
+            ),
+            presenting: proxyVM.unusedNodeRuntimePrompt
+        ) { _ in
+            Button(L("Stop Node", "关闭节点"), role: .destructive) {
+                proxyVM.resolveUnusedNodeRuntimePrompt(keepRunning: false)
+            }
+            Button(L("Keep Running", "保持运行")) {
+                proxyVM.resolveUnusedNodeRuntimePrompt(keepRunning: true)
+            }
+        } message: { prompt in
+            Text(L(
+                "Code, Desktop and Science have all disconnected from \"\(prompt.nodeName)\". Turn off this node?",
+                "Code、Desktop 与 Science 均已断开“\(prompt.nodeName)”。是否关闭该节点？"
+            ))
         }
     }
 }

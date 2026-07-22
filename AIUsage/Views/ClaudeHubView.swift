@@ -1,7 +1,7 @@
 import SwiftUI
-import AppKit
 
 enum ClaudeHubTab: String, CaseIterable, Identifiable {
+    case node
     case code
     case desktop
     case science
@@ -10,6 +10,7 @@ enum ClaudeHubTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .node: return "Node"
         case .code: return "Code"
         case .desktop: return "Desktop"
         case .science: return "Science"
@@ -18,6 +19,7 @@ enum ClaudeHubTab: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .node: return "point.3.connected.trianglepath.dotted"
         case .code: return "terminal"
         case .desktop: return "macwindow"
         case .science: return "atom"
@@ -26,6 +28,7 @@ enum ClaudeHubTab: String, CaseIterable, Identifiable {
 
     var tint: Color {
         switch self {
+        case .node: return .teal
         case .code: return .indigo
         case .desktop: return ClaudeDesktopIntegrationView.brand
         case .science: return ScienceProxyManagementView.brand
@@ -33,8 +36,8 @@ enum ClaudeHubTab: String, CaseIterable, Identifiable {
     }
 }
 
-/// One Claude ecosystem entry in the sidebar. Code and Desktop share the same
-/// gateway/node pool; Science remains an intentionally isolated runtime.
+/// One Claude ecosystem entry with four explicit ownership boundaries: Node
+/// runtimes plus independent Code, Desktop and Science product gateways.
 struct ClaudeHubView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(DefaultsKey.claudeHubSelectedTab) private var selectedTabRawValue = ClaudeHubTab.desktop.rawValue
@@ -54,8 +57,10 @@ struct ClaudeHubView: View {
 
             Group {
                 switch selectedTab {
+                case .node:
+                    ProxyManagementView(showsClaudeProductConfiguration: false)
                 case .code:
-                    ProxyManagementView()
+                    ClaudeCodeRoutingView()
                 case .desktop:
                     ClaudeDesktopIntegrationView()
                 case .science:
@@ -76,29 +81,15 @@ struct ClaudeHubView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 24) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Claude")
-                    .font(.system(size: 23, weight: .bold))
-                Text(L(
-                    "One node library · Code, Desktop and Science",
-                    "一套节点库 · Code、Desktop 与 Science"
-                ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            ForEach(ClaudeHubTab.allCases) { tab in
+                productButton(tab)
             }
-            .frame(minWidth: 220, alignment: .leading)
-
-            HStack(spacing: 7) {
-                ForEach(ClaudeHubTab.allCases) { tab in
-                    productButton(tab)
-                }
-            }
-            .frame(maxWidth: 570)
         }
+        .frame(maxWidth: 720, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(.bar)
+        .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .bottom) { Divider() }
     }
 
@@ -111,31 +102,27 @@ struct ClaudeHubView: View {
                 withAnimation(.easeOut(duration: 0.18)) { selectedTabRawValue = tab.rawValue }
             }
         } label: {
-            HStack(spacing: 9) {
+            HStack(spacing: 6) {
                 Image(systemName: tab.symbol)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(selected ? tab.tint : Color.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(selected ? tab.tint.opacity(0.14) : Color.primary.opacity(0.045))
-                    )
+                    .frame(width: 20, height: 22)
                 Text(tab.title)
-                    .font(.callout.weight(.semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
-                Spacer(minLength: 0)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .padding(.horizontal, 12)
             .contentShape(Rectangle())
             .background(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(selected ? Color(nsColor: .controlBackgroundColor) : .clear)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selected ? tab.tint.opacity(0.10) : Color.primary.opacity(0.025))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(selected ? tab.tint.opacity(0.28) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(selected ? tab.tint.opacity(0.38) : Color.primary.opacity(0.055), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -144,11 +131,396 @@ struct ClaudeHubView: View {
     }
 }
 
+/// Code owns only application configuration and its fixed product gateway.
+/// Node creation, runtime state and upstream credentials live in the Node tab.
+private struct ClaudeCodeRoutingView: View {
+    @ObservedObject private var gateway = GlobalProxyManager.claude
+    @ObservedObject private var proxyVM = ProxyViewModel.shared
+    @State private var showSettingsEditor = false
+    @State private var showSettingsHelp = false
+    @State private var showModelHelp = false
+    @State private var selectedNodeID = ""
+    @State private var showAllCodeModels = false
+    @State private var effortLevel: ClaudeCodePersistentEffort = .auto
+    @State private var effortError: String?
+
+    private var nodes: [GlobalProxyNodeRef] { gateway.availableNodes() }
+
+    private var resolvedNodeID: String? {
+        if gateway.isRuntimeEnabled,
+           let active = gateway.activeNodeId,
+           nodes.contains(where: { $0.id == active }) { return active }
+        if nodes.contains(where: { $0.id == selectedNodeID }) { return selectedNodeID }
+        if let active = gateway.activeNodeId,
+           nodes.contains(where: { $0.id == active }) { return active }
+        return nodes.first?.id
+    }
+
+    private var selectedNode: ProxyConfiguration? {
+        guard let resolvedNodeID else { return nil }
+        return proxyVM.configurations.first(where: { $0.id == resolvedNodeID })
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 0) {
+                    routeStep("terminal", "Claude Code", active: gateway.isEnabled)
+                    routeLine
+                    routeStep("arrow.triangle.branch", L("Code port :\(gateway.config.port)", "Code 端口 :\(gateway.config.port)"), active: gateway.isProxyRunning)
+                    routeLine
+                    routeStep("server.rack", gateway.node(for: gateway.activeNodeId)?.name ?? L("Choose Node", "选择节点"), active: gateway.activeNodeId != nil)
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.indigo.opacity(0.055)))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.indigo.opacity(0.18)))
+
+                ClaudeGlobalProxySection(selectedNodeId: $selectedNodeID)
+                codeModelsCard
+                applicationConfigCard
+            }
+            .frame(maxWidth: 960)
+            .padding(20)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            if selectedNodeID.isEmpty { selectedNodeID = resolvedNodeID ?? "" }
+            reloadEffortLevel()
+        }
+        .onChange(of: gateway.activeNodeId) { _, newValue in
+            guard let newValue else { return }
+            selectedNodeID = newValue
+            showAllCodeModels = false
+        }
+        .onChange(of: gateway.config.effectiveClaudeCodeCatalogMode) { _, _ in
+            showAllCodeModels = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            reloadEffortLevel()
+        }
+        .sheet(isPresented: $showSettingsEditor) {
+            LocalSettingsEditorView()
+        }
+    }
+
+    private func routeStep(_ symbol: String, _ title: String, active: Bool) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(active ? Color.indigo : Color.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(active ? Color.indigo.opacity(0.11) : Color.secondary.opacity(0.08)))
+    }
+
+    private var routeLine: some View {
+        Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1).frame(maxWidth: .infinity)
+    }
+
+    private var applicationConfigCard: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 12) {
+                Image(systemName: "doc.badge.gearshape")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.indigo)
+                    .frame(width: 38, height: 38)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.indigo.opacity(0.10)))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L("Claude Code configuration", "Claude Code 配置"))
+                        .font(.headline)
+                    Text("~/.claude/settings.json")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    showSettingsHelp.toggle()
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showSettingsHelp, arrowEdge: .top) {
+                    Text(L(
+                        "AIUsage manages the Gateway endpoint, model routes and the startup effort default. A running Claude Code session keeps its current effort until you change it inside Claude Code.",
+                        "AIUsage 管理 Gateway 地址、模型映射和启动默认强度。正在运行的 Claude Code 会话会保持当前强度，除非你在 Claude Code 内修改。"
+                    ))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(16)
+                    .frame(width: 340)
+                }
+                Button(L("Edit…", "编辑…")) { showSettingsEditor = true }
+                    .buttonStyle(.bordered)
+            }
+
+            Divider()
+            effortControl
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.06)))
+    }
+
+    private var effortControl: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 10) {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.indigo)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Color.indigo.opacity(0.10)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Default effort", "默认思考强度"))
+                        .font(.caption.weight(.semibold))
+                    Text(L(
+                        "Takes effect the next time Claude Code starts · does not change the current session",
+                        "下次启动 Claude Code 时生效 · 不会改变当前会话"
+                    ))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                Picker("", selection: Binding(
+                    get: { effortLevel },
+                    set: { saveEffortLevel($0) }
+                )) {
+                    ForEach(ClaudeCodePersistentEffort.allCases) { level in
+                        Text(effortTitle(level)).tag(level)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 440)
+            }
+
+            if let effortError {
+                Label(effortError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func effortTitle(_ level: ClaudeCodePersistentEffort) -> String {
+        switch level {
+        case .auto: return L("Auto", "自动")
+        case .low: return "Low"
+        case .medium: return "Medium"
+        case .high: return "High"
+        case .xhigh: return "XHigh"
+        }
+    }
+
+    private func reloadEffortLevel() {
+        do {
+            effortLevel = try ClaudeSettingsManager.shared.readPersistentEffort()
+            effortError = nil
+        } catch {
+            effortError = error.localizedDescription
+        }
+    }
+
+    private func saveEffortLevel(_ level: ClaudeCodePersistentEffort) {
+        do {
+            try ClaudeSettingsManager.shared.writePersistentEffort(level)
+            effortLevel = level
+            effortError = nil
+        } catch {
+            let failure = error.localizedDescription
+            effortLevel = (try? ClaudeSettingsManager.shared.readPersistentEffort()) ?? .auto
+            effortError = failure
+        }
+    }
+
+    private var codeModelsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 9) {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.indigo)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(Color.indigo.opacity(0.11)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Code models", "Code 模型"))
+                        .font(.headline)
+                    Text(L(
+                        "Application routes for the selected node",
+                        "当前节点在 Code 中使用的应用侧路由"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if let selectedNode {
+                    Text(L(
+                        "\(selectedNode.runtimeModelCatalog.count) models",
+                        "\(selectedNode.runtimeModelCatalog.count) 个模型"
+                    ))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.indigo)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.indigo.opacity(0.10)))
+                }
+                Button { showModelHelp.toggle() } label: {
+                    Image(systemName: "questionmark.circle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showModelHelp, arrowEdge: .top) {
+                    codeModelHelpPopover
+                }
+            }
+
+            ClaudeModelModeSelector(
+                selection: gateway.config.effectiveClaudeCodeCatalogMode,
+                brand: .indigo,
+                nodeModelsDetail: L("Real names · restart Code", "真实名称 · 需重启 Code"),
+                isDisabled: gateway.isBusy,
+                onSelect: { mode in
+                    Task { await gateway.updateClaudeCodeCatalogMode(mode) }
+                }
+            )
+
+            Label(
+                gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes
+                    ? L(
+                        "Claude Code saves stable AIUsage routes; the Gateway can change the real model without restarting the session.",
+                        "Claude Code 只保存稳定的 AIUsage 路由；Gateway 可替换右侧真实模型，无需重启会话。"
+                    )
+                    : L(
+                        "Claude Code sees real node model names. Restart Code after changing this catalog or its startup model.",
+                        "Claude Code 会看到节点真实模型名；修改模型库或启动模型后需重启 Code。"
+                    ),
+                systemImage: gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes
+                    ? "arrow.triangle.2.circlepath"
+                    : "arrow.clockwise"
+            )
+            .font(.caption)
+            .foregroundStyle(gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes ? Color.indigo : Color.secondary)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.indigo.opacity(gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes ? 0.07 : 0.035))
+            )
+
+            if let node = selectedNode {
+                let nodeDefaults = ClaudeAppResolvedModels(
+                    defaultModel: node.defaultModel,
+                    opus: node.modelMapping.bigModel.name,
+                    sonnet: node.modelMapping.middleModel.name,
+                    haiku: node.modelMapping.smallModel.name
+                )
+                let resolved = gateway.config.effectiveClaudeCodeModels(for: node)
+                ClaudeModelRouteBoard(
+                    productName: "Code",
+                    brand: .indigo,
+                    showsStableRouteNames: gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes,
+                    catalog: node.runtimeModelCatalog,
+                    nodeDefaults: nodeDefaults,
+                    resolved: resolved,
+                    overrides: gateway.config.claudeCodeModelOverride(for: node.id),
+                    isDisabled: gateway.isBusy,
+                    onSelect: { route, model in
+                        Task {
+                            await gateway.updateClaudeCodeModelOverride(
+                                nodeID: node.id,
+                                route: route,
+                                model: model
+                            )
+                        }
+                    },
+                    onReset: {
+                        Task { await gateway.resetClaudeCodeModelOverrides(nodeID: node.id) }
+                    }
+                )
+
+                catalogLabel(
+                    gateway.config.effectiveClaudeCodeCatalogMode == .smartRoutes
+                        ? L("Models available for route mapping", "可用于映射的节点模型")
+                        : L("Real model names discovered by Code", "Code 可发现的真实模型")
+                )
+
+                ClaudeModelCatalogGrid(
+                    items: node.runtimeModelCatalog.map { model in
+                        ClaudeModelCatalogItem(
+                            id: model,
+                            title: model,
+                            help: model,
+                            isDefault: model == resolved.defaultModel
+                        )
+                    },
+                    brand: .indigo,
+                    showAll: $showAllCodeModels
+                )
+            } else {
+                Text(L(
+                    "Choose a node with a configured Model Library.",
+                    "请选择已配置模型库的节点。"
+                ))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 6)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    }
+
+    private func catalogLabel(_ title: String) -> some View {
+        Label(title, systemImage: "list.bullet.rectangle")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
+
+    private var codeModelHelpPopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L("Code model ownership", "Code 模型归属"))
+                .font(.headline)
+            Label(
+                L(
+                    "Node defaults are shared and are never changed here.",
+                    "节点默认配置仍由 Node 管理，此处不会修改。"
+                ),
+                systemImage: "server.rack"
+            )
+            Label(
+                L(
+                    "A Code override is stored only for this node and takes effect in the Code Gateway immediately.",
+                    "Code 覆盖只属于当前节点的 Code 路由，并立即应用到 Code 网关。"
+                ),
+                systemImage: "terminal"
+            )
+            Label(
+                L(
+                    "Reset removes every override and follows the node defaults again.",
+                    "恢复默认会删除覆盖，重新跟随节点配置。"
+                ),
+                systemImage: "arrow.counterclockwise"
+            )
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(16)
+        .frame(width: 360, alignment: .leading)
+    }
+}
+
 struct ClaudeDesktopIntegrationView: View {
     static let brand = Color(red: 0.78, green: 0.35, blue: 0.24)
 
     @ObservedObject private var manager = ClaudeDesktopIntegrationManager.shared
-    @ObservedObject private var gateway = GlobalProxyManager.claude
+    @ObservedObject private var gateway = GlobalProxyManager.desktop
     @ObservedObject private var proxyVM = ProxyViewModel.shared
     @State private var selectedNodeID = ""
     @State private var showConnectionHelp = false
@@ -158,8 +530,8 @@ struct ClaudeDesktopIntegrationView: View {
     @State private var desktopPortDraft = ""
     @State private var portSaveMessage: String?
     @State private var portSaveError: String?
-    @State private var pendingSharedRouteNodeID: String?
     @State private var pendingCatalogMode: ClaudeDesktopCatalogMode?
+    @State private var showAllDesktopModels = false
     @FocusState private var isPortFieldFocused: Bool
 
     private var nodes: [GlobalProxyNodeRef] { gateway.availableNodes() }
@@ -185,7 +557,8 @@ struct ClaudeDesktopIntegrationView: View {
         return ClaudeDesktopProfileStore.catalog(
             for: selectedNode,
             mode: catalogMode,
-            supports1M: gateway.config.claudeDesktopSupports1MModels(for: selectedNode.id)
+            supports1M: gateway.config.claudeDesktopSupports1MModels(for: selectedNode.id),
+            routes: gateway.config.effectiveClaudeDesktopModels(for: selectedNode)
         )
     }
 
@@ -210,29 +583,11 @@ struct ClaudeDesktopIntegrationView: View {
         .onChange(of: gateway.activeNodeId) { _, newValue in
             guard let newValue else { return }
             selectedNodeID = newValue
+            showAllDesktopModels = false
         }
+        .onChange(of: catalogMode) { _, _ in showAllDesktopModels = false }
         .onChange(of: gateway.config.effectiveClaudeDesktopHTTPSPort) { _, _ in
             if !isPortFieldFocused { syncDesktopPortDraft() }
-        }
-        .confirmationDialog(
-            L("Switch the shared Claude route?", "切换 Claude 共享路由？"),
-            isPresented: Binding(
-                get: { pendingSharedRouteNodeID != nil },
-                set: { if !$0 { pendingSharedRouteNodeID = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(sharedRouteSwitchButtonTitle) {
-                guard let nodeID = pendingSharedRouteNodeID else { return }
-                selectedNodeID = nodeID
-                pendingSharedRouteNodeID = nil
-                Task { await gateway.switchActiveNode(to: nodeID) }
-            }
-            Button(L("Cancel", "取消"), role: .cancel) {
-                pendingSharedRouteNodeID = nil
-            }
-        } message: {
-            Text(sharedRouteSwitchMessage)
         }
         .confirmationDialog(
             L("Change the Desktop model mode?", "切换 Desktop 模型模式？"),
@@ -329,9 +684,7 @@ struct ClaudeDesktopIntegrationView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(
-                    gateway.config.effectiveClaudeCodeEnabled
-                        ? L("Shared Code + Desktop route", "Code + Desktop 共享路由")
-                        : L("Desktop Gateway route", "Desktop Gateway 路由"),
+                    L("Desktop Gateway route", "Desktop 独立网关路由"),
                     systemImage: "point.3.connected.trianglepath.dotted"
                 )
                     .font(.caption.weight(.semibold))
@@ -349,11 +702,11 @@ struct ClaudeDesktopIntegrationView: View {
             }
 
             HStack(spacing: 0) {
-                routeEndpoint(icon: "server.rack", title: selectedNode?.name ?? L("Claude node", "Claude 节点"), active: selectedNode != nil)
-                routeLine
-                routeEndpoint(icon: "lock.shield.fill", title: "HTTPS", active: manager.isConfigured)
-                routeLine
                 routeEndpoint(icon: "macwindow", title: "Desktop", active: manager.isConfigured)
+                routeLine
+                routeEndpoint(icon: "lock.shield.fill", title: ":\(gateway.config.effectiveClaudeDesktopHTTPSPort)", active: manager.isConfigured)
+                routeLine
+                routeEndpoint(icon: "server.rack", title: selectedNode?.name ?? L("Claude node", "Claude 节点"), active: selectedNode != nil)
             }
         }
         .padding(13)
@@ -489,6 +842,36 @@ struct ClaudeDesktopIntegrationView: View {
 
             catalogModeSelector
 
+            if catalogMode == .smartRoutes, let node = selectedNode {
+                let nodeDefaults = ClaudeAppResolvedModels(
+                    defaultModel: node.defaultModel,
+                    opus: node.modelMapping.bigModel.name,
+                    sonnet: node.modelMapping.middleModel.name,
+                    haiku: node.modelMapping.smallModel.name
+                )
+                ClaudeModelRouteBoard(
+                    productName: "Desktop",
+                    brand: Self.brand,
+                    catalog: node.runtimeModelCatalog,
+                    nodeDefaults: nodeDefaults,
+                    resolved: gateway.config.effectiveClaudeDesktopModels(for: node),
+                    overrides: gateway.config.claudeDesktopModelOverride(for: node.id),
+                    isDisabled: gateway.isBusy || manager.isBusy,
+                    onSelect: { route, model in
+                        Task {
+                            await gateway.updateClaudeDesktopModelOverride(
+                                nodeID: node.id,
+                                route: route,
+                                model: model
+                            )
+                        }
+                    },
+                    onReset: {
+                        Task { await gateway.resetClaudeDesktopModelOverrides(nodeID: node.id) }
+                    }
+                )
+            }
+
             if previewModels.isEmpty {
                 Text(L("Choose a node with a configured Model Library.", "请选择已配置模型库的节点。"))
                     .font(.callout)
@@ -499,6 +882,15 @@ struct ClaudeDesktopIntegrationView: View {
                 displayNamePreview
             }
 
+            ClaudeEffortOwnershipRow(
+                productName: "Desktop",
+                brand: Self.brand,
+                detail: L(
+                    "Choose effort and Thinking in Desktop's model menu",
+                    "请在 Desktop 的模型菜单中选择 Effort 与 Thinking"
+                )
+            )
+
             modelManagerButton
         }
         .padding(16)
@@ -507,62 +899,13 @@ struct ClaudeDesktopIntegrationView: View {
     }
 
     private var catalogModeSelector: some View {
-        HStack(spacing: 8) {
-            catalogModeButton(
-                .smartRoutes,
-                title: L("Hot switch", "热切换"),
-                subtitle: "Opus · Sonnet · Haiku",
-                symbol: "arrow.triangle.2.circlepath"
-            )
-            catalogModeButton(
-                .fullNodeCatalog,
-                title: L("Node models", "节点模型"),
-                subtitle: L("Real model names", "真实模型名称"),
-                symbol: "square.stack.3d.up"
-            )
-        }
-    }
-
-    private func catalogModeButton(
-        _ mode: ClaudeDesktopCatalogMode,
-        title: String,
-        subtitle: String,
-        symbol: String
-    ) -> some View {
-        let selected = catalogMode == mode
-        return Button {
-            requestCatalogMode(mode)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(selected ? Self.brand : Color.secondary)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(selected ? Self.brand.opacity(0.12) : Color.primary.opacity(0.045)))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.callout.weight(.semibold))
-                    Text(subtitle).font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selected ? Self.brand : Color.secondary.opacity(0.55))
-            }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 9)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(selected ? Self.brand.opacity(0.065) : Color.primary.opacity(0.025))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(selected ? Self.brand.opacity(0.35) : Color.primary.opacity(0.07), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(selected || gateway.isBusy || manager.isBusy)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        ClaudeModelModeSelector(
+            selection: catalogMode,
+            brand: Self.brand,
+            nodeModelsDetail: L("Real names · reload Desktop", "真实名称 · 重载 Desktop"),
+            isDisabled: gateway.isBusy || manager.isBusy,
+            onSelect: requestCatalogMode
+        )
     }
 
     private func requestCatalogMode(_ mode: ClaudeDesktopCatalogMode) {
@@ -582,8 +925,8 @@ struct ClaudeDesktopIntegrationView: View {
                 symbol: "arrow.triangle.2.circlepath",
                 title: L("Hot switch", "热切换"),
                 detail: L(
-                    "Desktop keeps three stable routes. Node switches only change their Gateway targets, so Desktop stays open.",
-                    "Desktop 保留三条固定路由；切换节点只改变 Gateway 目标，因此无需重启 Desktop。"
+                    "Desktop keeps four stable routes. Each can follow the node or use a Desktop-only override; node switches stay live.",
+                    "Desktop 保留四条固定路由；每条都可跟随节点或使用 Desktop 独立覆盖，切换节点仍无需重启。"
                 )
             )
             helpItem(
@@ -620,7 +963,7 @@ struct ClaudeDesktopIntegrationView: View {
     private var displayNamePreview: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 7) {
-                Image(systemName: "textformat")
+                Image(systemName: "square.stack.3d.up.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Self.brand)
                 Group {
@@ -632,48 +975,28 @@ struct ClaudeDesktopIntegrationView: View {
                 }
                 .font(.caption.weight(.semibold))
                 Spacer()
-                if previewModels.count > 3 {
-                    Text(L(
-                        "+\(previewModels.count - 3) more",
-                        "另有 \(previewModels.count - 3) 个"
-                    ))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                }
             }
 
-            VStack(spacing: 0) {
-                ForEach(Array(previewModels.prefix(3).enumerated()), id: \.element.id) { index, model in
-                    HStack(alignment: .firstTextBaseline, spacing: 9) {
-                        Circle()
-                            .fill(Self.brand.opacity(0.75))
-                            .frame(width: 5, height: 5)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(model.displayName)
-                                .font(.callout.weight(.medium))
-                                .lineLimit(1)
-                            if model.displayName != model.upstreamModel {
-                                Text("→ \(model.upstreamModel)")
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .textSelection(.enabled)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, 7)
-
-                    if index < min(previewModels.count, 3) - 1 {
-                        Divider().opacity(0.55)
-                    }
-                }
-            }
+            ClaudeModelCatalogGrid(
+                items: previewModels.map { model in
+                    ClaudeModelCatalogItem(
+                        id: model.id,
+                        title: model.displayName,
+                        subtitle: model.upstreamModel,
+                        badge: model.supports1M ? "1M" : nil,
+                        help: model.displayName == model.upstreamModel
+                            ? model.displayName
+                            : "\(model.displayName) → \(model.upstreamModel)",
+                        isDefault: catalogMode == .smartRoutes
+                            ? model.id == ClaudeDesktopProfileStore.defaultRouteID
+                            : model.upstreamModel == selectedNode?.defaultModel
+                    )
+                },
+                brand: Self.brand,
+                showAll: $showAllDesktopModels
+            )
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.035)))
     }
 
     private var modelManagerButton: some View {
@@ -840,8 +1163,8 @@ struct ClaudeDesktopIntegrationView: View {
                 symbol: "arrow.uturn.backward",
                 title: L("When you disconnect", "断开时会做什么"),
                 detail: L(
-                    "AIUsage restores the previous profile, closes the Desktop HTTPS listener, and quits Desktop without reopening it. Claude Code remains available when enabled.",
-                    "AIUsage 会恢复接入前配置、关闭 Desktop HTTPS 监听，并退出 Desktop 且不再重开；已启用的 Claude Code 不受影响。"
+                    "AIUsage restores the previous profile, closes only the Desktop gateway, and quits Desktop without reopening it. Code and Science are independent.",
+                    "AIUsage 会恢复接入前配置，仅关闭 Desktop 网关，并退出 Desktop 且不再重开；Code 与 Science 不受影响。"
                 )
             )
 
@@ -887,7 +1210,7 @@ struct ClaudeDesktopIntegrationView: View {
             return L("Port must be between 1024 and 65535.", "端口必须在 1024 到 65535 之间。")
         }
         guard port != gateway.config.port else {
-            return L("Desktop HTTPS cannot share Claude Code's HTTP port.", "Desktop HTTPS 不能与 Claude Code 的 HTTP 端口相同。")
+            return L("Desktop HTTPS cannot share its internal gateway port.", "Desktop HTTPS 不能与内部网关端口相同。")
         }
         if let conflict = ProxyPortArbiter.conflict(
             forPorts: [port],
@@ -932,8 +1255,8 @@ struct ClaudeDesktopIntegrationView: View {
         HStack(spacing: 10) {
             Image(systemName: "shippingbox").foregroundStyle(.orange)
             Text(L(
-                "No Claude proxy node is available. Add one in the Code tab first.",
-                "暂无可用的 Claude 代理节点，请先在 Code 页签添加。"
+                "No Claude node is available. Add one in the Node tab first.",
+                "暂无可用的 Claude 节点，请先在 Node 页签添加。"
             ))
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -944,33 +1267,11 @@ struct ClaudeDesktopIntegrationView: View {
     }
 
     private func selectNode(_ nodeID: String) {
-        if gateway.config.effectiveClaudeCodeEnabled,
-           nodeID != gateway.activeNodeId {
-            pendingSharedRouteNodeID = nodeID
-            return
-        }
         selectedNodeID = nodeID
+        showAllDesktopModels = false
         if manager.isConfigured {
             Task { await gateway.switchActiveNode(to: nodeID) }
         }
-    }
-
-    private var sharedRouteSwitchButtonTitle: String {
-        manager.isConfigured
-            ? L("Switch Code + Desktop", "同时切换 Code + Desktop")
-            : L("Switch Code route", "切换 Code 路由")
-    }
-
-    private var sharedRouteSwitchMessage: String {
-        manager.isConfigured
-            ? L(
-                "Claude Code is attached to this Gateway too. Both products will use the new node immediately.",
-                "Claude Code 也已接入此 Gateway；切换后两端会立即改用新节点。"
-            )
-            : L(
-                "Desktop will join Claude Code's Gateway route. Selecting another node changes Code immediately; Desktop will use it after connection.",
-                "Desktop 将加入 Claude Code 当前的 Gateway 路由。选择其它节点会立即切换 Code；接入后 Desktop 也会使用该节点。"
-            )
     }
 
     private var statusTitle: String {
@@ -1011,7 +1312,7 @@ struct ClaudeDesktopIntegrationView: View {
 
 private struct ClaudeDesktopModelManagerSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var gateway = GlobalProxyManager.claude
+    @ObservedObject private var gateway = GlobalProxyManager.desktop
     let node: ProxyConfiguration
 
     @State private var searchText = ""
@@ -1022,7 +1323,8 @@ private struct ClaudeDesktopModelManagerSheet: View {
         ClaudeDesktopProfileStore.catalog(
             for: node,
             mode: gateway.config.effectiveClaudeDesktopCatalogMode,
-            supports1M: enabled1M
+            supports1M: enabled1M,
+            routes: gateway.config.effectiveClaudeDesktopModels(for: node)
         )
     }
 

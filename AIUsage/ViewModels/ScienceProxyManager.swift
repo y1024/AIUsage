@@ -21,8 +21,9 @@ final class ScienceProxyManager: ObservableObject {
     static let shared = ScienceProxyManager()
 
     private let track: GlobalProxyTrack = .science
-    private let adapter = ClaudeGlobalProxyAdapter()
+    private let adapter = ClaudeGlobalProxyAdapter(track: .science)
     private var runtime: GlobalProxyRuntime { .science }
+    private var leasedNodeId: String?
 
     @Published private(set) var config: GlobalProxyConfig
     @Published var operationError: String?
@@ -95,7 +96,9 @@ final class ScienceProxyManager: ObservableObject {
     /// Build the Science picker from the node's authoritative Model Library &
     /// Pricing collection. Legacy nodes with an empty library fall back to the
     /// configured default and three tier mappings.
-    private func modelCatalog(for nodeId: String) -> ScienceModelCatalog? {
+    /// The exact catalog exposed by Science for a selected node. The management
+    /// view uses the same value so its preview cannot drift from the HTTP API.
+    func modelCatalog(for nodeId: String) -> ScienceModelCatalog? {
         guard let node = ProxyViewModel.shared.configurations.first(where: {
             $0.id == nodeId && ProxyNodeFamily.claude.contains($0.nodeType)
         }) else { return nil }
@@ -415,10 +418,13 @@ final class ScienceProxyManager: ObservableObject {
         // 与 Claude Code 每节点激活互斥性无关（Science 不写 settings.json），此处不接管任何 CLI 配置。
         // 1) 起代理进程（固定端口，复用 Claude 转换链路）。
         do {
+            try await ProxyViewModel.shared.acquireNodeRuntime(nodeId, consumer: .science)
+            leasedNodeId = nodeId
             try await runtime.start(port: config.port, bindHost: config.bindAddress, env: env, nodeId: node.id, nodeName: node.name)
         } catch is CancellationError {
-            // Superseded by a newer lifecycle operation on this runtime; the
-            // newer owner controls the stack, so exit without a raw error.
+            // Release the Node Runtime lease acquired by this start attempt.
+            // A newer lifecycle operation will acquire its own lease.
+            await teardownScienceStack(endpoints)
             return
         } catch {
             await teardownScienceStack(endpoints)
@@ -551,6 +557,10 @@ final class ScienceProxyManager: ObservableObject {
             ScienceManagedDaemonStopper.stopFromManagedLock(dataDir: otherModeDataDir)
         }.value
         runtime.stop()
+        if let leasedNodeId {
+            ProxyViewModel.shared.releaseNodeRuntime(leasedNodeId, consumer: .science)
+            self.leasedNodeId = nil
+        }
     }
 
     /// 热切换激活上游节点：进程不重启、Science 无感。
@@ -561,6 +571,7 @@ final class ScienceProxyManager: ObservableObject {
             return
         }
         guard nodeId != config.activeNodeId else { return }
+        let previousNodeId = leasedNodeId ?? config.activeNodeId
         isBusy = true
         operationError = nil
         defer { isBusy = false }
@@ -576,7 +587,12 @@ final class ScienceProxyManager: ObservableObject {
         }
         payload["availableModels"] = catalog.models.map(\.upstreamModel)
         payload["defaultModel"] = catalog.defaultUpstreamModel
+        var acquiredNewLease = false
         do {
+            if leasedNodeId != nodeId {
+                try await ProxyViewModel.shared.acquireNodeRuntime(nodeId, consumer: .science)
+                acquiredNewLease = true
+            }
             try await runtime.switchUpstream(
                 payload: payload,
                 adminPath: adapter.adminPath(config: config),
@@ -586,6 +602,10 @@ final class ScienceProxyManager: ObservableObject {
             ScienceAuthProxy.shared.updateModelCatalog(catalog)
             config.activeNodeId = nodeId
             persist()
+            if let previousNodeId, previousNodeId != nodeId {
+                ProxyViewModel.shared.releaseNodeRuntime(previousNodeId, consumer: .science)
+            }
+            leasedNodeId = nodeId
 
             do {
                 let result = try await normalizePersistedSelections(
@@ -605,6 +625,9 @@ final class ScienceProxyManager: ObservableObject {
                 scienceMgrLog.error("Science hot-switch selection normalization failed: \(String(describing: error), privacy: .public)")
             }
         } catch {
+            if acquiredNewLease {
+                ProxyViewModel.shared.releaseNodeRuntime(nodeId, consumer: .science, promptWhenUnused: false)
+            }
             operationError = error.localizedDescription
             scienceMgrLog.error("Failed to hot-switch Science node: \(String(describing: error), privacy: .public)")
         }

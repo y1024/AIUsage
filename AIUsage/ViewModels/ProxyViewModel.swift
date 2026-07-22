@@ -79,8 +79,8 @@ enum ProxyRuntimeError: LocalizedError {
             return AppSettings.shared.t("The node stopped, but AIUsage could not persist the deactivated state.", "节点已停止，但 AIUsage 无法保存停用状态。")
         case .managedByGlobalProxy:
             return AppSettings.shared.t(
-                "Claude Code is attached to Claude Gateway. Switch its route from the Gateway card, or disconnect Code before using a direct node.",
-                "Claude Code 已接入 Claude Gateway。请在 Gateway 卡片中切换路由，或先断开 Code 再使用直连节点。"
+                "Claude Code is attached to Code Gateway. Switch its route from the Code card, or disconnect Code before using a direct node.",
+                "Claude Code 已接入 Code 网关。请在 Code 卡片中切换路由，或先断开 Code 再使用直连节点。"
             )
         }
     }
@@ -99,6 +99,30 @@ struct ProxyConnectivityTestState: Equatable, Codable {
     var testedAt: Date?
 }
 
+/// Lifecycle ownership for one reusable Node Runtime. Product gateways carry
+/// this control-plane identity; requests on the node data plane do not.
+enum NodeRuntimeConsumer: String, Codable, CaseIterable, Hashable {
+    case code
+    case desktop
+    case science
+    case manual
+
+    var label: String {
+        switch self {
+        case .code: return "Code"
+        case .desktop: return "Desktop"
+        case .science: return "Science"
+        case .manual: return AppSettings.shared.t("Manual", "手动")
+        }
+    }
+}
+
+struct UnusedNodeRuntimePrompt: Identifiable, Equatable {
+    let nodeID: String
+    let nodeName: String
+    var id: String { nodeID }
+}
+
 @MainActor
 class ProxyViewModel: ObservableObject {
     static let shared = ProxyViewModel()
@@ -109,6 +133,13 @@ class ProxyViewModel: ObservableObject {
     /// 写不同文件，故二者可同时激活，分别用 `activatedConfigId` / `activatedCodexConfigId` 跟踪。
     @Published var activatedCodexConfigId: String?
     @Published var proxyOnlyRunningIds: Set<String> = []
+    /// Control-plane leases for shared Node Runtime processes. A single node
+    /// process can serve Code, Desktop and Science concurrently.
+    @Published var nodeRuntimeConsumers: [String: Set<NodeRuntimeConsumer>] = [:]
+    @Published var unusedNodeRuntimePrompt: UnusedNodeRuntimePrompt?
+    /// Coalesces simultaneous Code/Desktop/Science requests for the same node
+    /// into one process launch and one port bind.
+    var nodeRuntimeStartTasks: [String: Task<Void, Error>] = [:]
     // `statistics` and `recentLogs` are intentionally NOT @Published: writes happen on every
     // proxied request (potentially many per second during streaming) and each publish would
     // force every observing view to rebuild body + re-aggregate on the main thread. Instead,
@@ -310,7 +341,7 @@ class ProxyViewModel: ObservableObject {
     func restartDownProxyRuntime(ids: Set<String>? = nil) async {
         let targets = ids ?? proxyRuntimeDownConfigIds
         for id in targets {
-            guard isNodeActivated(id),
+            guard isNodeActivated(id) || !nodeRuntimeConsumers[id, default: []].isEmpty,
                   let config = configurations.first(where: { $0.id == id }),
                   config.needsProxyProcess else {
                 proxyRuntimeDownConfigIds.remove(id)
@@ -379,6 +410,7 @@ class ProxyViewModel: ObservableObject {
         guard let index = configurations.firstIndex(where: { $0.id == profile.id }) else { return }
         let wasActivated = isNodeActivated(profile.id)
         let wasProxyOnly = proxyOnlyRunningIds.contains(profile.id)
+        let wasRuntimeRunning = runtimeService.isProxyRunning(profile.id)
         let busyIds: Set<String> = [profile.id]
         setOperationInProgress(busyIds, isActive: true)
         defer { setOperationInProgress(busyIds, isActive: false) }
@@ -389,9 +421,9 @@ class ProxyViewModel: ObservableObject {
                 reportOperationError(error)
                 return
             }
-        } else if wasProxyOnly {
+        } else if wasRuntimeRunning {
             runtimeService.stopProxyOnly(for: configurations[index])
-            proxyOnlyRunningIds.remove(profile.id)
+            if wasProxyOnly { proxyOnlyRunningIds.remove(profile.id) }
         }
         configurations[index] = config
         // Persist only after the old runtime has stopped successfully. Otherwise
@@ -407,15 +439,17 @@ class ProxyViewModel: ObservableObject {
             } catch {
                 reportOperationError(error)
             }
-        } else if wasProxyOnly {
+        } else if wasRuntimeRunning {
             do {
                 try await runtimeService.startProxyOnly(for: config)
-                proxyOnlyRunningIds.insert(profile.id)
+                if wasProxyOnly { proxyOnlyRunningIds.insert(profile.id) }
             } catch {
-                proxyRuntimeLog.error("Failed to restart proxy-only after profile update for \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
+                proxyRuntimeDownConfigIds.insert(profile.id)
+                proxyRuntimeLog.error("Failed to restart Node Runtime after profile update for \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
             }
-            saveProxyOnlyIds()
+            if wasProxyOnly { saveProxyOnlyIds() }
         }
+        await ensureLeasedNodeRuntimeAfterUpdate(config, wasRuntimeRunning: wasRuntimeRunning)
         await reapplyManagedRuntimesIfNeeded(for: profile.id)
     }
 
@@ -423,6 +457,7 @@ class ProxyViewModel: ObservableObject {
         if let index = configurations.firstIndex(where: { $0.id == config.id }) {
             let wasActivated = isNodeActivated(config.id)
             let wasProxyOnly = proxyOnlyRunningIds.contains(config.id)
+            let wasRuntimeRunning = runtimeService.isProxyRunning(config.id)
             let busyIds: Set<String> = [config.id]
             setOperationInProgress(busyIds, isActive: true)
             defer { setOperationInProgress(busyIds, isActive: false) }
@@ -433,9 +468,9 @@ class ProxyViewModel: ObservableObject {
                     reportOperationError(error)
                     return
                 }
-            } else if wasProxyOnly {
+            } else if wasRuntimeRunning {
                 runtimeService.stopProxyOnly(for: configurations[index])
-                proxyOnlyRunningIds.remove(config.id)
+                if wasProxyOnly { proxyOnlyRunningIds.remove(config.id) }
             }
             configurations[index] = config
             // 配置已变更，旧的连通性测试结果不再代表当前节点，清除之。
@@ -450,15 +485,17 @@ class ProxyViewModel: ObservableObject {
                 } catch {
                     reportOperationError(error)
                 }
-            } else if wasProxyOnly {
+            } else if wasRuntimeRunning {
                 do {
                     try await runtimeService.startProxyOnly(for: config)
-                    proxyOnlyRunningIds.insert(config.id)
+                    if wasProxyOnly { proxyOnlyRunningIds.insert(config.id) }
                 } catch {
-                    proxyRuntimeLog.error("Failed to restart proxy-only after config update for \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
+                    proxyRuntimeDownConfigIds.insert(config.id)
+                    proxyRuntimeLog.error("Failed to restart Node Runtime after config update for \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
                 }
-                saveProxyOnlyIds()
+                if wasProxyOnly { saveProxyOnlyIds() }
             }
+            await ensureLeasedNodeRuntimeAfterUpdate(config, wasRuntimeRunning: wasRuntimeRunning)
             await reapplyManagedRuntimesIfNeeded(for: config.id)
         }
     }
@@ -516,8 +553,10 @@ class ProxyViewModel: ObservableObject {
         let claude = GlobalProxyManager.claude
         if claude.activeNodeId == id {
             if claude.config.effectiveClaudeCodeEnabled { consumers.append("Code") }
-            if claude.config.effectiveClaudeDesktopEnabled { consumers.append("Desktop") }
         }
+
+        let desktop = GlobalProxyManager.desktop
+        if desktop.isEnabled, desktop.activeNodeId == id { consumers.append("Desktop") }
 
         let science = ScienceProxyManager.shared
         if science.isEnabled, science.activeNodeId == id { consumers.append("Science") }
@@ -539,7 +578,12 @@ class ProxyViewModel: ObservableObject {
     /// route. This keeps Desktop's picker, Science's model catalog, and global
     /// gateways aligned with the single shared node library.
     private func reapplyManagedRuntimesIfNeeded(for id: String) async {
-        let managers = [GlobalProxyManager.codex, GlobalProxyManager.claude, GlobalProxyManager.opencode]
+        let managers = [
+            GlobalProxyManager.codex,
+            GlobalProxyManager.claude,
+            GlobalProxyManager.desktop,
+            GlobalProxyManager.opencode,
+        ]
         for manager in managers where manager.isRuntimeEnabled && manager.activeNodeId == id {
             await manager.reapplyActiveUpstream()
             if let failure = manager.operationError { operationErrorMessage = failure }
@@ -549,6 +593,25 @@ class ProxyViewModel: ObservableObject {
         if science.isEnabled, science.activeNodeId == id {
             await science.reapplyActiveUpstream()
             if let failure = science.operationError { operationErrorMessage = failure }
+        }
+    }
+
+    /// A node editor save may require replacing the process because its fixed
+    /// endpoint or upstream credentials changed. Product leases survive that
+    /// replacement and the runtime is restored before gateways are reapplied.
+    private func ensureLeasedNodeRuntimeAfterUpdate(
+        _ config: ProxyConfiguration,
+        wasRuntimeRunning: Bool
+    ) async {
+        guard wasRuntimeRunning,
+              !nodeRuntimeConsumers[config.id, default: []].isEmpty,
+              !runtimeService.isProxyRunning(config.id) else { return }
+        do {
+            try await runtimeService.startProxyOnly(for: config)
+            proxyRuntimeDownConfigIds.remove(config.id)
+        } catch {
+            proxyRuntimeDownConfigIds.insert(config.id)
+            reportOperationError(error)
         }
     }
 

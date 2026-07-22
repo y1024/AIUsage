@@ -48,6 +48,7 @@ extension ProxyViewModel {
             // 随后的每节点恢复会因对应轨全局启用而跳过。
             await GlobalProxyManager.codex.restoreOnLaunch()
             await GlobalProxyManager.claude.restoreOnLaunch()
+            await GlobalProxyManager.desktop.restoreOnLaunch()
             await ClaudeDesktopIntegrationManager.shared.restoreOnLaunch()
             await GlobalProxyManager.opencode.restoreOnLaunch()
             await ScienceProxyManager.shared.restoreOnLaunch()
@@ -101,9 +102,9 @@ extension ProxyViewModel {
     }
 
     private func restoreActivatedNodeAsync() async {
-        // Only the Code consumer owns settings.json. Desktop may keep the
-        // shared Gateway alive while Code still restores an independent direct
-        // node; using the legacy aggregate flag here used to hide that route.
+        // Code now always owns one product Gateway. A legacy 0.15 per-node
+        // activation is migrated below instead of restoring the old direct
+        // settings.json route.
         if GlobalProxyManager.claude.isEnabled {
             return
         }
@@ -148,15 +149,12 @@ extension ProxyViewModel {
             return
         }
 
-        proxyRuntimeLog.info(
-            "Restoring node \(config.name, privacy: .public) type=\(config.nodeType.rawValue, privacy: .public)"
-        )
-
+        proxyRuntimeLog.info("Migrating legacy Code route for \(config.name, privacy: .public) to the Code Gateway")
         do {
-            try await activateRuntime(for: config)
-            try persistActivationSelection(config.id, touchLastUsedAt: false, isCodex: false)
+            try runtimeService.clearRuntime()
+            try persistActivationSelection(nil, touchLastUsedAt: false, isCodex: false)
         } catch {
-            proxyRuntimeLog.error("Failed to restore proxy node \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
+            proxyRuntimeLog.error("Failed to clear the legacy Code route for \(config.name, privacy: .public): \(String(describing: error), privacy: .public)")
             activatedConfigId = nil
             for index in configurations.indices {
                 configurations[index].isEnabled = false
@@ -170,15 +168,9 @@ extension ProxyViewModel {
             }
             return
         }
-
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            guard let self = self else { return }
-            if let description = self.runtimeService.processDebugDescription(for: id) {
-                proxyRuntimeLog.info("Restored node process state: \(description, privacy: .public)")
-            } else {
-                proxyRuntimeLog.notice("No proxy process found for restored node \(config.name, privacy: .public)")
-            }
+        await GlobalProxyManager.claude.enable(activeNodeId: config.id)
+        if !GlobalProxyManager.claude.isEnabled {
+            proxyRuntimeLog.error("Failed to migrate the legacy Code route for \(config.name, privacy: .public) to the Code Gateway")
         }
     }
 
@@ -539,17 +531,21 @@ extension ProxyViewModel: ProxyRuntimeServiceDelegate {
     }
 
     func proxyRuntimeService(_ service: ProxyRuntimeService, processDidTerminateFor configId: String) {
-        if proxyOnlyRunningIds.remove(configId) != nil {
-            saveProxyOnlyIds()
-            proxyRuntimeLog.notice("Proxy-only process terminated unexpectedly for node \(configId, privacy: .public), removed from running set")
-        }
-
         guard !operationInProgressConfigIds.contains(configId) else {
             return
         }
-        guard isNodeActivated(configId),
+        let hasRuntimeLease = !nodeRuntimeConsumers[configId, default: []].isEmpty
+        let shouldRemainRunning = isNodeActivated(configId) || hasRuntimeLease
+        guard shouldRemainRunning,
               let config = configurations.first(where: { $0.id == configId }),
               config.needsProxyProcess else {
+            if proxyOnlyRunningIds.remove(configId) != nil {
+                nodeRuntimeConsumers[configId]?.remove(.manual)
+                if nodeRuntimeConsumers[configId]?.isEmpty == true {
+                    nodeRuntimeConsumers.removeValue(forKey: configId)
+                }
+                saveProxyOnlyIds()
+            }
             return
         }
 
@@ -572,7 +568,7 @@ extension ProxyViewModel: ProxyRuntimeServiceDelegate {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delay)
             guard let self else { return }
-            guard self.isNodeActivated(config.id),
+            guard self.isNodeActivated(config.id) || !self.nodeRuntimeConsumers[config.id, default: []].isEmpty,
                   !self.operationInProgressConfigIds.contains(config.id),
                   let latestConfig = self.configurations.first(where: { $0.id == config.id }),
                   latestConfig.needsProxyProcess else {
@@ -612,7 +608,7 @@ extension ProxyViewModel: ProxyRuntimeServiceDelegate {
     /// 提示「本地代理未在运行」并提供手动重启（与 OpenCode 三轨对齐）。
     /// 不还原 settings.json/config.toml——它们仍指向本地端口，手动重启进程即可恢复，无需重新激活。
     private func markProxyRuntimeDown(_ config: ProxyConfiguration) {
-        guard isNodeActivated(config.id) else { return }
+        guard isNodeActivated(config.id) || !nodeRuntimeConsumers[config.id, default: []].isEmpty else { return }
         proxyRuntimeRestartAttempts.removeValue(forKey: config.id)
         proxyRuntimeDownConfigIds.insert(config.id)
         proxyRuntimeLog.error(

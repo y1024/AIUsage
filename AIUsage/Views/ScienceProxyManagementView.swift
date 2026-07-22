@@ -16,6 +16,7 @@ struct ScienceProxyManagementView: View {
     @State private var allowLAN = false
     @State private var showAdvanced = false
     @State private var showWorkspaceHelp = false
+    @State private var showAllModels = false
     @State private var showNewWorkspaceAlert = false
     @State private var showRenameWorkspaceAlert = false
     @State private var showDeleteWorkspaceConfirm = false
@@ -30,6 +31,10 @@ struct ScienceProxyManagementView: View {
     private var workspaces: [ScienceWorkspace] { manager.config.effectiveScienceWorkspaces }
     private var activeWorkspace: ScienceWorkspace { manager.config.effectiveActiveScienceWorkspace }
     private var workspaceControlsEnabled: Bool { !adoptReal }
+    private var selectedModelCatalog: ScienceModelCatalog? {
+        guard !resolvedSelection.isEmpty else { return nil }
+        return manager.modelCatalog(for: resolvedSelection)
+    }
 
     var body: some View {
         ScrollView {
@@ -44,12 +49,16 @@ struct ScienceProxyManagementView: View {
                 if nodes.isEmpty {
                     noNodesCard
                 }
+                modelCatalogCard
                 configCard
             }
+            .frame(maxWidth: 900)
             .padding(20)
+            .frame(maxWidth: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear(perform: syncFromConfig)
+        .onChange(of: resolvedSelection) { _, _ in showAllModels = false }
         .alert(L("New Workspace", "新建工作区"), isPresented: $showNewWorkspaceAlert) {
             TextField(L("Name", "名称"), text: $workspaceNameDraft)
             Button(L("Cancel", "取消"), role: .cancel) { workspaceNameDraft = "" }
@@ -253,6 +262,76 @@ struct ScienceProxyManagementView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
+    }
+
+    // MARK: - Model Catalog
+
+    private var modelCatalogCard: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 9) {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Self.brand)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(Self.brand.opacity(0.11)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Science models", "Science 模型"))
+                        .font(.headline)
+                    Text(L(
+                        "The catalog currently exposed by the selected node",
+                        "当前节点实际提供给 Science 的模型目录"
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if let catalog = selectedModelCatalog {
+                    Text(L("\(catalog.models.count) models", "\(catalog.models.count) 个模型"))
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(Self.brand)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Self.brand.opacity(0.10)))
+                }
+            }
+
+            if let catalog = selectedModelCatalog, !catalog.models.isEmpty {
+                ClaudeModelCatalogGrid(
+                    items: catalog.models.map { model in
+                        ClaudeModelCatalogItem(
+                            id: model.id,
+                            title: model.displayName,
+                            subtitle: model.upstreamModel,
+                            help: model.description,
+                            isDefault: model.id == catalog.defaultModelID
+                        )
+                    },
+                    brand: Self.brand,
+                    showAll: $showAllModels
+                )
+            } else {
+                Text(L(
+                    "Choose a node whose Model Library contains at least one model.",
+                    "请选择模型库中至少包含一个模型的节点。"
+                ))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 4)
+            }
+
+            ClaudeEffortOwnershipRow(
+                productName: "Science",
+                brand: Self.brand,
+                detail: L(
+                    "Preserves the reasoning choice made by the Science session",
+                    "保留 Science 会话自身选择的思考策略"
+                )
+            )
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.primary.opacity(0.06), lineWidth: 1))
     }
 
     // MARK: - Config Card

@@ -346,7 +346,7 @@ struct ProxySettings: Codable, Equatable {
             maxOutputTokens: 0, defaultModel: "gpt-5.5",
             modelMapping: .openAIDefault,
             anthropicBaseURL: "https://api.anthropic.com",
-            anthropicAPIKey: "", usePassthroughProxy: false,
+            anthropicAPIKey: "", usePassthroughProxy: true,
             enableModelAliasMapping: false,
             enableHTTPS: false, httpsPort: nil
         )
@@ -449,9 +449,7 @@ struct ProxySettings: Codable, Equatable {
     }
 
     func needsProxyProcess(nodeType: NodeType) -> Bool {
-        nodeType == .openaiProxy
-            || nodeType == .codexProxy
-            || (nodeType == .anthropicDirect && usePassthroughProxy)
+        true
     }
 
     func shouldMergeClaudeCommonConfig(globalEnabled: Bool) -> Bool {
@@ -508,15 +506,10 @@ struct ProxySettings: Codable, Equatable {
 
         switch nodeType {
         case .anthropicDirect:
-            if usePassthroughProxy {
-                let proxyURL = "http://\(host):\(port)"
-                // 透明代理：Claude Code 用「客户端 Key」鉴权本地代理（留空回退上游 Key，此时
-                // 代理放行任意 Key），真实上游 Key 由代理用 ANTHROPIC_UPSTREAM_KEY 转发。
-                let clientToken = expectedClientKey.isEmpty ? anthropicAPIKey : expectedClientKey
-                return .init(baseURL: proxyURL, authToken: clientToken,
-                             defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
-            }
-            return .init(baseURL: anthropicBaseURL, authToken: anthropicAPIKey,
+            // Anthropic-compatible nodes use the same fixed local runtime
+            // contract as conversion nodes. Apps never bypass the node port.
+            let clientToken = expectedClientKey.isEmpty ? "proxy-key" : expectedClientKey
+            return .init(baseURL: displayURL, authToken: clientToken,
                          defaultModel: dm, opusModel: opus, sonnetModel: sonnet, haikuModel: haiku)
         case .openaiProxy:
             let proxyKey = expectedClientKey.isEmpty ? "proxy-key" : expectedClientKey

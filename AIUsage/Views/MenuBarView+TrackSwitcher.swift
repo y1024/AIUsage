@@ -5,9 +5,8 @@ import QuotaBackend
 // 顶部控制台的三条轨道切换器（Codex / OpenCode / Claude Code）。每条都是一颗品牌色胶囊 chip，
 // 点击在面板内弹出「自定义内嵌覆盖层」（非原生 Menu，因为菜单栏宿主是 transient NSPopover，
 // 嵌套系统 popover 不可靠）。面板统一支持两种模式：
-//   - 全局代理 OFF：每节点激活（点节点 = 写 CLI 配置激活，与代理页一致）。
-//   - 全局代理 ON ：节点列表变热切换（点节点 = GlobalProxyManager.switchActiveNode，进程内换上游、
-//                   CLI 不重启），并由面板头部 Toggle 启用 / 停用全局代理。
+// Claude Code 始终通过自己的产品 Gateway；模型模式决定节点切换是热切换还是需要重启 Code。
+// Codex/OpenCode 保留原有的每节点 / 全局代理两种生命周期。
 // 三条轨道各自观察自己的 GlobalProxyManager（codex/claude/opencode），不再只认 Codex 一条。
 // 依赖主视图的 proxyVM / openCodeStore / globalCodex / globalClaude / globalOpenCode / appState / openPanelTrack。
 
@@ -120,7 +119,7 @@ extension MenuBarView {
         case .claude:   codexClaudePanel(family: .claude)
         case .opencode: openCodePanel()
         // Science 轨不在顶部控制台切换（其生命周期含沙箱/虚拟登录，统一在侧边栏「Claude Science 代理」页管理）。
-        case .science:  EmptyView()
+        case .desktop, .science:  EmptyView()
         }
     }
 
@@ -164,17 +163,30 @@ extension MenuBarView {
             }
             onDeactivate = deactivateProxyClosure(activeId: activeId)
         } else {
-            let anthropic = familyNodes.filter { $0.nodeType == .anthropicDirect }
-            let openai = familyNodes.filter { $0.nodeType == .openaiProxy }
-            if !anthropic.isEmpty {
-                sections.append(MenuBarTrackPanelSection(id: "anthropic", title: "Anthropic",
-                                                         rows: anthropic.map { perNodeRow($0) }))
-            }
-            if !openai.isEmpty {
-                sections.append(MenuBarTrackPanelSection(id: "openai", title: "OpenAI",
-                                                         rows: openai.map { perNodeRow($0) }))
-            }
-            onDeactivate = deactivateProxyClosure(activeId: activeId)
+            let mode = manager.config.effectiveClaudeCodeCatalogMode
+            sections = [MenuBarTrackPanelSection(
+                id: "code-gateway",
+                title: mode == .smartRoutes
+                    ? L("Code route · hot-switch", "Code 路由 · 热切换")
+                    : L("Code route · restart required", "Code 路由 · 需重启"),
+                rows: globalNodes.map { node in
+                    MenuBarTrackPanelRow(
+                        id: node.id,
+                        name: node.name,
+                        isActive: manager.activeNodeId == node.id && manager.isEnabled
+                    ) {
+                        Task {
+                            if manager.isEnabled {
+                                await manager.switchActiveNode(to: node.id)
+                            } else {
+                                await manager.enable(activeNodeId: node.id)
+                            }
+                        }
+                        closePanel()
+                    }
+                }
+            )]
+            onDeactivate = nil
         }
         if sections.isEmpty {
             sections = [MenuBarTrackPanelSection(id: "empty", rows: [])]
@@ -241,9 +253,13 @@ extension MenuBarView {
     /// 全局代理 ON 时的「激活节点 · 热切换」分区。
     private func hotSwapSection(manager: GlobalProxyManager,
                                 nodes: [GlobalProxyNodeRef]) -> MenuBarTrackPanelSection {
-        MenuBarTrackPanelSection(
+        let title = manager.track == .claude
+            && manager.config.effectiveClaudeCodeCatalogMode == .fullNodeCatalog
+            ? L("Active node · restart Code", "激活节点 · 需重启 Code")
+            : L("Active node · hot-swap", "激活节点 · 热切换")
+        return MenuBarTrackPanelSection(
             id: "hotswap",
-            title: L("Active node · hot-swap", "激活节点 · 热切换"),
+            title: title,
             rows: nodes.map { node in
                 MenuBarTrackPanelRow(id: node.id, name: node.name,
                                      isActive: manager.activeNodeId == node.id) {

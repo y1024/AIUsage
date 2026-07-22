@@ -254,7 +254,7 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         isEnabled: Bool = false,
         anthropicBaseURL: String = "https://api.anthropic.com",
         anthropicAPIKey: String = "",
-        usePassthroughProxy: Bool = false,
+        usePassthroughProxy: Bool = true,
         host: String = "127.0.0.1",
         port: Int = 8080,
         allowLAN: Bool = false,
@@ -278,7 +278,10 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         self.isEnabled = isEnabled
         self.anthropicBaseURL = anthropicBaseURL
         self.anthropicAPIKey = anthropicAPIKey
-        self.usePassthroughProxy = usePassthroughProxy
+        // 0.16+: every Claude node owns one local runtime endpoint. Keep the
+        // persisted legacy field for backward compatibility, but normalize
+        // Anthropic nodes to the uniform runtime contract.
+        self.usePassthroughProxy = nodeType == .anthropicDirect ? true : usePassthroughProxy
         self.host = host
         self.port = port
         self.allowLAN = allowLAN
@@ -305,7 +308,9 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
         anthropicBaseURL = try container.decodeIfPresent(String.self, forKey: .anthropicBaseURL) ?? "https://api.anthropic.com"
         anthropicAPIKey = try container.decodeIfPresent(String.self, forKey: .anthropicAPIKey) ?? ""
-        usePassthroughProxy = try container.decodeIfPresent(Bool.self, forKey: .usePassthroughProxy) ?? false
+        usePassthroughProxy = nodeType == .anthropicDirect
+            ? true
+            : (try container.decodeIfPresent(Bool.self, forKey: .usePassthroughProxy) ?? false)
         host = try container.decode(String.self, forKey: .host)
         port = try container.decode(Int.self, forKey: .port)
         allowLAN = try container.decode(Bool.self, forKey: .allowLAN)
@@ -331,40 +336,38 @@ struct ProxyConfiguration: Codable, Identifiable, Equatable {
     }
 
     var displayURL: String {
-        switch nodeType {
-        case .anthropicDirect:
-            return usePassthroughProxy ? "http://\(host):\(port)" : anthropicBaseURL
-        case .openaiProxy, .codexProxy:
-            return "http://\(host):\(port)"
-        }
-    }
-
-    /// 列表卡片徽章文案：协议短名 + 工作方式（直连/代理），措辞统一。
-    /// 仅 Anthropic 直连（未开透明代理）显示「直连」，其余皆为「代理」。
-    var nodeBadgeLabel: String {
-        let isDirect = nodeType == .anthropicDirect && !usePassthroughProxy
-        let mode = isDirect
-            ? AppSettings.shared.t("Direct", "直连")
-            : AppSettings.shared.t("Proxy", "代理")
-        return "\(nodeType.badgeProtocolName) · \(mode)"
+        "http://\(host):\(port)"
     }
 
     var effectiveHTTPSPort: Int { httpsPort ?? (port + 1) }
 
     /// 该节点代理进程实际监听的端口集合（用于跨轨端口仲裁）：HTTP 入站端口恒占用；
     /// 开启 HTTPS 时进程会额外监听 HTTPS 端口（QuotaServer 同时起 HTTP + HTTPS 两个 listener）。
-    /// 非代理节点（直连）不起进程、不占端口，返回空。
+    /// Every node owns its configured port, including Anthropic-compatible
+    /// upstreams. This is the core invariant used by all product gateways.
     var listeningPorts: [Int] {
-        guard needsProxyProcess else { return [] }
         var ports = [port]
         if enableHTTPS { ports.append(effectiveHTTPSPort) }
         return ports
     }
 
     var needsProxyProcess: Bool {
-        nodeType == .openaiProxy
-            || nodeType == .codexProxy
-            || (nodeType == .anthropicDirect && usePassthroughProxy)
+        true
+    }
+
+    /// Exact upstream model IDs accepted by the node runtime. Product
+    /// gateways resolve aliases before forwarding; this catalog prevents the
+    /// node from applying a second tier mapping.
+    var runtimeModelCatalog: [String] {
+        var seen = Set<String>()
+        return (modelLibrary.map(\.name) + [
+            defaultModel,
+            modelMapping.bigModel.name,
+            modelMapping.middleModel.name,
+            modelMapping.smallModel.name,
+        ])
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
     /// Codex 节点：单一模型 + 价格存放在 `modelMapping.bigModel`。

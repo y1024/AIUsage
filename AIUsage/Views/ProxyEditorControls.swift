@@ -101,6 +101,7 @@ struct CapsuleSegmentedPicker<Value: Hashable>: View {
 struct CapsuleInterfacePicker<Value: Hashable>: View {
     let options: [SelectableCardOption<Value>]
     @Binding var selection: Value
+    var fillWidth = true
     var onChange: ((Value) -> Void)? = nil
 
     private var selected: SelectableCardOption<Value>? {
@@ -113,7 +114,7 @@ struct CapsuleInterfacePicker<Value: Hashable>: View {
                 options: options.map { CapsuleSegmentOption($0.id, title: $0.title) },
                 selection: $selection,
                 tint: selected?.tint ?? .accentColor,
-                fillWidth: true,
+                fillWidth: fillWidth,
                 onChange: onChange
             )
 

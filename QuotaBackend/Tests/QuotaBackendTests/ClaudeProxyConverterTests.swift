@@ -76,6 +76,41 @@ final class ClaudeProxyConverterTests: XCTestCase {
         XCTAssertEqual(config.mapToUpstreamModel("unknown"), "unknown")
     }
 
+    func testProductGatewayMapsAliasOnceAndNodeRuntimePreservesExactModel() {
+        let exactModel = "provider/opus-production"
+        let productGateway = ClaudeProxyConfiguration(
+            enabled: true,
+            mode: .anthropicPassthrough,
+            upstreamBaseURL: "http://127.0.0.1:18081",
+            upstreamAPIKey: "node-key",
+            bigModel: exactModel,
+            middleModel: "provider/sonnet-production",
+            smallModel: "provider/haiku-production",
+            enableModelAliasMapping: true,
+            availableModels: [
+                exactModel,
+                "provider/sonnet-production",
+                "provider/haiku-production",
+            ],
+            preferExactCatalogModels: true
+        )
+        let nodeRuntime = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.example.com",
+            upstreamAPIKey: "upstream-key",
+            bigModel: "must-not-remap",
+            middleModel: "must-not-remap",
+            smallModel: "must-not-remap",
+            enableModelAliasMapping: false,
+            availableModels: [exactModel],
+            preferExactCatalogModels: true
+        )
+
+        let productOutput = productGateway.mapToUpstreamModel("claude-opus-4-6")
+        XCTAssertEqual(productOutput, exactModel)
+        XCTAssertEqual(nodeRuntime.mapToUpstreamModel(productOutput), exactModel)
+    }
+
     func testScienceCatalogAliasesResolveToExactActiveNodeModels() throws {
         let config = ClaudeProxyConfiguration(
             enabled: true,
@@ -219,6 +254,7 @@ final class ClaudeProxyConverterTests: XCTestCase {
 
     func testDesktopStableTierRoutesMapThroughCurrentGatewayNode() {
         let routes = [
+            ScienceModelProtocolAdapter.desktopDefaultRouteID,
             ScienceModelProtocolAdapter.desktopOpusRouteID,
             ScienceModelProtocolAdapter.desktopSonnetRouteID,
             ScienceModelProtocolAdapter.desktopHaikuRouteID,
@@ -231,7 +267,7 @@ final class ClaudeProxyConverterTests: XCTestCase {
             middleModel: "node-a-balanced",
             smallModel: "node-a-fast",
             availableModels: routes,
-            defaultModel: ScienceModelProtocolAdapter.desktopSonnetRouteID,
+            defaultModel: "node-a-default",
             exposeScienceModelCatalog: true,
             preferExactCatalogModels: true,
             catalogRouteStyle: .desktop,
@@ -245,11 +281,80 @@ final class ClaudeProxyConverterTests: XCTestCase {
         )
         XCTAssertEqual(
             config.scienceCatalogModels.map(\.displayName),
-            ["AIUsage Opus", "AIUsage Sonnet", "AIUsage Haiku"]
+            ["AIUsage Default", "AIUsage Opus", "AIUsage Sonnet", "AIUsage Haiku"]
         )
-        XCTAssertEqual(config.mapToUpstreamModel(routes[0]), "node-a-large")
-        XCTAssertEqual(config.mapToUpstreamModel(routes[1]), "node-a-balanced")
-        XCTAssertEqual(config.mapToUpstreamModel(routes[2]), "node-a-fast")
+        XCTAssertEqual(config.mapToUpstreamModel(routes[0]), "node-a-default")
+        XCTAssertEqual(config.mapToUpstreamModel(routes[1]), "node-a-large")
+        XCTAssertEqual(config.mapToUpstreamModel(routes[2]), "node-a-balanced")
+        XCTAssertEqual(config.mapToUpstreamModel(routes[3]), "node-a-fast")
+    }
+
+    func testCodeSmartRoutesRemainStableWhileGatewayMappingChanges() {
+        let routes = [
+            ScienceModelProtocolAdapter.desktopDefaultRouteID,
+            ScienceModelProtocolAdapter.desktopOpusRouteID,
+            ScienceModelProtocolAdapter.desktopSonnetRouteID,
+            ScienceModelProtocolAdapter.desktopHaikuRouteID,
+        ]
+        let firstNode = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://first.example.com",
+            upstreamAPIKey: "first-key",
+            bigModel: "GLM-5.2",
+            middleModel: "provider/sonnet-a",
+            smallModel: "provider/haiku-a",
+            availableModels: routes,
+            defaultModel: "provider/default-a",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .desktop,
+            mapDesktopTierRoutes: true
+        )
+        let secondNode = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://second.example.com",
+            upstreamAPIKey: "second-key",
+            bigModel: "provider/opus-b",
+            middleModel: "provider/sonnet-b",
+            smallModel: "provider/haiku-b",
+            availableModels: routes,
+            defaultModel: "provider/default-b",
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .desktop,
+            mapDesktopTierRoutes: true
+        )
+
+        XCTAssertEqual(firstNode.scienceCatalogModels.map(\.id), routes)
+        XCTAssertEqual(secondNode.scienceCatalogModels.map(\.id), routes)
+        XCTAssertEqual(firstNode.mapToUpstreamModel(routes[0]), "provider/default-a")
+        XCTAssertEqual(secondNode.mapToUpstreamModel(routes[0]), "provider/default-b")
+        XCTAssertEqual(firstNode.mapToUpstreamModel(routes[1]), "GLM-5.2")
+        XCTAssertEqual(secondNode.mapToUpstreamModel(routes[1]), "provider/opus-b")
+    }
+
+    func testCodeFullCatalogPublishesAndRoutesExactModelIDs() {
+        let models = ["GLM-5.2", "provider/custom-opus", "claude-sonnet-private"]
+        let config = ClaudeProxyConfiguration(
+            enabled: true,
+            upstreamBaseURL: "https://api.example.com",
+            upstreamAPIKey: "test-key",
+            bigModel: "must-not-remap",
+            middleModel: "must-not-remap",
+            smallModel: "must-not-remap",
+            availableModels: models,
+            defaultModel: models[0],
+            exposeScienceModelCatalog: true,
+            preferExactCatalogModels: true,
+            catalogRouteStyle: .code,
+            mapDesktopTierRoutes: false
+        )
+
+        XCTAssertEqual(config.scienceCatalogModels.map(\.id), models)
+        XCTAssertEqual(config.scienceCatalogModels.map(\.displayName), models)
+        for model in models {
+            XCTAssertEqual(config.mapToUpstreamModel(model), model)
+        }
     }
 
     func testDesktopFullCatalogDoesNotGuessStableTierRouteFromRealModelName() {

@@ -1,9 +1,8 @@
 import SwiftUI
 
-// MARK: - Claude Global Proxy Section
-// Claude Code 轨「全局统一代理」配置卡片：常驻固定端口对外暴露稳定入口（端口 + client key + 三层虚拟模型），
-// Claude Code 一次性指向它即可（写 ~/.claude/settings.json 的 ANTHROPIC_BASE_URL/AUTH_TOKEN 与三模型）。
-// 切换激活节点走进程内热替换（opus/sonnet/haiku → 节点真实 big/middle/small），CLI 无感、端口不变。
+// MARK: - Code Gateway Section
+// Claude Code 轨「全局统一代理」配置卡片：常驻固定端口对外暴露稳定入口。
+// Claude Code 一次性指向它即可；四路模型映射由上方 Code 模型卡负责。
 // 启用期间接管 settings.json，并禁用每节点单独激活（节点开关由本卡片统一切换激活节点）。
 
 struct ClaudeGlobalProxySection: View {
@@ -11,32 +10,43 @@ struct ClaudeGlobalProxySection: View {
     @ObservedObject private var runtime = GlobalProxyRuntime.claude
     @ObservedObject private var proxyVM = ProxyViewModel.shared
 
-    @State private var opusModel: String = ""
-    @State private var sonnetModel: String = ""
-    @State private var haikuModel: String = ""
-    @State private var selectedNodeId: String = ""
-    @State private var pendingSharedRouteNodeId: String?
-    @State private var showModelRoutingHelp = false
+    @State private var localSelectedNodeId = ""
+    private let externalSelectedNodeId: Binding<String>?
+    @State private var pendingRestartNodeId: String?
 
-    private static let claudeBrand = Color(red: 0.85, green: 0.45, blue: 0.25)
+    private static let claudeBrand = Color.indigo
+
+    init(selectedNodeId: Binding<String>? = nil) {
+        externalSelectedNodeId = selectedNodeId
+    }
+
+    private var selectedNodeId: String {
+        get { externalSelectedNodeId?.wrappedValue ?? localSelectedNodeId }
+        nonmutating set {
+            if let externalSelectedNodeId {
+                externalSelectedNodeId.wrappedValue = newValue
+            } else {
+                localSelectedNodeId = newValue
+            }
+        }
+    }
 
     private var nodes: [GlobalProxyNodeRef] { manager.availableNodes() }
     private var isEnabled: Bool { manager.isEnabled }
-    private var isRuntimeOwnedByDesktop: Bool { manager.isRuntimeEnabled && !isEnabled }
+    private var modelMode: ClaudeDesktopCatalogMode { manager.config.effectiveClaudeCodeCatalogMode }
 
     var body: some View {
         GlobalProxySectionScaffold(
             brand: Self.claudeBrand,
-            title: "Claude Gateway",
+            title: L("Code Gateway", "Code 网关"),
             subtitle: gatewaySubtitle,
             isEnabled: isEnabled,
             isRunning: runtime.isRunning,
-            isRuntimeOwnedByAnotherConsumer: isRuntimeOwnedByDesktop,
-            otherConsumerStatus: L("Desktop active", "Desktop 使用中"),
+            isRuntimeOwnedByAnotherConsumer: false,
+            otherConsumerStatus: "",
             isBusy: manager.isBusy,
             port: manager.config.port,
-            bindHost: manager.config.effectiveClaudeDesktopEnabled
-                ? "127.0.0.1" : manager.config.displayBindHost,
+            bindHost: manager.config.displayBindHost,
             allowLAN: allowLANBinding,
             hasNodes: !nodes.isEmpty,
             emptyHint: L("Create a Claude node first to use the global proxy.", "请先创建 Claude 节点后再使用全局代理。"),
@@ -48,26 +58,26 @@ struct ClaudeGlobalProxySection: View {
         )
         .onAppear(perform: syncFromConfig)
         .confirmationDialog(
-            L("Switch the shared Claude route?", "切换 Claude 共享路由？"),
+            L("Switch Code to another node?", "切换 Code 节点？"),
             isPresented: Binding(
-                get: { pendingSharedRouteNodeId != nil },
-                set: { if !$0 { pendingSharedRouteNodeId = nil } }
+                get: { pendingRestartNodeId != nil },
+                set: { if !$0 { pendingRestartNodeId = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button(L("Switch Code + Desktop", "同时切换 Code + Desktop")) {
-                guard let nodeId = pendingSharedRouteNodeId else { return }
+            Button(L("Switch Node", "切换节点")) {
+                guard let nodeId = pendingRestartNodeId else { return }
                 selectedNodeId = nodeId
-                pendingSharedRouteNodeId = nil
+                pendingRestartNodeId = nil
                 Task { await manager.switchActiveNode(to: nodeId) }
             }
             Button(L("Cancel", "取消"), role: .cancel) {
-                pendingSharedRouteNodeId = nil
+                pendingRestartNodeId = nil
             }
         } message: {
             Text(L(
-                "Code and Desktop are attached to the same Gateway route. Both products will use the new node immediately.",
-                "Code 与 Desktop 正在使用同一条 Gateway 路由；切换后两端会立即改用新节点。"
+                "Node models expose real model names. The route will switch now; restart running Claude Code sessions so they reload the new catalog.",
+                "“节点模型”会暴露真实模型名。路由将立即切换；请重启正在运行的 Claude Code 会话以重新加载模型目录。"
             ))
         }
     }
@@ -81,16 +91,13 @@ struct ClaudeGlobalProxySection: View {
                 brand: Self.claudeBrand,
                 title: currentNodeName,
                 systemImage: "bolt.fill",
-                isDisabled: manager.isBusy || isRuntimeOwnedByDesktop,
+                isDisabled: manager.isBusy,
                 items: nodes.map { GlobalProxyPickerItem(id: $0.id, name: $0.name) },
                 selectedId: nodeBinding.wrappedValue,
                 onSelect: { nodeBinding.wrappedValue = $0 }
             )
         }
-        .help(isRuntimeOwnedByDesktop
-              ? L("Desktop owns this route. Switch it from the Desktop tab, or attach Code to share it.",
-                  "当前路由由 Desktop 使用；请在 Desktop 页签切换，或接入 Code 后共享。")
-              : L("Choose the Claude Gateway route", "选择 Claude Gateway 路由"))
+        .help(L("Choose the Code Gateway route", "选择 Code 网关路由"))
     }
 
     private var currentNodeName: String {
@@ -102,81 +109,49 @@ struct ClaudeGlobalProxySection: View {
 
     @ViewBuilder private var runningSummary: some View {
         GlobalProxySummaryChip(
-            label: "Code",
-            value: manager.config.effectiveClaudeCodeEnabled ? L("Attached", "已接入") : L("Independent", "独立")
+            label: L("Mode", "模式"),
+            value: modelMode == .smartRoutes ? L("Hot switch", "热切换") : L("Node models", "节点模型")
         )
-        GlobalProxySummaryChip(
-            label: "Desktop",
-            value: manager.config.effectiveClaudeDesktopEnabled ? L("Attached", "已接入") : L("Off", "未接入")
-        )
-        GlobalProxySummaryChip(label: L("Opus", "Opus"), value: manager.config.claudeOpus)
-        GlobalProxySummaryChip(label: L("Sonnet", "Sonnet"), value: manager.config.claudeSonnet)
-        GlobalProxySummaryChip(label: L("Haiku", "Haiku"), value: manager.config.claudeHaiku)
-    }
-
-    // MARK: - Configuration (port + three-tier models; editable only while disabled)
-    // 三层模型并排一行，省纵向空间；端口/三模型仅停用态可改。
-
-    private var configContent: some View {
-        HStack(alignment: .top, spacing: 10) {
-            GlobalProxyField(label: L("Port", "端口")) {
-                TextField(
-                    "14400",
-                    value: portBinding,
-                    format: IntegerFormatStyle<Int>.number.grouping(.never)
-                )
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 90)
+        if let active = proxyVM.configurations.first(where: { $0.id == manager.activeNodeId }) {
+            let models = manager.config.effectiveClaudeCodeModels(for: active)
+            GlobalProxySummaryChip(label: L("Default", "默认"), value: models.defaultModel)
+            GlobalProxySummaryChip(label: "Opus", value: models.opus)
+            GlobalProxySummaryChip(label: "Sonnet", value: models.sonnet)
+            GlobalProxySummaryChip(label: "Haiku", value: models.haiku)
+            if modelMode == .fullNodeCatalog {
+                GlobalProxySummaryChip(label: L("Catalog", "目录"), value: "\(active.runtimeModelCatalog.count)")
             }
-            modelColumn(L("Opus", "Opus"), placeholder: GlobalProxyConfig.defaultClaudeOpus, text: $opusModel)
-            modelColumn(L("Sonnet", "Sonnet"), placeholder: GlobalProxyConfig.defaultClaudeSonnet, text: $sonnetModel)
-            modelColumn(L("Haiku", "Haiku"), placeholder: GlobalProxyConfig.defaultClaudeHaiku, text: $haikuModel)
-            Button {
-                showModelRoutingHelp.toggle()
-            } label: {
-                Image(systemName: "questionmark.circle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(L("Model routing", "模型路由说明"))
-            .popover(isPresented: $showModelRoutingHelp, arrowEdge: .top) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L("Three stable routes", "三条固定路由"))
-                        .font(.headline)
-                    Text(L(
-                        "These names are the stable entries sent by Claude Code. Gateway rewrites them to the active node's big, middle and small models.",
-                        "这些名称是 Claude Code 使用的固定入口；Gateway 会把它们改写为当前节点的大、中、小模型。"
-                    ))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(16)
-                .frame(width: 320, alignment: .leading)
-            }
-            Spacer(minLength: 0)
         }
     }
 
-    /// 一列模型：小标签在上、输入框在下，固定宽度左对齐，与其它模型框一致。
-    private func modelColumn(_ tier: String, placeholder: String, text: Binding<String>) -> some View {
-        GlobalProxyField(label: L("\(tier) Model", "\(tier) 模型")) {
-            TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
-                .frame(minWidth: 120, idealWidth: 150, maxWidth: 160)
-                .onChange(of: text.wrappedValue) { _, _ in commitSettings() }
+    // MARK: - Configuration
+
+    private var configContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                GlobalProxyField(label: L("Port", "端口")) {
+                    TextField(
+                        "14400",
+                        value: portBinding,
+                        format: IntegerFormatStyle<Int>.number.grouping(.never)
+                    )
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90)
+                }
+                Text(L(
+                    "Model routes are configured in the Code models card below.",
+                    "模型映射请在下方“Code 模型”卡片中配置。"
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
         }
     }
 
     private var allowLANBinding: Binding<Bool> {
         Binding(
-            get: {
-                manager.config.effectiveClaudeDesktopEnabled
-                    ? false : manager.config.effectiveAllowLAN
-            },
+            get: { manager.config.effectiveAllowLAN },
             set: { manager.updateAllowLAN($0) }
         )
     }
@@ -187,9 +162,9 @@ struct ClaudeGlobalProxySection: View {
             set: {
                 manager.updateClaudeModels(
                     port: $0,
-                    opus: opusModel,
-                    sonnet: sonnetModel,
-                    haiku: haikuModel
+                    opus: manager.config.claudeOpus,
+                    sonnet: manager.config.claudeSonnet,
+                    haiku: manager.config.claudeHaiku
                 )
             }
         )
@@ -214,13 +189,13 @@ struct ClaudeGlobalProxySection: View {
         Binding(
             get: { manager.isRuntimeEnabled ? (manager.activeNodeId ?? resolvedSelection) : resolvedSelection },
             set: { newId in
-                if isEnabled, manager.config.effectiveClaudeDesktopEnabled,
+                if isEnabled, modelMode == .fullNodeCatalog,
                    newId != manager.activeNodeId {
-                    pendingSharedRouteNodeId = newId
+                    pendingRestartNodeId = newId
                 } else {
                     selectedNodeId = newId
                 }
-                if manager.isRuntimeEnabled && pendingSharedRouteNodeId == nil {
+                if manager.isRuntimeEnabled && pendingRestartNodeId == nil {
                     Task { await manager.switchActiveNode(to: newId) }
                 }
             }
@@ -231,9 +206,6 @@ struct ClaudeGlobalProxySection: View {
 
     /// 当前选定节点（兜底到首个可用节点），保证 Picker/启用按钮总有合法目标。
     private var resolvedSelection: String {
-        // When Desktop already owns the Gateway, attaching Code must join the
-        // live shared route. A stale local picker draft must never switch
-        // Desktop as a side effect of turning Code on.
         if manager.isRuntimeEnabled,
            let active = manager.activeNodeId,
            nodes.contains(where: { $0.id == active }) {
@@ -246,32 +218,12 @@ struct ClaudeGlobalProxySection: View {
     }
 
     private var gatewaySubtitle: String {
-        switch (manager.config.effectiveClaudeCodeEnabled, manager.config.effectiveClaudeDesktopEnabled) {
-        case (true, true):
-            return L("Code + Desktop · shared route", "Code + Desktop · 共享路由")
-        case (true, false):
-            return L("Code · hot switch", "Code · 热切换")
-        case (false, true):
-            return L("Desktop · Code independent", "Desktop · Code 独立")
-        case (false, false):
-            return L("Stable route · hot switch", "固定入口 · 热切换")
-        }
+        modelMode == .smartRoutes
+            ? L("Code · stable aliases · hot switch", "Code · 固定别名 · 热切换")
+            : L("Code · real model names · restart on node change", "Code · 真实模型名 · 切换节点需重启")
     }
 
     private func syncFromConfig() {
-        opusModel = manager.config.claudeOpus
-        sonnetModel = manager.config.claudeSonnet
-        haikuModel = manager.config.claudeHaiku
         selectedNodeId = resolvedSelection
-    }
-
-    private func commitSettings() {
-        guard !manager.isRuntimeEnabled else { return }
-        manager.updateClaudeModels(
-            port: manager.config.port,
-            opus: opusModel,
-            sonnet: sonnetModel,
-            haiku: haikuModel
-        )
     }
 }

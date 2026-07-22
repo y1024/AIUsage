@@ -60,9 +60,9 @@ public struct ClaudeProxyConfiguration: Sendable {
     /// use different public model identities. Desktop requires role-shaped
     /// Anthropic routes while Science keeps its compatibility selection IDs.
     public let catalogRouteStyle: ScienceModelProtocolAdapter.RouteStyle
-    /// Only Desktop's hot-switch mode interprets its three stable public route
-    /// IDs as tier aliases. Full-catalog mode must route an identically named
-    /// real upstream model exactly instead of guessing from the string.
+    /// Product hot-switch modes interpret the four stable public route IDs as
+    /// app-side aliases. Full-catalog mode must route an identically named real
+    /// upstream model exactly instead of guessing from the string.
     public let mapDesktopTierRoutes: Bool
     /// Real upstream model IDs explicitly advertised with a 1M-context picker
     /// variant. The route adapter projects this onto the public catalog rows.
@@ -157,7 +157,7 @@ public struct ClaudeProxyConfiguration: Sendable {
                requestModel,
                acceptingRawUpstreamIDs: preferExactCatalogModels
            ) {
-            // Desktop publishes stable Opus/Sonnet/Haiku route identities.
+            // Code/Desktop publish stable Default/Opus/Sonnet/Haiku identities.
             // The route itself must pass through the current node's tier map;
             // returning it as a literal upstream model would couple Desktop to
             // one node and defeat Gateway hot switching.
@@ -179,7 +179,9 @@ public struct ClaudeProxyConfiguration: Sendable {
 
     private func mapTierRouteToUpstream(_ requestModel: String) -> String {
         let normalized = requestModel.lowercased()
-        if normalized.contains("opus") {
+        if normalized == ScienceModelProtocolAdapter.desktopDefaultRouteID {
+            return defaultModel ?? middleModel
+        } else if normalized.contains("opus") {
             return bigModel
         } else if normalized.contains("sonnet") {
             return middleModel

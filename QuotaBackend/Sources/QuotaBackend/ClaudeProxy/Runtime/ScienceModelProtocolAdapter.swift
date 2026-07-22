@@ -9,6 +9,11 @@ public struct ScienceModelProtocolAdapter: Sendable {
     public enum RouteStyle: String, Sendable, Codable {
         case science
         case desktop
+        /// Claude Code full-catalog mode deliberately publishes the exact
+        /// upstream ids returned by the selected Node. Unlike Desktop and
+        /// Science, Code can learn arbitrary Claude-shaped ids from the
+        /// Gateway `/v1/models` endpoint.
+        case code
     }
 
     public struct Model: Sendable, Equatable {
@@ -32,12 +37,14 @@ public struct ScienceModelProtocolAdapter: Sendable {
 
     /// Some Science releases accept only Claude-shaped model IDs.
     static let generatedIDPrefix = "claude-aiusage-v1-"
+    public static let desktopDefaultRouteID = "claude-default-4-6-aiusage-v1"
     public static let desktopOpusRouteID = "claude-opus-4-6-aiusage-v1"
     public static let desktopSonnetRouteID = "claude-sonnet-4-6-aiusage-v1"
     public static let desktopHaikuRouteID = "claude-haiku-4-5-aiusage-v1"
 
     public static func isStableDesktopTierRoute(_ model: String) -> Bool {
-        [desktopOpusRouteID, desktopSonnetRouteID, desktopHaikuRouteID].contains(model)
+        [desktopDefaultRouteID, desktopOpusRouteID, desktopSonnetRouteID, desktopHaikuRouteID]
+            .contains(model)
     }
 
     /// Prevents Science's display-only `Internal` heuristic from matching.
@@ -72,14 +79,23 @@ public struct ScienceModelProtocolAdapter: Sendable {
                     : Self.generatedSelectionID(for: upstream)
             case .desktop:
                 id = Self.desktopSelectionID(for: upstream)
+            case .code:
+                id = upstream
+            }
+            let displayName: String
+            switch routeStyle {
+            case .science:
+                displayName = Self.presentationName(for: upstream)
+            case .desktop:
+                displayName = Self.desktopPresentationName(for: upstream)
+            case .code:
+                displayName = upstream
             }
             routing[id] = upstream
             return Model(
                 id: id,
                 upstreamModel: upstream,
-                displayName: routeStyle == .science
-                    ? Self.presentationName(for: upstream)
-                    : Self.desktopPresentationName(for: upstream),
+                displayName: displayName,
                 supports1M: supports1MUpstreamModels.contains(upstream)
             )
         }
@@ -211,6 +227,7 @@ public struct ScienceModelProtocolAdapter: Sendable {
 
     private static func desktopPresentationName(for model: String) -> String {
         switch model {
+        case desktopDefaultRouteID: return "AIUsage Default"
         case desktopOpusRouteID: return "AIUsage Opus"
         case desktopSonnetRouteID: return "AIUsage Sonnet"
         case desktopHaikuRouteID: return "AIUsage Haiku"

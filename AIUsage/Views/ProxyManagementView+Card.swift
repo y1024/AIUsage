@@ -27,6 +27,8 @@ struct ConfigurationCardView: View, Equatable {
     let config: ProxyConfiguration
     let isActive: Bool
     let isProxyOnlyRunning: Bool
+    let isRuntimeManuallyHeld: Bool
+    let showsActivationControl: Bool
     let isBusy: Bool
     let isActivationManaged: Bool
     let canAttachCodeToGateway: Bool
@@ -59,6 +61,8 @@ struct ConfigurationCardView: View, Equatable {
         lhs.config == rhs.config &&
         lhs.isActive == rhs.isActive &&
         lhs.isProxyOnlyRunning == rhs.isProxyOnlyRunning &&
+        lhs.isRuntimeManuallyHeld == rhs.isRuntimeManuallyHeld &&
+        lhs.showsActivationControl == rhs.showsActivationControl &&
         lhs.isBusy == rhs.isBusy &&
         lhs.isActivationManaged == rhs.isActivationManaged &&
         lhs.canAttachCodeToGateway == rhs.canAttachCodeToGateway &&
@@ -74,6 +78,7 @@ struct ConfigurationCardView: View, Equatable {
     private static let anthropicBrand = Color(red: 0.85, green: 0.47, blue: 0.34)
     private static let openAIBrand = Color(red: 0.29, green: 0.73, blue: 0.56)
     private static let codexBrand = Color(red: 0.40, green: 0.52, blue: 0.92)
+    private static let nodeRuntimeBrand = Color.teal
 
     private var brandColor: Color {
         switch config.nodeType {
@@ -102,6 +107,36 @@ struct ConfigurationCardView: View, Equatable {
 
     private var connectedUnavailableLabel: String {
         L("Unavailable while connected to \(activationTargetName)", "接入 \(activationTargetName) 时不可用")
+    }
+
+    private var productRuntimeOwners: [String] {
+        var owners: [String] = []
+        if claudeUsage.codeRoute == .gateway { owners.append("Code") }
+        if claudeUsage.desktop { owners.append("Desktop") }
+        if claudeUsage.science { owners.append("Science") }
+        return owners
+    }
+
+    private var runtimeStopIsProductOwned: Bool {
+        !showsActivationControl && isProxyOnlyRunning && !isRuntimeManuallyHeld && !productRuntimeOwners.isEmpty
+    }
+
+    private var nodeSwitchHelp: String {
+        if runtimeStopIsProductOwned {
+            return L(
+                "This node is currently used by \(productRuntimeOwners.joined(separator: " · "))",
+                "该节点正由 \(productRuntimeOwners.joined(separator: " · ")) 使用"
+            )
+        }
+        return isProxyOnlyRunning
+            ? L("Turn off this node", "关闭节点")
+            : L("Turn on this node for Code, Desktop and Science", "开启节点，供 Code、Desktop 与 Science 使用")
+    }
+
+    private var launchCommandLabel: String {
+        config.nodeType.isCodex
+            ? L("Copy Codex Launch Command", "复制 Codex 启动命令")
+            : L("Copy Claude Code Launch Command", "复制 Claude Code 启动命令")
     }
 
     // MARK: - Model Quick Switch（模型库多于一个模型时提供）
@@ -172,46 +207,40 @@ struct ConfigurationCardView: View, Equatable {
                 Spacer()
 
                 HStack(spacing: 6) {
-                    Toggle("", isOn: Binding(
-                        get: { isActive },
-                        set: { newValue in if newValue != isActive { onToggleActivation() } }
-                    ))
-                    .toggleStyle(ProxyActivationToggleStyle(
-                        brandColor: brandColor,
-                        isBusy: isBusy
-                    ))
-                    .disabled(isBusy || isActivationManaged)
-                    .instantTooltip(isActivationManaged
-                        ? L("Claude Code is managed by Claude Gateway", "Claude Code 正由 Claude Gateway 管理")
-                        : (canAttachCodeToGateway
-                           ? L("Attach Claude Code to Desktop's existing Gateway route",
-                               "让 Claude Code 加入 Desktop 当前的 Gateway 路由")
-                           : (isActive ? disconnectLabel : applyLabel)))
+                    if showsActivationControl {
+                        Toggle("", isOn: Binding(
+                            get: { isActive },
+                            set: { newValue in if newValue != isActive { onToggleActivation() } }
+                        ))
+                        .toggleStyle(ProxyActivationToggleStyle(
+                            brandColor: brandColor,
+                            isBusy: isBusy
+                        ))
+                        .disabled(isBusy || isActivationManaged)
+                        .instantTooltip(isActivationManaged
+                            ? L("Claude Code is managed by Code Gateway", "Claude Code 正由 Code 网关管理")
+                            : (isActive ? disconnectLabel : applyLabel))
+                    }
 
                     if config.needsProxyProcess {
-                        Button(action: onToggleProxyOnly) {
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                                .font(.system(size: 14))
-                                .foregroundStyle(isActive ? .gray.opacity(0.4) : isProxyOnlyRunning ? .orange : .purple)
-                                .frame(width: 20, height: 20)
+                        HStack(spacing: 5) {
+                            Text(isProxyOnlyRunning ? L("On", "已开启") : L("Off", "未开启"))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(isProxyOnlyRunning ? Color.green : Color.secondary)
+                            Toggle("", isOn: Binding(
+                                get: { isProxyOnlyRunning },
+                                set: { newValue in
+                                    if newValue != isProxyOnlyRunning { onToggleProxyOnly() }
+                                }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .tint(.teal)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(isBusy || isActive)
-                        .instantTooltip(isActive
-                              ? connectedUnavailableLabel
-                              : isProxyOnlyRunning
-                              ? L("Stop Proxy", "停止代理")
-                              : L("Start Proxy", "启动代理"))
+                        .disabled(isBusy || isActive || runtimeStopIsProductOwned)
+                        .instantTooltip(isActive ? connectedUnavailableLabel : nodeSwitchHelp)
                     }
-
-                    Button(action: onCopyLaunchCommand) {
-                        Image(systemName: "doc.on.clipboard")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.blue)
-                            .frame(width: 20, height: 20)
-                    }
-                    .buttonStyle(.plain)
-                    .instantTooltip(L("Copy Launch Command", "复制启动命令"))
 
                     connectivityControl
 
@@ -247,7 +276,7 @@ struct ConfigurationCardView: View, Equatable {
         )
         .overlay(alignment: .leading) {
             if isActive || isProxyOnlyRunning {
-                let statusColor = isActive ? brandColor : Color.purple
+                let statusColor = isActive ? brandColor : Self.nodeRuntimeBrand
                 Capsule()
                     .fill(statusColor)
                     .frame(width: 3)
@@ -269,14 +298,14 @@ struct ConfigurationCardView: View, Equatable {
 
     private var cardBackgroundColor: Color {
         if isActive { return brandColor.opacity(0.06) }
-        if isProxyOnlyRunning { return Color.purple.opacity(0.04) }
+        if isProxyOnlyRunning { return Self.nodeRuntimeBrand.opacity(0.04) }
         if isSelected { return brandColor.opacity(0.04) }
         return Color(nsColor: .controlBackgroundColor).opacity(0.5)
     }
 
     private var cardBorderColor: Color {
         if isActive { return brandColor.opacity(0.5) }
-        if isProxyOnlyRunning { return Color.purple.opacity(0.35) }
+        if isProxyOnlyRunning { return Self.nodeRuntimeBrand.opacity(0.35) }
         if isSelected { return brandColor.opacity(0.25) }
         return Color.primary.opacity(0.06)
     }
@@ -456,15 +485,15 @@ struct ConfigurationCardView: View, Equatable {
                 Label(
                     isActive
                         ? connectedUnavailableLabel
-                        : isProxyOnlyRunning ? L("Stop Proxy", "停止代理") : L("Start Proxy", "启动代理"),
-                    systemImage: "antenna.radiowaves.left.and.right"
+                        : isProxyOnlyRunning ? L("Turn Off Node", "关闭节点") : L("Turn On Node", "开启节点"),
+                    systemImage: isProxyOnlyRunning ? "power.circle.fill" : "power.circle"
                 )
             }
-            .disabled(isBusy || isActive)
+            .disabled(isBusy || isActive || runtimeStopIsProductOwned)
         }
 
         Button { onCopyLaunchCommand() } label: {
-            Label(L("Copy Launch Command", "复制启动命令"), systemImage: "doc.on.clipboard")
+            Label(launchCommandLabel, systemImage: "doc.on.clipboard")
         }
 
         Button { onTestConnectivity() } label: {
@@ -514,7 +543,7 @@ struct ConfigurationCardView: View, Equatable {
         let (icon, color): (String, Color) = {
             switch config.nodeType {
             case .anthropicDirect:
-                return (config.usePassthroughProxy ? "bolt.shield.fill" : "bolt.horizontal.fill", Self.anthropicBrand)
+                return ("bolt.shield.fill", Self.anthropicBrand)
             case .openaiProxy:
                 return ("arrow.triangle.swap", Self.openAIBrand)
             case .codexProxy:
@@ -525,7 +554,7 @@ struct ConfigurationCardView: View, Equatable {
         return HStack(spacing: 3) {
             Image(systemName: icon)
                 .font(.system(size: 7, weight: .bold))
-            Text(config.nodeBadgeLabel)
+            Text(config.nodeType.badgeProtocolName)
         }
         .font(.system(size: 9, weight: .bold))
         .foregroundStyle(color)
@@ -543,7 +572,7 @@ struct ConfigurationCardView: View, Equatable {
                     color: .indigo,
                     isRunning: claudeUsage.codeRunning,
                     help: route == .gateway
-                        ? L("Claude Code uses this node through Claude Gateway", "Claude Code 正通过 Claude Gateway 使用此节点")
+                        ? L("Claude Code uses this node through Code Gateway", "Claude Code 正通过 Code 网关使用此节点")
                         : L("Claude Code is connected directly to this node", "Claude Code 正直连接入此节点")
                 )
             }
@@ -553,7 +582,7 @@ struct ConfigurationCardView: View, Equatable {
                     icon: "macwindow",
                     color: Self.anthropicBrand,
                     isRunning: claudeUsage.desktopRunning,
-                    help: L("Claude Desktop uses this node through Claude Gateway", "Claude Desktop 正通过 Claude Gateway 使用此节点")
+                    help: L("Claude Desktop uses this node through Desktop Gateway", "Claude Desktop 正通过 Desktop 网关使用此节点")
                 )
             }
             if claudeUsage.science {
@@ -617,10 +646,8 @@ struct ConfigurationCardView: View, Equatable {
             switch config.nodeType {
             case .anthropicDirect:
                 detailItem(label: "Base URL", value: config.anthropicBaseURL)
-                if config.usePassthroughProxy {
-                    detailItem(label: L("Local Proxy", "本地代理"), value: "http://\(config.host):\(config.port)")
-                    detailItem(label: L("LAN Access", "局域网访问"), value: config.allowLAN ? L("Enabled", "已启用") : L("Disabled", "已禁用"))
-                }
+                detailItem(label: L("Local Endpoint", "本地地址"), value: "http://\(config.host):\(config.port)")
+                detailItem(label: L("LAN Access", "局域网访问"), value: config.allowLAN ? L("Enabled", "已启用") : L("Disabled", "已禁用"))
             case .openaiProxy:
                 detailItem(label: L("Upstream", "上游"), value: config.normalizedUpstreamBaseURL)
                 detailItem(label: L("Upstream API", "上游接口"), value: config.openAIUpstreamAPI == .chatCompletions ? "Chat Completions" : "Responses")

@@ -14,10 +14,9 @@ struct ClaudeDesktopCatalogEntry: Equatable, Identifiable {
     let supports1M: Bool
 }
 
-/// The exact model values passed into QuotaServer. Smart routes are already
-/// public route IDs; a full catalog passes real upstream IDs so the backend can
-/// derive the same safe Desktop aliases as the profile store.
-struct ClaudeDesktopGatewayCatalogProjection {
+/// The exact model values passed into a Claude product Gateway. Smart routes
+/// are stable app-facing IDs; a full catalog passes real upstream IDs.
+struct ClaudeProductGatewayCatalogProjection {
     let availableModels: [String]
     let defaultModel: String?
     let supports1MModels: [String]
@@ -104,6 +103,7 @@ final class ClaudeDesktopProfileStore {
     /// entries when users alternate between AIUsage and another profile tool.
     static let profileID = "a1a5a9e0-7c1d-4e5f-9a0b-c1d2e3f4a5b6"
     static let profileName = "AIUsage Gateway"
+    static let defaultRouteID = "claude-default-4-6-aiusage-v1"
     static let opusRouteID = "claude-opus-4-6-aiusage-v1"
     static let sonnetRouteID = "claude-sonnet-4-6-aiusage-v1"
     static let haikuRouteID = "claude-haiku-4-5-aiusage-v1"
@@ -174,16 +174,24 @@ final class ClaudeDesktopProfileStore {
     static func catalog(
         for node: ProxyConfiguration,
         mode: ClaudeDesktopCatalogMode = .fullNodeCatalog,
-        supports1M: Set<String> = []
+        supports1M: Set<String> = [],
+        routes: ClaudeAppResolvedModels? = nil
     ) -> [ClaudeDesktopCatalogEntry] {
         switch mode {
         case .smartRoutes:
-            // Desktop keeps these identities for the lifetime of the
-            // integration. Only the Gateway tier projection changes.
+            let resolved = routes ?? ClaudeAppResolvedModels(
+                defaultModel: node.defaultModel,
+                opus: node.modelMapping.bigModel.name,
+                sonnet: node.modelMapping.middleModel.name,
+                haiku: node.modelMapping.smallModel.name
+            )
+            // Code and Desktop keep these four public identities for the
+            // lifetime of the integration. Only their Gateway projections change.
             let routes: [(id: String, upstream: String, label: String)] = [
-                (Self.opusRouteID, node.modelMapping.bigModel.name, "AIUsage Opus"),
-                (Self.sonnetRouteID, node.modelMapping.middleModel.name, "AIUsage Sonnet"),
-                (Self.haikuRouteID, node.modelMapping.smallModel.name, "AIUsage Haiku"),
+                (Self.defaultRouteID, resolved.defaultModel, "AIUsage Default"),
+                (Self.opusRouteID, resolved.opus, "AIUsage Opus"),
+                (Self.sonnetRouteID, resolved.sonnet, "AIUsage Sonnet"),
+                (Self.haikuRouteID, resolved.haiku, "AIUsage Haiku"),
             ]
             return routes.compactMap { route in
                 let upstream = route.upstream.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -226,20 +234,27 @@ final class ClaudeDesktopProfileStore {
     static func gatewayProjection(
         for node: ProxyConfiguration,
         mode: ClaudeDesktopCatalogMode,
-        supports1M: Set<String> = []
-    ) -> ClaudeDesktopGatewayCatalogProjection {
-        let entries = catalog(for: node, mode: mode, supports1M: supports1M)
+        supports1M: Set<String> = [],
+        routes: ClaudeAppResolvedModels? = nil
+    ) -> ClaudeProductGatewayCatalogProjection {
+        let entries = catalog(
+            for: node,
+            mode: mode,
+            supports1M: supports1M,
+            routes: routes
+        )
         switch mode {
         case .smartRoutes:
-            return ClaudeDesktopGatewayCatalogProjection(
+            return ClaudeProductGatewayCatalogProjection(
                 availableModels: entries.map(\.id),
-                defaultModel: entries.first(where: {
-                    $0.id == Self.sonnetRouteID
-                })?.id ?? entries.first?.id,
+                // The backend uses this real identity when resolving the
+                // stable Default route; the public picker still defaults to
+                // the first catalog row.
+                defaultModel: routes?.defaultModel ?? node.defaultModel,
                 supports1MModels: entries.filter(\.supports1M).map(\.id)
             )
         case .fullNodeCatalog:
-            return ClaudeDesktopGatewayCatalogProjection(
+            return ClaudeProductGatewayCatalogProjection(
                 availableModels: entries.map(\.upstreamModel),
                 defaultModel: entries.first(where: {
                     $0.upstreamModel == node.defaultModel
