@@ -10,6 +10,11 @@ struct GlobalConfig {
     var enabled: Bool
     var settings: [String: Any]
 
+    init(enabled: Bool, settings: [String: Any]) {
+        self.enabled = enabled
+        self.settings = settings
+    }
+
     static let empty = GlobalConfig(enabled: false, settings: [:])
 
     // MARK: - Deep Merge

@@ -5,7 +5,7 @@ import os.log
 import QuotaBackend
 
 // MARK: - OpenCode Node Store
-// OpenCode 节点的持久化与激活状态。节点列表 + activeNodeId 存为单文件
+// OpenCode 节点的持久化与激活状态。节点列表 + activeNodeIds（可多节点同时激活）存为单文件
 // ~/.config/aiusage/opencode-nodes.json（含 API Key，0600 权限）。
 // 激活/停用委托 OpenCodeConfigManager 写受管全局层；启动时与配置文件实际状态对账。
 // 代理模式节点：激活前先经 OpenCodeProxyRuntime 拉起本地透传进程，受管层指向
@@ -38,7 +38,8 @@ final class OpenCodeNodeStore: ObservableObject {
     static let shared = OpenCodeNodeStore()
 
     @Published private(set) var nodes: [OpenCodeNode] = []
-    @Published private(set) var activeNodeId: String?
+    /// 当前激活的节点 id 列表（issue #66：多节点可同时激活；末位 = 最近激活，顶层 model 指向它）。
+    @Published private(set) var activeNodeIds: [String] = []
     /// 「仅代理」运行中的节点集合（不接管全局配置，仅拉起本地透传进程暴露端口，
     /// 供启动命令等外部接入使用）。与 Claude/Codex 同语义：可多个并行（各占一端口）、
     /// 与激活互不影响；激活某节点时该节点退出仅代理（代理随激活运行）。
@@ -46,6 +47,9 @@ final class OpenCodeNodeStore: ObservableObject {
     /// 通用配置片段（与 Claude 页同构）：激活时按节点合并策略深合并进受管层，
     /// 受管块与用户原文之间的中间层。持久化于 ~/.config/aiusage/opencode-global-config.json。
     @Published var globalConfig: GlobalConfig = .empty
+    /// 多节点同时激活时顶层 model 指向的「默认模型节点」（独立于通用配置）。
+    /// nil 表示未显式选择，重写受管配置时回退到节点列表中排第一个的激活节点。
+    @Published private(set) var openCodeDefaultNodeId: String?
 
     private let configManager = OpenCodeConfigManager.shared
     private let proxyRuntime = OpenCodeProxyRuntime.shared
@@ -55,7 +59,9 @@ final class OpenCodeNodeStore: ObservableObject {
         var version: Int
         var nodes: [OpenCodeNode]
         var activeNodeId: String?
+        var activeNodeIds: [String]?
         var proxyOnlyNodeIds: [String]?
+        var openCodeDefaultNodeId: String?
     }
 
     private static let storeVersion = 1
@@ -79,9 +85,15 @@ final class OpenCodeNodeStore: ObservableObject {
 
     // MARK: - Derived State
 
+    /// 最近激活的节点（顶层 model 指向它），兼容旧 UI 显示。
     var activeNode: OpenCodeNode? {
-        guard let activeNodeId else { return nil }
-        return nodes.first { $0.id == activeNodeId }
+        guard let lastId = activeNodeIds.last else { return nil }
+        return nodes.first { $0.id == lastId }
+    }
+
+    /// 所有激活节点（按激活顺序，末位为最近）。
+    var activeNodes: [OpenCodeNode] {
+        activeNodeIds.compactMap { id in nodes.first { $0.id == id } }
     }
 
     var configPath: String { configManager.configPath }
@@ -116,7 +128,7 @@ final class OpenCodeNodeStore: ObservableObject {
         save()
 
         // 编辑当前激活节点后立即重新激活（重写受管层；代理参数未变时进程原地复用）。
-        if updated.id == activeNodeId {
+        if activeNodeIds.contains(updated.id) {
             Task { [weak self] in
                 try? await self?.activate(updated)
             }
@@ -133,9 +145,9 @@ final class OpenCodeNodeStore: ObservableObject {
     }
 
     func delete(_ node: OpenCodeNode) throws {
-        if node.id == activeNodeId {
+        if activeNodeIds.contains(node.id) {
             // 恢复失败时必须保留节点和恢复入口，不能留下“节点已删、接管会话仍在”的孤儿状态。
-            try deactivate()
+            try deactivate(node)
         }
         if proxyOnlyNodeIds.contains(node.id) {
             stopProxyOnly(node)
@@ -197,10 +209,32 @@ final class OpenCodeNodeStore: ObservableObject {
         } catch {
             openCodeStoreLog.error("Failed to save OpenCode global config: \(String(describing: error), privacy: .public)")
         }
-        // 通用配置变化即时反映到生效中的节点。
-        if let node = activeNode {
-            Task { try? await activate(node) }
+        // 通用配置变化即时反映到生效中的节点（全量重写所有激活节点）。
+        if !activeNodeIds.isEmpty {
+            do {
+                try rewriteManagedConfig()
+            } catch {
+                openCodeStoreLog.error("Failed to reapply common config: \(String(describing: error), privacy: .public)")
+            }
         }
+    }
+
+    /// 设置「默认模型节点」并立即重写受管配置（顶层 model 指向它）。
+    /// 传 nil 回到「自动（第一个激活节点）」。先完成配置写入成功后再提交新选择，
+    /// 写入失败时保持原默认节点不变。
+    func setOpenCodeDefaultNodeId(_ id: String?) {
+        guard openCodeDefaultNodeId != id else { return }
+        if !activeNodeIds.isEmpty {
+            let resolved = id ?? nodes.first(where: { activeNodeIds.contains($0.id) })?.id
+            do {
+                try rewriteManagedConfig(defaultNodeIdOverride: resolved)
+            } catch {
+                openCodeStoreLog.error("Failed to reapply default model node: \(String(describing: error), privacy: .public)")
+                return
+            }
+        }
+        openCodeDefaultNodeId = id
+        save()
     }
 
     /// Force SwiftUI to refresh file-resolution labels after an external file edit.
@@ -219,10 +253,11 @@ final class OpenCodeNodeStore: ObservableObject {
     /// outside AIUsage. Normal deactivation remains fail-closed.
     func discardExternalConfigChanges() throws {
         try configManager.restoreDiscardingExternalChanges()
-        if let active = activeNode, active.proxyEnabled, !proxyOnlyNodeIds.contains(active.id) {
-            proxyRuntime.stop(nodeId: active.id)
+        for node in activeNodes where node.proxyEnabled && !proxyOnlyNodeIds.contains(node.id) {
+            proxyRuntime.stop(nodeId: node.id)
         }
-        activeNodeId = nil
+        activeNodeIds.removeAll()
+        openCodeDefaultNodeId = nil
         save()
         objectWillChange.send()
     }
@@ -234,7 +269,6 @@ final class OpenCodeNodeStore: ObservableObject {
         if GlobalProxyManager.opencode.config.isEnabled {
             throw OpenCodeNodeStoreError.managedByGlobalProxy
         }
-        let common = commonSettings(for: node)
         if node.proxyEnabled {
             // Codex 轨道（responses 透传）启动时强制要求 Key，缺失会让 QuotaServer
             // 静默不挂载代理路由，请求全 404——提前拦截给出可读错误。
@@ -245,23 +279,113 @@ final class OpenCodeNodeStore: ObservableObject {
             if proxyOnlyNodeIds.remove(node.id) != nil {
                 save()
             }
-            stopPreviousActiveProxyProcess(except: node.id)
-            // 代理模式：先拉起本地透传进程，再把受管层指向它；写配置失败则回收进程。
+            // 代理模式：先拉起本地透传进程，再把受管层指向它；写配置失败则回收进程并回滚激活状态。
             try await proxyRuntime.start(node: node)
+            let previousIds = activeNodeIds
+            activeNodeIds.removeAll { $0 == node.id }
+            activeNodeIds.append(node.id)
             do {
-                try configManager.activate(node: node, baseURLOverride: node.proxyLocalBaseURL, commonSettings: common)
+                try rewriteManagedConfig()
             } catch {
+                activeNodeIds = previousIds
                 proxyRuntime.stop(nodeId: node.id)
                 throw error
             }
         } else {
-            stopPreviousActiveProxyProcess(except: node.id)
-            try configManager.activate(node: node, commonSettings: common)
+            let previousIds = activeNodeIds
+            activeNodeIds.removeAll { $0 == node.id }
+            activeNodeIds.append(node.id)
+            do {
+                try rewriteManagedConfig()
+            } catch {
+                activeNodeIds = previousIds
+                throw error
+            }
         }
         if let index = nodes.firstIndex(where: { $0.id == node.id }) {
             nodes[index].lastUsedAt = Date()
         }
-        activeNodeId = node.id
+        save()
+        objectWillChange.send()
+    }
+
+    /// 批量激活多个节点（一次事务，用于恢复刚停用的每节点路由 / 批量切换）：
+    /// 先启动全部代理进程并升级仅代理标记，再一次性重写受管配置，最后提交激活集合；
+    /// 任一步失败时回收已启动代理、恢复仅代理标记，激活集合保持原值（不留部分激活）。
+    func activate(_ nodes: [OpenCodeNode]) async throws {
+        guard !nodes.isEmpty else { return }
+        // 与全局统一代理互斥：全局启用时由它独占受管层，每节点激活会覆盖全局受管块。
+        if GlobalProxyManager.opencode.config.isEnabled {
+            throw OpenCodeNodeStoreError.managedByGlobalProxy
+        }
+        let newIds = nodes.map(\.id)
+        var upgradedProxyOnly: [String] = []
+        var startedProxyIds: [String] = []
+
+        do {
+            for node in nodes {
+                guard node.proxyEnabled else { continue }
+                // Codex 轨道（responses 透传）启动时强制要求 Key，缺失会让 QuotaServer
+                // 静默不挂载代理路由，请求全 404——提前拦截给出可读错误。
+                if node.protocolType == .openAIResponses, node.apiKey.nilIfBlank == nil {
+                    throw OpenCodeNodeStoreError.proxyRequiresAPIKey
+                }
+                // 该节点此前以仅代理运行：升级为激活（参数没变时进程原地复用，不闪断）。
+                if proxyOnlyNodeIds.remove(node.id) != nil {
+                    upgradedProxyOnly.append(node.id)
+                }
+                try await proxyRuntime.start(node: node)
+                startedProxyIds.append(node.id)
+            }
+            // 一次性重写受管配置；此时尚未提交激活集合，失败只需回收代理进程。
+            try rewriteManagedConfig(using: newIds)
+        } catch {
+            for id in startedProxyIds {
+                proxyRuntime.stop(nodeId: id)
+            }
+            for id in upgradedProxyOnly {
+                proxyOnlyNodeIds.insert(id)
+            }
+            throw error
+        }
+
+        activeNodeIds = newIds
+        for node in nodes {
+            if let index = self.nodes.firstIndex(where: { $0.id == node.id }) {
+                self.nodes[index].lastUsedAt = Date()
+            }
+        }
+        save()
+        objectWillChange.send()
+    }
+
+    /// 停用单个节点（issue #66）：委托给批量停用，保证事务一致。
+    func deactivate(_ node: OpenCodeNode) throws {
+        try deactivate([node.id])
+    }
+
+    /// 停用多个节点：一次性计算停用后集合并重写/还原配置，配置成功后再提交激活集合、
+    /// 停代理并持久化；任一步失败时原激活集合、代理进程、有效配置全部不变。
+    func deactivate(_ ids: [String]) throws {
+        let targetSet = Set(ids)
+        guard !targetSet.isEmpty else { return }
+        let remainingIds = activeNodeIds.filter { !targetSet.contains($0) }
+        guard remainingIds.count != activeNodeIds.count else { return }
+        if remainingIds.isEmpty {
+            try configManager.restore()
+        } else {
+            try rewriteManagedConfig(using: remainingIds)
+        }
+        let removedIds = Set(activeNodeIds).subtracting(remainingIds)
+        activeNodeIds = remainingIds
+        if let chosen = openCodeDefaultNodeId, removedIds.contains(chosen) {
+            openCodeDefaultNodeId = nil
+        }
+        for id in removedIds {
+            guard let node = nodes.first(where: { $0.id == id }),
+                  node.proxyEnabled, !proxyOnlyNodeIds.contains(id) else { continue }
+            proxyRuntime.stop(nodeId: id)
+        }
         save()
         objectWillChange.send()
     }
@@ -269,21 +393,39 @@ final class OpenCodeNodeStore: ObservableObject {
     func deactivate() throws {
         try configManager.restore()
         // 先成功恢复配置再停代理；恢复被外部修改拦截时保持原路由可用。
-        if let active = activeNode, active.proxyEnabled, !proxyOnlyNodeIds.contains(active.id) {
-            proxyRuntime.stop(nodeId: active.id)
+        for node in activeNodes where node.proxyEnabled && !proxyOnlyNodeIds.contains(node.id) {
+            proxyRuntime.stop(nodeId: node.id)
         }
-        activeNodeId = nil
+        activeNodeIds.removeAll()
+        openCodeDefaultNodeId = nil
         save()
         objectWillChange.send()
     }
 
-    /// 切换激活目标时回收上一个激活的代理节点进程（其进程随激活存在，
-    /// 不属于仅代理集合时没人再需要它）。
-    private func stopPreviousActiveProxyProcess(except newId: String) {
-        guard let previous = activeNode, previous.proxyEnabled,
-              previous.id != newId,
-              !proxyOnlyNodeIds.contains(previous.id) else { return }
-        proxyRuntime.stop(nodeId: previous.id)
+    /// 顶层 model 指向显式选择的「默认模型节点」（未选择或失效回退第一个激活节点）；`ids` 传候选集合
+    /// （停用流程在提交 activeNodeIds 前调用，避免读到未提交状态），nil 用当前 activeNodeIds。
+    private func rewriteManagedConfig(using ids: [String]? = nil, defaultNodeIdOverride: String? = nil) throws {
+        let targetIds = ids ?? activeNodeIds
+        let activeNodes = targetIds.compactMap { id in nodes.first { $0.id == id } }
+        guard !activeNodes.isEmpty else {
+            try configManager.restore()
+            return
+        }
+        let defaultNodeId: String
+        if let chosen = defaultNodeIdOverride, targetIds.contains(chosen) {
+            defaultNodeId = chosen
+        } else if let chosen = openCodeDefaultNodeId, targetIds.contains(chosen) {
+            defaultNodeId = chosen
+        } else {
+            // 回退到「自动」：节点列表中排第一个且处于激活状态的节点。
+            defaultNodeId = nodes.first(where: { targetIds.contains($0.id) })?.id ?? activeNodes[0].id
+        }
+        try configManager.activate(
+            nodes: activeNodes,
+            defaultNodeId: defaultNodeId
+        ) { [weak self] node in
+            self?.commonSettings(for: node)
+        }
     }
 
     // MARK: - Proxy-Only Mode
@@ -300,7 +442,7 @@ final class OpenCodeNodeStore: ObservableObject {
     }
 
     func startProxyOnly(_ node: OpenCodeNode) async throws {
-        guard node.proxyEnabled, node.id != activeNodeId else { return }
+        guard node.proxyEnabled, !activeNodeIds.contains(node.id) else { return }
         if node.protocolType == .openAIResponses, node.apiKey.nilIfBlank == nil {
             throw OpenCodeNodeStoreError.proxyRequiresAPIKey
         }
@@ -319,10 +461,10 @@ final class OpenCodeNodeStore: ObservableObject {
     /// 仅代理集合里不存在或已关掉代理模式的节点一并清理。
     func reconcileWithConfigFile() {
         var changed = false
-        if activeNodeId != nil,
+        if !activeNodeIds.isEmpty,
            configManager.managementState == .unmanaged,
            !configManager.isManaged {
-            activeNodeId = nil
+            activeNodeIds.removeAll()
             changed = true
         }
         let validProxyOnlyIds = proxyOnlyNodeIds.filter { id in
@@ -341,10 +483,17 @@ final class OpenCodeNodeStore: ObservableObject {
     private func restoreProxyIfNeeded() {
         // 与 Claude/Codex 一致：受「启动时自动恢复代理」设置控制。关闭时不接管，
         // 并还原受管配置层（避免它仍指向不会被拉起的本地端口）。
+        // 仅代理节点依赖本地进程：进程未自动恢复时其受管块会指向不存在的端口，需停用还原；
+        // 直连节点配置持久、无需恢复，重启后应保持激活。
         guard AppSettings.shared.proxyAutoRestoreOnLaunch else {
-            if activeNodeId != nil {
-                do { try deactivate() } catch {
-                    openCodeStoreLog.error("Failed to deactivate OpenCode node while auto-restore disabled: \(SensitiveDataRedactor.redactedMessage(for: error), privacy: .public)")
+            let proxyActiveIds = activeNodeIds.filter { id in
+                nodes.first(where: { $0.id == id })?.proxyEnabled == true
+            }
+            if !proxyActiveIds.isEmpty {
+                do {
+                    try deactivate(proxyActiveIds)
+                } catch {
+                    openCodeStoreLog.error("Failed to deactivate OpenCode proxy node while auto-restore disabled: \(SensitiveDataRedactor.redactedMessage(for: error), privacy: .public)")
                 }
             }
             return
@@ -358,10 +507,10 @@ final class OpenCodeNodeStore: ObservableObject {
         guard state == .managed || (state == .unmanaged && configManager.isManaged) else { return }
 
         var toRestore: [OpenCodeNode] = []
-        if let active = activeNode, active.proxyEnabled {
-            toRestore.append(active)
+        for node in activeNodes where node.proxyEnabled {
+            toRestore.append(node)
         }
-        for id in proxyOnlyNodeIds where id != activeNodeId {
+        for id in proxyOnlyNodeIds where !activeNodeIds.contains(id) {
             if let node = nodes.first(where: { $0.id == id && $0.proxyEnabled }) {
                 toRestore.append(node)
             }
@@ -470,8 +619,9 @@ final class OpenCodeNodeStore: ObservableObject {
         do {
             let file = try JSONDecoder.profileDecoder.decode(StoreFile.self, from: data)
             nodes = file.nodes
-            activeNodeId = file.activeNodeId
+            activeNodeIds = file.activeNodeIds ?? (file.activeNodeId.map { [$0] } ?? [])
             proxyOnlyNodeIds = Set(file.proxyOnlyNodeIds ?? [])
+            openCodeDefaultNodeId = file.openCodeDefaultNodeId
             sortNodes()
             backfillProviderSlugs()
         } catch {
@@ -495,8 +645,10 @@ final class OpenCodeNodeStore: ObservableObject {
         let file = StoreFile(
             version: Self.storeVersion,
             nodes: nodes,
-            activeNodeId: activeNodeId,
-            proxyOnlyNodeIds: proxyOnlyNodeIds.isEmpty ? nil : Array(proxyOnlyNodeIds).sorted()
+            activeNodeId: activeNodeIds.last,
+            activeNodeIds: activeNodeIds.isEmpty ? nil : activeNodeIds,
+            proxyOnlyNodeIds: proxyOnlyNodeIds.isEmpty ? nil : Array(proxyOnlyNodeIds).sorted(),
+            openCodeDefaultNodeId: openCodeDefaultNodeId
         )
         do {
             let dir = (Self.storePath as NSString).deletingLastPathComponent
